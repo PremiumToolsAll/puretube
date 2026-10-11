@@ -6,10 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/format.dart';
-import '../data/library_database.dart';
-import '../data/library_models.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/format.dart';
+import '../../data/library_database.dart';
+import '../../data/library_models.dart';
 
 /// Tab 3: Subscriptions (local, no Google account).
 class SubscriptionsTab extends StatefulWidget {
