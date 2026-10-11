@@ -3,10 +3,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/format.dart';
-import '../../downloads/data/download_service.dart';
-import '../../player/presentation/player_screen.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/format.dart';
+import '../../../downloads/data/download_service.dart';
+import '../../../player/presentation/player_screen.dart';
 
 /// Tab 4: Downloads (library view).
 class DownloadsTab extends StatefulWidget {
