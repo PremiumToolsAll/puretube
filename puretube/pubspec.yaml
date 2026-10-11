@@ -72,7 +72,7 @@ dependencies:
   flex_color_picker: ^3.6.0
   home_widget: ^0.7.0
   android_intent_plus: ^5.1.0
-  nearby_connections: ^6.0.1
+  nearby_connections: ^4.3.0
   ffmpeg_kit_flutter: ^6.0.3
 
 dev_dependencies:
