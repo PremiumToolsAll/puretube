@@ -281,6 +281,93 @@ class YoutubeExtractorService {
     }
   }
 
+  /// Returns channel info.
+  Future<ChannelInfo?> getChannelInfo(String channelId) async {
+    await _requireNetwork();
+    try {
+      final channel = await _yt.channels
+          .get(channelId)
+          .timeout(const Duration(seconds: 15));
+      return ChannelInfo(
+        id: channel.id.value,
+        title: channel.title,
+        logoUrl: channel.logoUrl,
+        bannerUrl: channel.bannerUrl,
+        subscriberCount: channel.subscribersCount ?? 0,
+        description: '',
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Returns videos from a channel.
+  Future<List<VideoDetails>> getChannelVideos(String channelId,
+      {int limit = 20}) async {
+    await _requireNetwork();
+    try {
+      final videos = await _yt.channels
+          .getUploads(channelId)
+          .take(limit)
+          .toList()
+          .timeout(const Duration(seconds: 20));
+      return videos
+          .map((v) {
+            try {
+              return VideoDetails.fromExplode(v);
+            } catch (_) {
+              return null;
+            }
+          })
+          .whereType<VideoDetails>()
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Returns comments for a video.
+  Future<List<CommentInfo>> getComments(String videoId,
+      {int limit = 30}) async {
+    await _requireNetwork();
+    try {
+      final video =
+          await _yt.videos.get(videoId).timeout(
+                const Duration(seconds: 15),
+              );
+      final comments =
+          await _yt.videos.commentsClient
+              .getComments(video)
+              .timeout(const Duration(seconds: 20));
+      if (comments == null) return [];
+      return comments
+          .take(limit)
+          .map((c) => CommentInfo(
+                author: c.author,
+                text: c.text,
+                likeCount: c.likeCount,
+                publishedTime: c.publishedTime,
+                authorAvatarUrl: '',
+                replyCount: c.replyCount,
+              ))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Returns search query suggestions for autocomplete.
+  Future<List<String>> getSearchSuggestions(String query) async {
+    await _requireNetwork();
+    try {
+      return await _yt.search
+          .getQuerySuggestions(query)
+          .timeout(const Duration(seconds: 10));
+    } catch (_) {
+      return [];
+    }
+  }
+
   /// Returns trending/popular videos for the home feed.
   /// Uses a generic popular search since youtube_explode_dart 2.x
   /// has no dedicated trending API.
