@@ -51,8 +51,6 @@ Future<void> main() async {
       config: const AudioServiceConfig(
         androidNotificationChannelId: 'com.puretube.channel.audio',
         androidNotificationChannelName: 'PureTube playback',
-        androidNotificationChannelDescription:
-            'Playback controls for PureTube',
         androidShowNotificationBadge: false,
         // Keep the service in foreground while paused so the notification
         // (and its controls) stays alive and responsive.
