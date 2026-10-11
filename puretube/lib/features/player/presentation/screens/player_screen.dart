@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -47,6 +48,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   VideoController? _videoController;
   bool _showControls = true;
   Timer? _hideTimer;
+
+  // fullscreen (landscape)
+  bool _isFullscreen = false;
 
   // double-tap
   Offset? _doubleTapPos;
@@ -145,6 +149,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _hideTimer?.cancel();
     _seekFlashTimer?.cancel();
     _gaugeTimer?.cancel();
+    // Restore portrait + system UI if the user left while fullscreen.
+    if (_isFullscreen) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      SystemChrome.setPreferredOrientations(
+          [DeviceOrientation.portraitUp]);
+    }
     super.dispose();
   }
 
@@ -159,6 +169,74 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   void _toggleControls() {
     setState(() => _showControls = !_showControls);
+    _restartHideTimer();
+  }
+
+  // ---------------- fullscreen ----------------
+
+  Future<void> _toggleFullscreen() async {
+    setState(() => _isFullscreen = !_isFullscreen);
+    if (_isFullscreen) {
+      await SystemChrome.setEnabledSystemUIMode(
+          SystemUiMode.immersiveSticky);
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      await SystemChrome.setEnabledSystemUIMode(
+          SystemUiMode.edgeToEdge);
+      await SystemChrome.setPreferredOrientations(
+          [DeviceOrientation.portraitUp]);
+    }
+    _restartHideTimer();
+  }
+
+  // ---------------- prev / next ----------------
+
+  /// Previous: restart the current video.
+  Future<void> _playPrevious() async {
+    await ref
+        .read(playerControllerProvider.notifier)
+        .seekTo(Duration.zero);
+    _restartHideTimer();
+  }
+
+  /// Next: play the first Up Next suggestion.
+  Future<void> _playNext() async {
+    final videoId =
+        ref.read(playerControllerProvider).videoId;
+    if (videoId == null) return;
+    try {
+      final related = await ref
+          .read(extractorProvider)
+          .getRelatedVideos(videoId);
+      if (!mounted) return;
+      if (related.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No next video found'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) =>
+              PlayerScreen(videoId: related.first.id),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not load next video: $e'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
     _restartHideTimer();
   }
 
@@ -786,6 +864,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 right: 0,
                 child: _buildTopBar(uiState),
               ),
+              Center(child: _buildCenterControls()),
               Positioned(
                 bottom: 0,
                 left: 0,
@@ -959,9 +1038,51 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
+  /// YouTube-style centered transport controls:
+  /// previous | play/pause | next.
+  Widget _buildCenterControls() {
+    final notifier = ref.read(playerControllerProvider.notifier);
+    final player = ref.read(mediaKitPlayerProvider);
+    return StreamBuilder<bool>(
+      stream: player.stream.playing,
+      builder: (context, snap) {
+        final playing = snap.data ?? false;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: 'Previous',
+              iconSize: 48,
+              onPressed: _playPrevious,
+              icon: const Icon(Icons.skip_previous,
+                  color: Colors.white70),
+            ),
+            const SizedBox(width: 24),
+            IconButton(
+              tooltip: playing ? 'Pause' : 'Play',
+              iconSize: 64,
+              onPressed: notifier.togglePlayPause,
+              icon: Icon(
+                playing ? Icons.pause : Icons.play_arrow,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 24),
+            IconButton(
+              tooltip: 'Next',
+              iconSize: 48,
+              onPressed: _playNext,
+              icon: const Icon(Icons.skip_next,
+                  color: Colors.white70),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildBottomControls(
       Player player, PlayerUiState uiState) {
-    final notifier = ref.read(playerControllerProvider.notifier);
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -975,34 +1096,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         children: [
           _PlayerSeekBar(player: player),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+            padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
             child: Row(
               children: [
-                _TimeLabel(player: player, current: true),
+                // "0:02 / 45:56" bottom-left.
+                _CombinedTimeLabel(player: player),
                 const Spacer(),
-                TextButton(
-                  onPressed: _showSpeedSheet,
-                  child: Text('${uiState.speed}x',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold)),
-                ),
-                StreamBuilder<bool>(
-                  stream: player.stream.playing,
-                  builder: (context, snap) {
-                    final playing = snap.data ?? false;
-                    return IconButton(
-                      iconSize: 40,
-                      onPressed: notifier.togglePlayPause,
-                      icon: Icon(
-                        playing
-                            ? Icons.pause_circle_filled
-                            : Icons.play_circle_filled,
-                        color: Colors.white,
-                      ),
-                    );
-                  },
-                ),
                 IconButton(
                   tooltip: 'Sleep timer',
                   onPressed: _showSleepSheet,
@@ -1011,11 +1110,24 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                           ? _accent
                           : Colors.white),
                 ),
-                const Spacer(),
-                _TimeLabel(player: player, current: false),
+                // Fullscreen bottom-right.
+                IconButton(
+                  tooltip: _isFullscreen
+                      ? 'Exit fullscreen'
+                      : 'Fullscreen',
+                  onPressed: _toggleFullscreen,
+                  icon: Icon(
+                    _isFullscreen
+                        ? Icons.fullscreen_exit
+                        : Icons.fullscreen,
+                    color: Colors.white,
+                  ),
+                ),
               ],
             ),
           ),
+          // Thin red progress bar at the very bottom edge.
+          _ThinProgressBar(player: player),
         ],
       ),
     );
@@ -1357,22 +1469,66 @@ class _UpNextSectionState extends ConsumerState<_UpNextSection> {
   }
 }
 
-class _TimeLabel extends StatelessWidget {
+/// Combined "0:02 / 45:56" time label, bottom-left of the video.
+class _CombinedTimeLabel extends StatelessWidget {
   final Player player;
-  final bool current;
-  const _TimeLabel(
-      {required this.player, required this.current});
+  const _CombinedTimeLabel({required this.player});
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<Duration>(
-      stream:
-          current ? player.stream.position : player.stream.duration,
-      builder: (context, snap) => Text(
-        formatDuration(snap.data),
-        style:
-            const TextStyle(color: Colors.white70, fontSize: 12),
-      ),
+      stream: player.stream.duration,
+      builder: (context, durSnap) {
+        final duration = durSnap.data ?? Duration.zero;
+        return StreamBuilder<Duration>(
+          stream: player.stream.position,
+          builder: (context, posSnap) {
+            final position = posSnap.data ?? Duration.zero;
+            return Text(
+              '${formatDuration(position)} / ${formatDuration(duration)}',
+              style: const TextStyle(
+                  color: Colors.white70, fontSize: 12),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+/// Thin red progress bar pinned to the very bottom edge of the video.
+class _ThinProgressBar extends StatelessWidget {
+  final Player player;
+  const _ThinProgressBar({required this.player});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<Duration>(
+      stream: player.stream.duration,
+      builder: (context, durSnap) {
+        final total =
+            durSnap.data?.inMilliseconds ?? 0;
+        return StreamBuilder<Duration>(
+          stream: player.stream.position,
+          builder: (context, posSnap) {
+            final pos =
+                posSnap.data?.inMilliseconds ?? 0;
+            final frac = total > 0
+                ? (pos / total).clamp(0.0, 1.0)
+                : 0.0;
+            return SizedBox(
+              height: 3,
+              child: LinearProgressIndicator(
+                value: frac,
+                backgroundColor: Colors.white24,
+                valueColor:
+                    const AlwaysStoppedAnimation<Color>(
+                        Colors.red),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
