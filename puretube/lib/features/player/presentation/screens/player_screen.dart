@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -42,6 +43,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   VideoController? _videoController;
   bool _showControls = true;
   Timer? _hideTimer;
+  bool _isFullscreen = false;
 
   // double-tap
   Offset? _doubleTapPos;
@@ -140,6 +142,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _hideTimer?.cancel();
     _seekFlashTimer?.cancel();
     _gaugeTimer?.cancel();
+    // Restore portrait + system UI on exit.
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
@@ -155,6 +163,24 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void _toggleControls() {
     setState(() => _showControls = !_showControls);
     _restartHideTimer();
+  }
+
+  void _toggleFullscreen() {
+    setState(() => _isFullscreen = !_isFullscreen);
+    if (_isFullscreen) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+      SystemChrome.setEnabledSystemUIMode(
+          SystemUiMode.immersiveSticky);
+    } else {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+      ]);
+      SystemChrome.setEnabledSystemUIMode(
+          SystemUiMode.edgeToEdge);
+    }
   }
 
   // ---------------- double-tap: -10s / +10s / play-pause ----------------
@@ -1014,6 +1040,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       color: uiState.sleepRemaining != null
                           ? _accent
                           : Colors.white),
+                ),
+                IconButton(
+                  tooltip: _isFullscreen
+                      ? 'Exit fullscreen'
+                      : 'Fullscreen',
+                  onPressed: _toggleFullscreen,
+                  icon: Icon(
+                    _isFullscreen
+                        ? Icons.fullscreen_exit
+                        : Icons.fullscreen,
+                    color: Colors.white,
+                  ),
                 ),
                 const Spacer(),
                 _TimeLabel(player: player, current: false),
