@@ -159,11 +159,11 @@ class DownloadsController
         url: option.url,
         savePath: savePath,
         totalBytesHint: option.sizeBytes,
-        onProgress: (p) {
+        onProgress: (p, speedBps) {
           final cur = state[id];
           if (cur != null &&
               cur.status == DownloadStatus.downloading) {
-            _upsert(cur.copyWith(progress: p));
+            _upsert(cur.copyWith(progress: p, speedBps: speedBps));
           }
         },
       );
