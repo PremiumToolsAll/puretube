@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../../core/theme/app_theme.dart';
 
 /// Scrubbable seek bar with buffered indicator and glow knob.
 class PlayerSeekBar extends StatelessWidget {
