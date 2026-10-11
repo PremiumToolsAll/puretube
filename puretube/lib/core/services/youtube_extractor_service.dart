@@ -124,6 +124,52 @@ class YoutubeExtractorService {
     }
   }
 
+  /// Lists all muxed (audio+video) quality options for a video,
+  /// sorted by height descending. Labels look like "MPEG-4 720p".
+  /// One entry per distinct height (duplicates by codec are dropped).
+  Future<List<MuxedQuality>> getQualityOptions(
+      String videoId) async {
+    await _requireNetwork();
+    try {
+      final manifest = await _yt.videos.streamsClient
+          .getManifest(videoId)
+          .timeout(const Duration(seconds: 30));
+
+      final muxed = [...manifest.muxed]
+        ..sort((a, b) => b.videoQuality.height
+            .compareTo(a.videoQuality.height));
+
+      if (muxed.isEmpty) {
+        throw UnplayableVideoException(videoId,
+            'No playable streams for this video.');
+      }
+
+      final seenHeights = <int>{};
+      final options = <MuxedQuality>[];
+      for (final m in muxed) {
+        final h = m.videoQuality.height;
+        if (h <= 0 || !seenHeights.add(h)) continue;
+        options.add(MuxedQuality(
+          label: 'MPEG-4 ${h}p',
+          height: h,
+          url: m.url.toString(),
+        ));
+      }
+      if (options.isEmpty) {
+        throw UnplayableVideoException(videoId,
+            'No playable streams for this video.');
+      }
+      return options;
+    } on TimeoutException {
+      throw ExtractorException(
+          'Timed out fetching qualities. Retry.');
+    } on PureTubeException {
+      rethrow;
+    } catch (e) {
+      throw ExtractorException('Could not list qualities: $e');
+    }
+  }
+
   /// Lists every downloadable stream: all muxed qualities + best audio.
   Future<List<DownloadOption>> getDownloadOptions(
       String videoId) async {
@@ -240,11 +286,25 @@ class YoutubeExtractorService {
     }
   }
 
-  /// Lists recent uploads from a channel.
+  /// Lists recent uploads from a channel. Tries the uploads-page API
+  /// first (most reliable), falling back to the UU-playlist method.
   Future<List<VideoDetails>> getChannelUploads(
       String channelId,
       {int limit = 30}) async {
     await _requireNetwork();
+    try {
+      final page = await _yt.channels
+          .getUploadsFromPage(channelId)
+          .timeout(const Duration(seconds: 30));
+      final videos = page.take(limit).toList();
+      if (videos.isNotEmpty) {
+        return videos
+            .map(VideoDetails.fromExplode)
+            .toList();
+      }
+    } catch (_) {
+      // Fall through to the UU-playlist method below.
+    }
     try {
       final uploads = await _yt.channels
           .getUploads(channelId)
@@ -261,6 +321,33 @@ class YoutubeExtractorService {
     } catch (e) {
       throw ExtractorException(
           'Could not load uploads: ${_friendlyError(e)}');
+    }
+  }
+
+  /// Fetches "Up Next" suggestions for a video. youtube_explode_dart 3.x
+  /// exposes no public related-videos API, so we search using the
+  /// video's author + title and exclude the video itself.
+  /// Returns an empty list (never throws) on any failure.
+  Future<List<VideoDetails>> getRelatedVideos(String videoId,
+      {int limit = 12}) async {
+    try {
+      await _requireNetwork();
+      final video = await _yt.videos
+          .get(videoId)
+          .timeout(const Duration(seconds: 20));
+      final query = '${video.author} ${video.title}'.trim();
+      if (query.isEmpty) return [];
+      final results = await _yt.search
+          .search(query)
+          .timeout(const Duration(seconds: 20));
+      return results
+          .whereType<Video>()
+          .where((v) => v.id.value != videoId)
+          .take(limit)
+          .map(VideoDetails.fromExplode)
+          .toList();
+    } catch (_) {
+      return [];
     }
   }
 }
