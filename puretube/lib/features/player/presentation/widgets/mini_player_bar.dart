@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 
 import '../../../../core/di/providers.dart';
+import '../../../../core/widgets/press_scale.dart';
 import '../providers/player_controller.dart';
 import '../screens/player_screen.dart';
 
@@ -141,8 +142,8 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
                         stream: player.stream.playing,
                         builder: (context, snap) {
                           final playing = snap.data ?? false;
-                          return IconButton(
-                            splashRadius: 22,
+                          return PressIconButton(
+                            tooltip: playing ? 'Pause' : 'Play',
                             icon: AnimatedSwitcher(
                               duration: const Duration(
                                   milliseconds: 200),
@@ -166,8 +167,8 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
                           );
                         },
                       ),
-                      IconButton(
-                        splashRadius: 22,
+                      PressIconButton(
+                        tooltip: 'Close',
                         icon: const Icon(Icons.close_rounded,
                             size: 22, color: Colors.white70),
                         onPressed: notifier.stop,
