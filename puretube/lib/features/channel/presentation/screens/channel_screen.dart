@@ -1,22 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
-import '../../../../core/services/youtube_service.dart';
-import '../../../../core/theme/app_theme.dart';
+import '../../../../core/di/providers.dart';
 import '../../../../core/utils/format.dart';
 import '../../../home/presentation/widgets/video_card.dart';
-import '../../../library/data/library_database.dart';
-import '../../../player/domain/entities/models.dart';
-import '../../../player/presentation/player_screen.dart';
+import '../../../library/presentation/providers/library_providers.dart';
+import '../../../player/domain/entities/playback_models.dart';
 import '../tabs/community_tab.dart';
 
-/// Channel page with tabs.
+/// Channel page with tabs: Videos, Shorts, Community, About.
 class ChannelScreen extends ConsumerStatefulWidget {
   final String channelId;
 
-  const ChannelScreen(
-      {super.key, required this.channelId});
+  const ChannelScreen({super.key, required this.channelId});
 
   @override
   ConsumerState<ChannelScreen> createState() =>
@@ -26,9 +22,10 @@ class ChannelScreen extends ConsumerStatefulWidget {
 class _ChannelScreenState
     extends ConsumerState<ChannelScreen>
     with SingleTickerProviderStateMixin {
+  static const _accent = Color(0xFF6200EA);
   late final TabController _tabCtrl;
-  Channel? _channel;
-  List<VideoItem> _videos = [];
+  ChannelInfo? _channel;
+  List<VideoDetails> _videos = [];
   bool _loading = true;
   bool _subscribed = false;
   String? _error;
@@ -36,8 +33,7 @@ class _ChannelScreenState
   @override
   void initState() {
     super.initState();
-    _tabCtrl =
-        TabController(length: 4, vsync: this);
+    _tabCtrl = TabController(length: 4, vsync: this);
     _load();
   }
 
@@ -53,20 +49,19 @@ class _ChannelScreenState
       _error = null;
     });
     try {
-      final yt = YoutubeService.instance;
-      final ch = await yt
-          .channel(widget.channelId);
-      final uploads = await yt.channelUploads(
+      final extractor = ref.read(extractorProvider);
+      final ch =
+          await extractor.getChannel(widget.channelId);
+      final uploads = await extractor.getChannelUploads(
           widget.channelId,
           limit: 30);
-      final sub = await LibraryDatabase.instance
+      final sub = ref
+          .read(subscriptionRepositoryProvider)
           .isSubscribed(widget.channelId);
       if (mounted) {
         setState(() {
           _channel = ch;
-          _videos = uploads
-              .map(VideoItem.fromVideo)
-              .toList();
+          _videos = uploads;
           _subscribed = sub;
           _loading = false;
         });
@@ -82,17 +77,17 @@ class _ChannelScreenState
   }
 
   Future<void> _toggleSubscribe() async {
-    final db = LibraryDatabase.instance;
+    final repo =
+        ref.read(subscriptionRepositoryProvider);
     try {
       if (_subscribed) {
-        await db
-            .unsubscribe(widget.channelId);
+        await repo.unsubscribe(widget.channelId);
       } else {
-        await db.subscribe(
+        await repo.subscribe(
           channelId: widget.channelId,
           name: _channel?.title ?? 'Channel',
           subscriberCount:
-              _channel?.subscribersCount ?? 0,
+              _channel?.subscriberCount,
         );
       }
       if (mounted) {
@@ -105,24 +100,25 @@ class _ChannelScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Colors.black,
       appBar: AppBar(
-        backgroundColor: AppTheme.background,
-        title: Text(_channel?.title ?? 'Channel',
-            style: AppTheme.subtitle),
+        backgroundColor: Colors.black,
+        title: Text(_channel?.title ?? 'Channel'),
       ),
       body: _loading
           ? const Center(
               child: CircularProgressIndicator(
-                  color: AppTheme.primary))
+                  color: _accent))
           : _error != null
               ? Center(
                   child: Column(
                     mainAxisSize:
                         MainAxisSize.min,
                     children: [
-                      Text('Could not load channel',
-                          style: AppTheme.body),
+                      const Text(
+                          'Could not load channel',
+                          style: TextStyle(
+                              color: Colors.grey)),
                       const SizedBox(
                           height: 12),
                       ElevatedButton(
@@ -130,8 +126,7 @@ class _ChannelScreenState
                         style: ElevatedButton
                             .styleFrom(
                                 backgroundColor:
-                                    AppTheme
-                                        .primary),
+                                    _accent),
                         child: const Text(
                             'Retry'),
                       ),
@@ -143,8 +138,7 @@ class _ChannelScreenState
                     _header(),
                     TabBar(
                       controller: _tabCtrl,
-                      indicatorColor:
-                          AppTheme.primary,
+                      indicatorColor: _accent,
                       isScrollable: true,
                       tabs: const [
                         Tab(text: 'Videos'),
@@ -179,7 +173,8 @@ class _ChannelScreenState
         children: [
           CircleAvatar(
             radius: 36,
-            backgroundColor: AppTheme.card,
+            backgroundColor:
+                const Color(0xFF1A1A1A),
             backgroundImage: ch
                     .logoUrl.isNotEmpty
                 ? NetworkImage(ch.logoUrl)
@@ -201,28 +196,26 @@ class _ChannelScreenState
                   CrossAxisAlignment.start,
               children: [
                 Text(ch.title,
-                    style: AppTheme.subtitle
-                        .copyWith(
-                            fontWeight:
-                                FontWeight
-                                    .bold)),
+                    style: const TextStyle(
+                        fontWeight:
+                            FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.white)),
                 const SizedBox(height: 4),
                 Text(
-                    '${formatCount(ch.subscribersCount)} subscribers',
-                    style: AppTheme.caption
-                        .copyWith(
-                            color: AppTheme
-                                .textSecondary)),
+                    '${formatCount(ch.subscriberCount)} subscribers',
+                    style: const TextStyle(
+                        color: Colors.grey,
+                        fontSize: 13)),
               ],
             ),
           ),
           ElevatedButton(
             onPressed: _toggleSubscribe,
             style: ElevatedButton.styleFrom(
-              backgroundColor:
-                  _subscribed
-                      ? AppTheme.card
-                      : const Color(0xFFFF0000),
+              backgroundColor: _subscribed
+                  ? const Color(0xFF1A1A1A)
+                  : const Color(0xFFFF0000),
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                   borderRadius:
@@ -243,8 +236,7 @@ class _ChannelScreenState
         ? _videos
             .where((v) =>
                 v.duration != null &&
-                v.duration!.inSeconds <=
-                    90)
+                v.duration!.inSeconds <= 90)
             .toList()
         : _videos;
     if (list.isEmpty) {
@@ -253,42 +245,58 @@ class _ChannelScreenState
             shortsOnly
                 ? 'No shorts yet'
                 : 'No videos yet',
-            style: AppTheme.body.copyWith(
-                color:
-                    AppTheme.textSecondary)),
+            style:
+                const TextStyle(color: Colors.grey)),
       );
     }
     return RefreshIndicator(
-      color: AppTheme.primary,
+      color: _accent,
       onRefresh: _load,
       child: ListView.builder(
         itemCount: list.length,
         itemBuilder: (_, i) =>
-            VideoCard(video: list[i]),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 6),
+              child:
+                  VideoCard(video: list[i]),
+            ),
       ),
     );
   }
 
   Widget _aboutTab() {
-    // youtube_explode_dart's Channel has no description field;
-    // safe fallback so the About tab renders without crashing.
-    const description = '';
+    final ch = _channel!;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment:
             CrossAxisAlignment.start,
         children: [
-          Text('About',
-              style: AppTheme.subtitle.copyWith(
-                  fontWeight:
-                      FontWeight.bold)),
+          const Text('About',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.white)),
           const SizedBox(height: 12),
-          if (description.isNotEmpty)
-            Text(description,
-                style: AppTheme.body.copyWith(
-                    color:
-                        AppTheme.textSecondary)),
+          if (ch.bannerUrl.isNotEmpty)
+            ClipRRect(
+              borderRadius:
+                  BorderRadius.circular(12),
+              child: Image.network(
+                ch.bannerUrl,
+                height: 120,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) =>
+                    const SizedBox.shrink(),
+              ),
+            ),
+          const SizedBox(height: 12),
+          Text(
+              '${formatCount(ch.subscriberCount)} subscribers',
+              style: const TextStyle(
+                  color: Colors.grey)),
         ],
       ),
     );
