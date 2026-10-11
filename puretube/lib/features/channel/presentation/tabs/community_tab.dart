@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/format.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/format.dart';
 
 /// Community post types.
 enum PostType { text, image, poll }
