@@ -7,6 +7,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../core/services/audio_player_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../home/presentation/providers/search_provider.dart';
 import 'popup_player_service.dart';
 
 /// Floating popup player widget (in-app mini player).
@@ -50,9 +51,6 @@ class _PopupPlayerWidgetState
   @override
   void dispose() {
     _hideTimer?.cancel();
-    try {
-      _videoController?.dispose();
-    } catch (_) {}
     super.dispose();
   }
 
