@@ -131,23 +131,15 @@ class _DownloadTile extends ConsumerWidget {
     );
   }
 
-  String _statusLabel() {
-    String speedStr(double bps) {
-      if (bps < 1024) return '${bps.round()} B/s';
-      if (bps < 1048576) return '${(bps / 1024).toStringAsFixed(1)} KB/s';
-      return '${(bps / 1048576).toStringAsFixed(2)} MB/s';
-    }
-
-    return switch (record.status) {
-      DownloadStatus.queued => 'Queued',
-      DownloadStatus.downloading =>
-        '${(record.progress * 100).round()}% • ${speedStr(record.speedBps)}',
-      DownloadStatus.paused => 'Paused',
-      DownloadStatus.completed => 'Completed',
-      DownloadStatus.failed => 'Failed',
-      DownloadStatus.canceled => 'Canceled',
-    };
-  }
+  String _statusLabel() => switch (record.status) {
+        DownloadStatus.queued => 'Queued',
+        DownloadStatus.downloading =>
+          '${(record.progress * 100).round()}%',
+        DownloadStatus.paused => 'Paused',
+        DownloadStatus.completed => 'Completed',
+        DownloadStatus.failed => 'Failed',
+        DownloadStatus.canceled => 'Canceled',
+      };
 
   String _fileSize(int bytes) {
     if (bytes >= 1 << 30) {
