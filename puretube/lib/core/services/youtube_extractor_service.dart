@@ -155,6 +155,36 @@ class YoutubeExtractorService {
           url: m.url.toString(),
         ));
       }
+
+      // DASH video-only streams (1080p/1440p/2160p+) + best separate
+      // audio track. mpv plays these by attaching the audio URL via the
+      // 'audio-file' property (see PureTubeAudioHandler.switchStream).
+      final audioOnly = [...manifest.audioOnly]
+        ..sort((a, b) =>
+            b.bitrate.bitsPerSecond.compareTo(a.bitrate.bitsPerSecond));
+      if (audioOnly.isNotEmpty) {
+        final audioUrl = audioOnly.first.url.toString();
+        final videoOnly = [...manifest.videoOnly]
+          ..sort((a, b) => b.videoResolution.height
+              .compareTo(a.videoResolution.height));
+        for (final v in videoOnly) {
+          final h = v.videoResolution.height;
+          if (h <= 720 || !seenHeights.add(h)) continue;
+          final resLabel = h >= 2160
+              ? '2160p (2K)'
+              : h >= 1440
+                  ? '1440p (1.5K)'
+                  : '${h}p';
+          options.add(MuxedQuality(
+            label: '$resLabel · DASH',
+            height: h,
+            url: v.url.toString(),
+            audioUrl: audioUrl,
+          ));
+        }
+      }
+
+      options.sort((a, b) => b.height.compareTo(a.height));
       if (options.isEmpty) {
         throw UnplayableVideoException(videoId,
             'No playable streams for this video.');
