@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/services/youtube_service.dart';
-import '../../core/theme/app_theme.dart';
-import '../home/presentation/providers/search_provider.dart';
-import '../home/presentation/widgets/video_card.dart';
-import '../player/domain/entities/models.dart';
-import './data/app_database.dart';
+import '../../../core/services/youtube_service.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../home/presentation/providers/search_provider.dart';
+import '../../home/presentation/widgets/video_card.dart';
+import '../../player/domain/entities/models.dart';
+import '../data/app_database.dart';
 
 /// Search screen — history, filters, paginated results.
 class SearchScreen extends ConsumerStatefulWidget {
