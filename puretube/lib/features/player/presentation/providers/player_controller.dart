@@ -285,7 +285,8 @@ class PlayerController extends Notifier<PlayerUiState>
     }
   }
 
-  /// Switch to a different muxed quality, preserving position.
+  /// Switch to a different quality, preserving position.
+  /// Supports muxed (<=720p) and video-only+audio (1080p/2K/4K).
   Future<void> setQuality(QualityOption quality) async {
     if (state.status != PlayerStatus.ready ||
         state.videoId == null ||
@@ -295,14 +296,18 @@ class PlayerController extends Notifier<PlayerUiState>
     if (quality.height == state.currentQualityHeight) return;
     try {
       final position = _handler.player.state.position;
-      await _handler.switchStream(quality.url, resumeAt: position);
+      await _handler.switchStream(
+        quality.url,
+        audioUrl: quality.audioUrl,
+        resumeAt: position,
+      );
       final s = state.streams;
       if (s != null) {
         state = state.copyWith(
           currentQualityHeight: quality.height,
           streams: PlaybackStreams(
             videoId: s.videoId,
-            muxedUrl: quality.url,
+            muxedUrl: quality.isVideoOnly ? s.muxedUrl : quality.url,
             muxedHeight: quality.height,
             qualities: s.qualities,
             audioOnlyUrl: s.audioOnlyUrl,
