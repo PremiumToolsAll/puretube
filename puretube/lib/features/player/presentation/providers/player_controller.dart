@@ -284,7 +284,7 @@ class PlayerController extends Notifier<PlayerUiState>
   }
 
   Future<void> setSpeed(double speed) async {
-    final s = speed.clamp(0.5, 2.0);
+    final s = speed.clamp(0.25, 4.0);
     await _handler.setSpeed(s);
     state = state.copyWith(speed: s);
   }
