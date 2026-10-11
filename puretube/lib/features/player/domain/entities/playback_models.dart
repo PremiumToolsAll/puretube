@@ -36,17 +36,21 @@ class VideoDetails {
       );
 }
 
-/// A single muxed (video+audio) quality option.
+/// A quality option: muxed (video+audio) or video-only (1080p+ with separate audio).
 class QualityOption {
-  final String label; // "720p", "480p", ...
+  final String label; // "720p", "1080p", "4K", ...
   final int height;
   final String url;
+  final String? audioUrl; // set for video-only streams (1080p+)
 
   const QualityOption({
     required this.label,
     required this.height,
     required this.url,
+    this.audioUrl,
   });
+
+  bool get isVideoOnly => audioUrl != null;
 }
 
 class PlaybackStreams {
