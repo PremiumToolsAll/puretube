@@ -63,3 +63,10 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   generate: true
+
+# Patched youtube_explode_dart: fixes NoSuchMethodError 'getT' in search
+# parsing (extension methods don't resolve on dynamic values from
+# firstOrNull/elementAtSafe). See packages/youtube_explode_dart/.
+dependency_overrides:
+  youtube_explode_dart:
+    path: packages/youtube_explode_dart
