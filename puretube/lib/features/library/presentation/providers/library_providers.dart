@@ -14,6 +14,9 @@ final playlistRepositoryProvider =
     Provider<PlaylistRepository>((ref) => PlaylistRepository());
 final downloadRepositoryProvider =
     Provider<DownloadRepository>((ref) => DownloadRepository());
+final subscriptionRepositoryProvider =
+    Provider<SubscriptionRepository>(
+        (ref) => SubscriptionRepository());
 final downloadServiceProvider =
     Provider<DownloadService>((ref) => DownloadService());
 
