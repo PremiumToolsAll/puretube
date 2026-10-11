@@ -1,137 +1,74 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/di/providers.dart';
-import '../../domain/entities/playback_models.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/format.dart';
 import '../providers/player_controller.dart';
 
-/// Comments section below the video player.
-class CommentsSection extends ConsumerStatefulWidget {
-  const CommentsSection({super.key});
+/// Comments section below the video info.
+class CommentsSection extends StatelessWidget {
+  final PlayerUiState ui;
 
-  @override
-  ConsumerState<CommentsSection> createState() =>
-      _CommentsSectionState();
-}
-
-class _CommentsSectionState
-    extends ConsumerState<CommentsSection> {
-  List<CommentInfo>? _comments;
-  bool _loading = false;
-  bool _expanded = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadComments();
-  }
-
-  Future<void> _loadComments() async {
-    final videoId =
-        ref.read(playerControllerProvider).videoId;
-    if (videoId == null) return;
-    setState(() => _loading = true);
-    try {
-      final comments = await ref
-          .read(extractorProvider)
-          .getComments(videoId);
-      if (mounted) {
-        setState(() {
-          _comments = comments;
-          _loading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
+  const CommentsSection(
+      {super.key, required this.ui});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () =>
-            setState(() => _expanded = !_expanded),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    'Comments ${_comments?.length ?? ''}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const Spacer(),
-                  Icon(
-                    _expanded
-                        ? Icons.expand_less
-                        : Icons.expand_more,
-                    color: Colors.white70,
-                  ),
-                ],
-              ),
-              if (_loading)
-                const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Center(
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2),
-                  ),
-                )
-              else if (_comments != null &&
-                  _comments!.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                _buildComment(_comments!.first),
-                if (_expanded)
-                  ..._comments!
-                      .skip(1)
-                      .map(_buildComment),
-              ] else if (!_loading)
-                const Padding(
-                  padding: EdgeInsets.all(8),
-                  child: Text(
-                    'No comments yet.',
-                    style: TextStyle(
-                        color: Colors.white54, fontSize: 12),
-                  ),
-                ),
-            ],
-          ),
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text('Comments',
+                style: AppTheme.subtitle.copyWith(
+                    fontWeight:
+                        FontWeight.bold)),
+            const SizedBox(width: 8),
+            Text('${ui.commentCount}',
+                style: AppTheme.caption.copyWith(
+                    color:
+                        AppTheme.textSecondary)),
+          ],
         ),
-      ),
+        const SizedBox(height: 12),
+        if (ui.comments.isEmpty)
+          Text('No comments yet.',
+              style: AppTheme.caption.copyWith(
+                  color:
+                      AppTheme.textSecondary)),
+        ...ui.comments
+            .take(5)
+            .map((c) => _commentTile(c)),
+        if (ui.comments.length > 5)
+          TextButton(
+            onPressed: () =>
+                _allComments(context),
+            child: const Text(
+                'View more comments',
+                style: TextStyle(
+                    color: AppTheme.primary)),
+          ),
+      ],
     );
   }
 
-  Widget _buildComment(CommentInfo comment) {
+  Widget _commentTile(CommentItem c) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding:
+          const EdgeInsets.only(bottom: 12),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
         children: [
           CircleAvatar(
             radius: 16,
-            backgroundColor:
-                Colors.purple.withOpacity(0.3),
+            backgroundColor: AppTheme.card,
             child: Text(
-              comment.author.isNotEmpty
-                  ? comment.author[0].toUpperCase()
-                  : '?',
-              style: const TextStyle(
-                  color: Colors.white, fontSize: 14),
-            ),
+                c.author.isNotEmpty
+                    ? c.author[0].toUpperCase()
+                    : '?',
+                style: AppTheme.caption.copyWith(
+                    color: Colors.white)),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -139,68 +76,55 @@ class _CommentsSectionState
               crossAxisAlignment:
                   CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        comment.author,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                        overflow:
-                            TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      comment.publishedTime,
-                      style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 11),
-                    ),
-                  ],
-                ),
+                Text(c.author,
+                    style:
+                        AppTheme.caption.copyWith(
+                            fontWeight:
+                                FontWeight.w600,
+                            color: Colors.white)),
                 const SizedBox(height: 2),
-                Text(
-                  comment.text,
-                  style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 13),
-                  maxLines: _expanded ? null : 2,
-                  overflow: _expanded
-                      ? null
-                      : TextOverflow.ellipsis,
-                ),
+                Text(c.text,
+                    style: AppTheme.body
+                        .copyWith(fontSize: 13)),
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    const Icon(Icons.thumb_up_outlined,
+                    const Icon(
+                        Icons.thumb_up_outlined,
                         size: 14,
-                        color: Colors.white54),
+                        color:
+                            AppTheme.textSecondary),
                     const SizedBox(width: 4),
                     Text(
-                      '${comment.likeCount}',
-                      style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 11),
-                    ),
-                    if (comment.replyCount > 0) ...[
-                      const SizedBox(width: 12),
-                      Text(
-                        '${comment.replyCount} replies',
-                        style: const TextStyle(
-                            color: Colors.white54,
-                            fontSize: 11),
-                      ),
-                    ],
+                        formatCount(c.likeCount),
+                        style: AppTheme.caption
+                            .copyWith(
+                                color: AppTheme
+                                    .textSecondary)),
                   ],
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _allComments(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.8,
+        builder: (_, ctrl) => ListView.builder(
+          controller: ctrl,
+          padding: const EdgeInsets.all(16),
+          itemCount: ui.comments.length,
+          itemBuilder: (_, i) =>
+              _commentTile(ui.comments[i]),
+        ),
       ),
     );
   }
