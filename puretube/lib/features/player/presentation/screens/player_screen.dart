@@ -15,8 +15,12 @@ import '../../../../features/library/domain/entities/library_models.dart';
 import '../../../../features/library/presentation/providers/library_providers.dart';
 import '../../../../features/library/presentation/screens/playlists_screen.dart'
     show showSaveToPlaylistSheet;
+import '../../../ai/ai_summary_section.dart';
+import '../../../channel/presentation/screens/channel_screen.dart';
 import '../../domain/entities/playback_models.dart';
 import '../providers/player_controller.dart';
+import '../widgets/live_chat_widget.dart';
+import '../widgets/subtitle_sheet.dart';
 
 class _Gauge {
   final IconData icon;
@@ -832,6 +836,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               ),
             ),
           IconButton(
+            tooltip: 'Subtitles',
+            onPressed: () => SubtitleSheet.show(context),
+            icon: Icon(Icons.closed_caption_outlined,
+                color: uiState.activeSubtitle != null
+                    ? _accent
+                    : Colors.white),
+          ),
+          IconButton(
             tooltip: 'Audio only',
             onPressed: notifier.toggleAudioOnly,
             icon: Icon(Icons.headphones,
@@ -931,10 +943,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               style: const TextStyle(
                   fontSize: 17, fontWeight: FontWeight.bold)),
           const SizedBox(height: 6),
-          Text(
-            '${video.author}  •  ${formatCount(video.viewCount)} views  •  ${timeAgo(video.uploadDate)}',
-            style:
-                const TextStyle(color: Colors.grey, fontSize: 13),
+          InkWell(
+            onTap: () {
+              if (video.channelId.isNotEmpty) {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ChannelScreen(
+                        channelId: video.channelId),
+                  ),
+                );
+              }
+            },
+            child: Text(
+              '${video.author}  •  ${formatCount(video.viewCount)} views  •  ${timeAgo(video.uploadDate)}',
+              style: const TextStyle(
+                  color: Colors.grey, fontSize: 13),
+            ),
           ),
           const SizedBox(height: 14),
           Wrap(
@@ -978,6 +1002,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 style: const TextStyle(
                     color: Colors.grey, fontSize: 13)),
           ],
+          const SizedBox(height: 16),
+          AiSummarySection(
+            title: video.title,
+            author: video.author,
+            description: video.description,
+          ),
+          const SizedBox(height: 16),
+          const LiveChatWidget(
+              videoId: '', showUnavailable: true),
         ],
       ),
     );
