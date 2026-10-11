@@ -117,7 +117,27 @@ class YoutubeExtractorService {
           ));
         }
       }
-      // Sort by height, best first.
+
+      // Video-only streams for 1080p/2K/4K with paired audio.
+      try {
+        final bestAudioUrl = bestAudio.url.toString();
+        final videoOnly = [...manifest.videoOnly]
+          ..sort((a, b) => b.videoResolution.height
+              .compareTo(a.videoResolution.height));
+        for (final v in videoOnly) {
+          final h = v.videoResolution.height;
+          if (h > 720 && seenHeights.add(h)) {
+            qualities.add(QualityOption(
+              label: h >= 2160 ? '4K' : '${h}p',
+              height: h,
+              url: v.url.toString(),
+              audioUrl: bestAudioUrl,
+            ));
+          }
+        }
+      } catch (_) {
+        // Video-only not available; muxed qualities still work.
+      }
       qualities.sort((a, b) => b.height.compareTo(a.height));
 
       return PlaybackStreams(
