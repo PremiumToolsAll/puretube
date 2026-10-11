@@ -30,6 +30,8 @@ class PlayerUiState {
   final bool pipSupported;
   final List<CaptionTrack> subtitleTracks;
   final CaptionTrack? activeSubtitle;
+  final List<MuxedQuality> availableQualities;
+  final MuxedQuality? currentQuality;
 
   const PlayerUiState({
     this.status = PlayerStatus.idle,
@@ -46,6 +48,8 @@ class PlayerUiState {
     this.pipSupported = false,
     this.subtitleTracks = const [],
     this.activeSubtitle,
+    this.availableQualities = const [],
+    this.currentQuality,
   });
 
   PlayerUiState copyWith({
@@ -64,6 +68,8 @@ class PlayerUiState {
     List<CaptionTrack>? subtitleTracks,
     CaptionTrack? activeSubtitle,
     bool clearSubtitle = false,
+    List<MuxedQuality>? availableQualities,
+    MuxedQuality? currentQuality,
   }) {
     return PlayerUiState(
       status: status ?? this.status,
@@ -81,6 +87,9 @@ class PlayerUiState {
       subtitleTracks: subtitleTracks ?? this.subtitleTracks,
       activeSubtitle:
           clearSubtitle ? null : activeSubtitle ?? this.activeSubtitle,
+      availableQualities:
+          availableQualities ?? this.availableQualities,
+      currentQuality: currentQuality ?? this.currentQuality,
     );
   }
 }
@@ -194,6 +203,9 @@ class PlayerController extends Notifier<PlayerUiState>
       );
       // Load captions in the background; UI updates when ready.
       unawaited(loadSubtitles());
+      // Same for quality options; current quality starts at the
+      // height of the initially picked stream.
+      unawaited(loadQualities(initialHeight: streams.muxedHeight));
     } on PureTubeException catch (e) {
       state = state.copyWith(
           status: PlayerStatus.error, errorMessage: e.message);
@@ -278,6 +290,63 @@ class PlayerController extends Notifier<PlayerUiState>
   Future<void> enterPip() async {
     if (state.pipSupported && state.status == PlayerStatus.ready) {
       await _pip.enterPip();
+    }
+  }
+
+  // ---------------- Quality selection ----------------
+
+  /// Loads the available muxed quality options in the background.
+  /// Safe to call repeatedly (e.g. retry from the UI); failures are silent.
+  Future<void> loadQualities({int? initialHeight}) async {
+    final id = state.videoId;
+    if (id == null) return;
+    try {
+      final options = await _extractor.getQualityOptions(id);
+      if (state.videoId != id || options.isEmpty) return;
+      final anchor =
+          initialHeight ?? state.currentQuality?.height;
+      final current = anchor == null
+          ? options.first
+          : options.firstWhere(
+              (q) => q.height == anchor,
+              orElse: () => options.first,
+            );
+      state = state.copyWith(
+        availableQualities: options,
+        currentQuality: current,
+      );
+    } catch (_) {}
+  }
+
+  /// Switches to a different muxed quality, preserving the current
+  /// position and play state (via handler.switchStream).
+  Future<void> setQuality(MuxedQuality quality) async {
+    if (state.status != PlayerStatus.ready ||
+        state.videoId == null) {
+      return;
+    }
+    if (state.audioOnly) return; // quality applies to video mode only
+    if (state.currentQuality?.height == quality.height) return;
+    try {
+      await _handler.switchStream(quality.url);
+      // Keep the cached streams record in sync so expiry recovery
+      // and audio<->video toggling reuse the chosen quality.
+      final s = state.streams;
+      state = state.copyWith(
+        currentQuality: quality,
+        streams: s == null
+            ? null
+            : PlaybackStreams(
+                videoId: s.videoId,
+                muxedUrl: quality.url,
+                muxedHeight: quality.height,
+                audioOnlyUrl: s.audioOnlyUrl,
+                audioBitrate: s.audioBitrate,
+                fetchedAt: s.fetchedAt,
+              ),
+      );
+    } on PureTubeException catch (e) {
+      state = state.copyWith(errorMessage: e.message);
     }
   }
 
@@ -404,9 +473,45 @@ class PlayerController extends Notifier<PlayerUiState>
       final fresh =
           await _extractor.getPlaybackStreams(state.videoId!);
       if (state.status != PlayerStatus.ready) return;
-      state = state.copyWith(streams: fresh);
-      final url =
-          state.audioOnly ? fresh.audioOnlyUrl : fresh.muxedUrl;
+      // Preserve the user's chosen quality across recovery when possible.
+      var muxedUrl = fresh.muxedUrl;
+      var muxedHeight = fresh.muxedHeight;
+      MuxedQuality? preservedQuality;
+      final wantedHeight = state.currentQuality?.height;
+      if (!state.audioOnly &&
+          wantedHeight != null &&
+          wantedHeight != fresh.muxedHeight) {
+        try {
+          final options =
+              await _extractor.getQualityOptions(state.videoId!);
+          for (final q in options) {
+            if (q.height == wantedHeight) {
+              muxedUrl = q.url;
+              muxedHeight = q.height;
+              preservedQuality = q;
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+      state = state.copyWith(
+        streams: PlaybackStreams(
+          videoId: fresh.videoId,
+          muxedUrl: muxedUrl,
+          muxedHeight: muxedHeight,
+          audioOnlyUrl: fresh.audioOnlyUrl,
+          audioBitrate: fresh.audioBitrate,
+          fetchedAt: fresh.fetchedAt,
+        ),
+        // Keep the quality label in sync with the stream actually playing.
+        currentQuality: preservedQuality ??
+            MuxedQuality(
+              label: 'MPEG-4 ${muxedHeight}p',
+              height: muxedHeight,
+              url: muxedUrl,
+            ),
+      );
+      final url = state.audioOnly ? fresh.audioOnlyUrl : muxedUrl;
       await _handler.switchStream(url, resumeAt: resumeAt);
     } on PureTubeException catch (e) {
       // Most likely NetworkException: user lost internet mid-playback.
