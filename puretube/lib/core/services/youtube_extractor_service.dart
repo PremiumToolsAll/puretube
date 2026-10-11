@@ -212,26 +212,51 @@ class YoutubeExtractorService {
       final muxed = [...manifest.muxed]
         ..sort((a, b) => b.videoQuality.height
             .compareTo(a.videoQuality.height));
+      final videoOnly = [...manifest.videoOnly]
+        ..sort((a, b) => b.videoResolution.height
+            .compareTo(a.videoResolution.height));
       final audio = [...manifest.audioOnly]
         ..sort((a, b) => b.bitrate.compareTo(a.bitrate));
 
-      final options = <DownloadOption>[
-        for (final m in muxed)
-          DownloadOption(
-            label: m.videoQuality.qualityString,
-            url: m.url.toString(),
-            audioOnly: false,
-            sizeBytes: m.size.totalBytes,
-          ),
-      ];
-      if (audio.isNotEmpty) {
-        final a = audio.first;
+      final options = <DownloadOption>[];
+      final seenVideo = <String>{};
+      for (final m in muxed) {
+        final h = m.videoQuality.height;
+        if (h <= 0 || !seenVideo.add('muxed-$h')) continue;
         options.add(DownloadOption(
-          label:
-              'Audio ${(a.bitrate.bitsPerSecond / 1000).round()}kbps',
+          label: '${h}p',
+          url: m.url.toString(),
+          audioOnly: false,
+          sizeBytes: m.size.totalBytes,
+          videoCodec: m.videoCodec,
+          audioCodec: m.audioCodec,
+          height: h,
+        ));
+      }
+      for (final v in videoOnly) {
+        final h = v.videoResolution.height;
+        if (h <= 0 || !seenVideo.add('vo-$h-${v.videoCodec}')) continue;
+        options.add(DownloadOption(
+          label: '${h}p ${v.videoCodec}',
+          url: v.url.toString(),
+          audioOnly: false,
+          sizeBytes: v.size.totalBytes,
+          videoCodec: v.videoCodec,
+          height: h,
+          videoOnly: true,
+        ));
+      }
+      final seenAudio = <int>{};
+      for (final a in audio) {
+        final kbps = (a.bitrate.bitsPerSecond / 1000).round();
+        if (!seenAudio.add(kbps)) continue;
+        options.add(DownloadOption(
+          label: '$kbps kbps ${a.audioCodec}',
           url: a.url.toString(),
           audioOnly: true,
           sizeBytes: a.size.totalBytes,
+          audioCodec: a.audioCodec,
+          bitrateKbps: kbps,
         ));
       }
       if (options.isEmpty) {
