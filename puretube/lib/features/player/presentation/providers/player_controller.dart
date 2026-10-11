@@ -32,6 +32,8 @@ class PlayerUiState {
   final CaptionTrack? activeSubtitle;
   final List<MuxedQuality> availableQualities;
   final MuxedQuality? currentQuality;
+  final List<VideoDetails> relatedVideos;
+  final bool relatedFailed;
 
   const PlayerUiState({
     this.status = PlayerStatus.idle,
@@ -50,6 +52,8 @@ class PlayerUiState {
     this.activeSubtitle,
     this.availableQualities = const [],
     this.currentQuality,
+    this.relatedVideos = const [],
+    this.relatedFailed = false,
   });
 
   PlayerUiState copyWith({
@@ -70,6 +74,8 @@ class PlayerUiState {
     bool clearSubtitle = false,
     List<MuxedQuality>? availableQualities,
     MuxedQuality? currentQuality,
+    List<VideoDetails>? relatedVideos,
+    bool? relatedFailed,
   }) {
     return PlayerUiState(
       status: status ?? this.status,
@@ -90,6 +96,8 @@ class PlayerUiState {
       availableQualities:
           availableQualities ?? this.availableQualities,
       currentQuality: currentQuality ?? this.currentQuality,
+      relatedVideos: relatedVideos ?? this.relatedVideos,
+      relatedFailed: relatedFailed ?? this.relatedFailed,
     );
   }
 }
@@ -206,6 +214,9 @@ class PlayerController extends Notifier<PlayerUiState>
       // Same for quality options; current quality starts at the
       // height of the initially picked stream.
       unawaited(loadQualities(initialHeight: streams.muxedHeight));
+      // Up Next suggestions load in the background; the section below
+      // the player and the Next button both read them from state.
+      unawaited(_loadRelated(videoId));
     } on PureTubeException catch (e) {
       state = state.copyWith(
           status: PlayerStatus.error, errorMessage: e.message);
@@ -316,6 +327,31 @@ class PlayerController extends Notifier<PlayerUiState>
         currentQuality: current,
       );
     } catch (_) {}
+  }
+
+  /// Loads Up Next suggestions in the background. The section below the
+  /// player and the Next (⏭️) button both read them from state, so no
+  /// extra API call is needed when the user taps Next.
+  Future<void> _loadRelated(String videoId) async {
+    try {
+      final videos = await _extractor.getRelatedVideos(videoId);
+      if (state.videoId != videoId) return;
+      state = state.copyWith(
+        relatedVideos: videos,
+        relatedFailed: videos.isEmpty,
+      );
+    } catch (_) {
+      if (state.videoId != videoId) return;
+      state = state.copyWith(relatedFailed: true);
+    }
+  }
+
+  /// Retry loading Up Next suggestions (retry button in the section).
+  Future<void> retryRelated() async {
+    final id = state.videoId;
+    if (id == null) return;
+    state = state.copyWith(relatedFailed: false);
+    await _loadRelated(id);
   }
 
   /// Switches to a different muxed quality, preserving the current
