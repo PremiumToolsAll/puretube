@@ -1,590 +1,380 @@
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
-import '../../../../core/services/audio_player_service.dart';
-import '../../../../core/services/youtube_service.dart';
-import '../../../home/presentation/providers/search_provider.dart';
-import '../../data/services/dislike_service.dart';
-import '../../data/services/sponsorblock_service.dart';
-import '../../domain/entities/models.dart';
+import '../../../../core/di/providers.dart';
+import '../../../../core/error/exceptions.dart';
+import '../../../../core/services/pip_service.dart';
+import '../../../../core/services/sponsorblock_service.dart';
+import '../../../../core/services/youtube_extractor_service.dart';
+import '../../data/services/audio_player_handler.dart';
+import '../../domain/entities/playback_models.dart';
 
 enum PlayerStatus { idle, loading, ready, error }
 
 class PlayerUiState {
   final PlayerStatus status;
   final String? videoId;
-  final VideoItem? video;
+  final VideoDetails? video;
   final PlaybackStreams? streams;
-  final int currentQualityHeight;
-  final double speed;
+  final String? errorMessage;
+  final bool isInPip;
   final bool audioOnly;
+  final double speed;
+  final Duration? sleepRemaining;
+  final List<SponsorSegment> sponsorSegments;
   final bool skipSponsors;
-  final List<VideoItem> related;
-  final List<CommentItem> comments;
-  final int commentCount;
-  final DislikeVotes votes;
-  final SleepTimerState sleepTimer;
-  final List<SubtitleTrack> subtitleTracks;
-  final SubtitleTrack? activeSubtitle;
-  final String? error;
+  final bool pipSupported;
 
   const PlayerUiState({
     this.status = PlayerStatus.idle,
     this.videoId,
     this.video,
     this.streams,
-    this.currentQualityHeight = 0,
-    this.speed = 1.0,
+    this.errorMessage,
+    this.isInPip = false,
     this.audioOnly = false,
+    this.speed = 1.0,
+    this.sleepRemaining,
+    this.sponsorSegments = const [],
     this.skipSponsors = true,
-    this.related = const [],
-    this.comments = const [],
-    this.commentCount = 0,
-    this.votes = const DislikeVotes(),
-    this.sleepTimer = const SleepTimerState(),
-    this.subtitleTracks = const [],
-    this.activeSubtitle,
-    this.error,
+    this.pipSupported = false,
   });
 
   PlayerUiState copyWith({
     PlayerStatus? status,
     String? videoId,
-    VideoItem? video,
+    VideoDetails? video,
     PlaybackStreams? streams,
-    int? currentQualityHeight,
-    double? speed,
+    String? errorMessage,
+    bool? isInPip,
     bool? audioOnly,
+    double? speed,
+    Duration? sleepRemaining,
+    List<SponsorSegment>? sponsorSegments,
     bool? skipSponsors,
-    List<VideoItem>? related,
-    List<CommentItem>? comments,
-    int? commentCount,
-    DislikeVotes? votes,
-    SleepTimerState? sleepTimer,
-    List<SubtitleTrack>? subtitleTracks,
-    SubtitleTrack? activeSubtitle,
-    bool clearSubtitle = false,
-    String? error,
-  }) =>
-      PlayerUiState(
-        status: status ?? this.status,
-        videoId: videoId ?? this.videoId,
-        video: video ?? this.video,
-        streams: streams ?? this.streams,
-        currentQualityHeight:
-            currentQualityHeight ??
-                this.currentQualityHeight,
-        speed: speed ?? this.speed,
-        audioOnly: audioOnly ?? this.audioOnly,
-        skipSponsors:
-            skipSponsors ?? this.skipSponsors,
-        related: related ?? this.related,
-        comments: comments ?? this.comments,
-        commentCount:
-            commentCount ?? this.commentCount,
-        votes: votes ?? this.votes,
-        sleepTimer: sleepTimer ?? this.sleepTimer,
-        subtitleTracks: subtitleTracks ?? this.subtitleTracks,
-        activeSubtitle: clearSubtitle ? null : (activeSubtitle ?? this.activeSubtitle),
-        error: error,
-      );
+    bool? pipSupported,
+  }) {
+    return PlayerUiState(
+      status: status ?? this.status,
+      videoId: videoId ?? this.videoId,
+      video: video ?? this.video,
+      streams: streams ?? this.streams,
+      errorMessage: errorMessage,
+      isInPip: isInPip ?? this.isInPip,
+      audioOnly: audioOnly ?? this.audioOnly,
+      speed: speed ?? this.speed,
+      sleepRemaining: sleepRemaining,
+      sponsorSegments: sponsorSegments ?? this.sponsorSegments,
+      skipSponsors: skipSponsors ?? this.skipSponsors,
+      pipSupported: pipSupported ?? this.pipSupported,
+    );
+  }
 }
 
-class SleepTimerState {
-  final bool active;
-  final Duration remaining;
-
-  const SleepTimerState({
-    this.active = false,
-    this.remaining = Duration.zero,
-  });
-
-  SleepTimerState copyWith({
-    bool? active,
-    Duration? remaining,
-  }) =>
-      SleepTimerState(
-        active: active ?? this.active,
-        remaining: remaining ?? this.remaining,
-      );
-}
-
-class CommentItem {
-  final String author;
-  final String text;
-  final String time;
-  final int likeCount;
-
-  const CommentItem({
-    required this.author,
-    required this.text,
-    required this.time,
-    required this.likeCount,
-  });
-}
-
-/// A subtitle track with loaded captions.
-class SubtitleTrack {
-  final String language;
-  final String languageCode;
-  final bool isAutoGenerated;
-  final List<SubtitleCue> cues;
-
-  const SubtitleTrack({
-    required this.language,
-    required this.languageCode,
-    required this.isAutoGenerated,
-    required this.cues,
-  });
-}
-
-/// A single subtitle cue.
-class SubtitleCue {
-  final Duration start;
-  final Duration end;
-  final String text;
-
-  const SubtitleCue({
-    required this.start,
-    required this.end,
-    required this.text,
-  });
-}
-
-class PlayerController
-    extends Notifier<PlayerUiState> {
+/// Orchestrates everything about playback: extraction, the background
+/// audio handler, SponsorBlock skipping, sleep timer, speed, audio-only
+/// switching, stream-expiry recovery, and auto-PiP.
+class PlayerController extends Notifier<PlayerUiState>
+    with WidgetsBindingObserver {
   PureTubeAudioHandler get _handler =>
       ref.read(audioHandlerProvider);
-  YoutubeService get _yt =>
-      ref.read(youtubeServiceProvider);
-  final _sponsorBlock = SponsorBlockService();
-  final _dislike = DislikeService();
+  YoutubeExtractorService get _extractor =>
+      ref.read(extractorProvider);
+  SponsorBlockService get _sponsorBlock =>
+      ref.read(sponsorBlockProvider);
+  PipService get _pip => ref.read(pipServiceProvider);
 
-  StreamSubscription<Duration>? _posSub;
-  List<SponsorSegment> _segments = [];
-  bool _skipping = false;
-  String? _skipBadge;
-  Timer? _sleepTimer;
+  StreamSubscription<Duration>? _positionSub;
+  StreamSubscription<String>? _errorSub;
+  StreamSubscription<bool>? _pipSub;
+
   Timer? _sleepCountdown;
-
-  List<String> _queue = [];
-  int _queueIndex = -1;
-
-  /// Stream of skip-badge messages for the UI.
-  final _skipBadgeCtrl =
-      StreamController<String?>.broadcast();
-  Stream<String?> get skipBadgeStream =>
-      _skipBadgeCtrl.stream;
+  DateTime? _sleepEndsAt;
+  bool _skipInProgress = false;
+  int _recoveryAttempts = 0;
 
   @override
   PlayerUiState build() {
-    _posSub = _handler.player.stream.position
-        .listen(_maybeSkipSponsor);
-    _handler.onSkipNext = playNext;
-    _handler.onSkipPrevious = playPrevious;
-    ref.onDispose(() {
-      _posSub?.cancel();
-      _sleepTimer?.cancel();
-      _sleepCountdown?.cancel();
-      _skipBadgeCtrl.close();
-      _sponsorBlock.dispose();
-      _dislike.dispose();
+    final binding = WidgetsBinding.instance;
+    binding.addObserver(this);
+    _pip.init();
+
+    _pipSub = _pip.onPipChanged.listen((inPip) {
+      state = state.copyWith(isInPip: inPip);
     });
+    _positionSub =
+        _handler.player.stream.position.listen(_maybeSkipSponsor);
+    _errorSub = _handler.player.stream.error.listen(_onPlayerError);
+
+    ref.onDispose(() {
+      binding.removeObserver(this);
+      _pipSub?.cancel();
+      _positionSub?.cancel();
+      _errorSub?.cancel();
+      _cancelSleepTimer();
+    });
+
     return const PlayerUiState();
   }
 
-  void setQueue(List<String> ids, {int start = 0}) {
-    _queue = ids;
-    _queueIndex = start.clamp(0, ids.length - 1);
-  }
-
-  bool get hasNext =>
-      (_queue.isNotEmpty &&
-          _queueIndex < _queue.length - 1) ||
-      state.related.isNotEmpty;
-
-  bool get hasPrevious =>
-      _queue.isNotEmpty && _queueIndex > 0;
-
-  Future<void> playNext() async {
-    if (_queue.isNotEmpty &&
-        _queueIndex < _queue.length - 1) {
-      _queueIndex++;
-      await loadVideo(_queue[_queueIndex]);
-    } else if (state.related.isNotEmpty) {
-      await loadVideo(state.related.first.id);
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
+    switch (lifecycleState) {
+      case AppLifecycleState.paused:
+        // Home button / app switcher while video is playing: shrink to PiP.
+        if (state.status == PlayerStatus.ready &&
+            !state.audioOnly &&
+            !state.isInPip &&
+            _handler.player.state.playing) {
+          unawaited(_pip.enterPip());
+        }
+        break;
+      case AppLifecycleState.detached:
+        // PiP window dismissed with X, or process teardown: stop playback.
+        unawaited(stop());
+        break;
+      default:
+        break;
     }
   }
 
-  Future<void> playPrevious() async {
-    if (_queue.isNotEmpty && _queueIndex > 0) {
-      _queueIndex--;
-      await loadVideo(_queue[_queueIndex]);
-    }
-  }
+  // ---------------- loading ----------------
 
   Future<void> loadVideo(String videoId) async {
-    cancelSleepTimer();
+    final previousSpeed = state.speed;
+    final previousSkip = state.skipSponsors;
+    _recoveryAttempts = 0;
+    _cancelSleepTimer();
+    await _handler.player.stop();
+
     state = PlayerUiState(
       status: PlayerStatus.loading,
       videoId: videoId,
-      speed: state.speed,
-      skipSponsors: state.skipSponsors,
+      speed: previousSpeed,
+      skipSponsors: previousSkip,
     );
-    _segments = [];
-    try {
-      final results = await Future.wait([
-        _yt.video(videoId),
-        _yt.streams(videoId),
-        _sponsorBlock.getSegments(videoId),
-        _dislike.getVotes(videoId),
-      ]);
-      final video = results[0] as Video;
-      final manifest = results[1] as StreamManifest;
-      _segments = results[2] as List<SponsorSegment>;
-      final votes = results[3] as DislikeVotes;
 
-      final item = VideoItem.fromVideo(video);
-      final streams = _pickStreams(videoId, manifest);
+    try {
+      final video = await _extractor.getVideoDetails(videoId);
+      final streams = await _extractor.getPlaybackStreams(videoId);
+      final segments = await _sponsorBlock.getSegments(videoId);
+
+      await _handler.loadMedia(
+        mediaItem: MediaItem(
+          id: video.id,
+          title: video.title,
+          artist: video.author,
+          artUri: Uri.tryParse(video.thumbnailUrl),
+          duration: video.duration,
+        ),
+        streamUrl: streams.muxedUrl,
+        speed: previousSpeed,
+      );
 
       state = state.copyWith(
         status: PlayerStatus.ready,
-        video: item,
+        video: video,
         streams: streams,
-        currentQualityHeight: streams.muxedHeight,
-        votes: votes,
+        sponsorSegments: segments,
+        pipSupported: await _pip.isPipSupported,
       );
-
-      await _handler.loadMedia(
-        item: MediaItem(
-          id: videoId,
-          title: item.title,
-          artist: item.author,
-          artUri: Uri.tryParse(item.thumbnailUrl),
-        ),
-        streamUrl: state.audioOnly
-            ? streams.audioOnlyUrl
-            : streams.muxedUrl,
-        speed: state.speed,
-      );
-
-      // Related + comments in background.
-      _yt.related(video).then((rel) {
-        if (state.videoId == videoId) {
-          state = state.copyWith(
-            related:
-                rel.map(VideoItem.fromVideo).toList(),
-          );
-        }
-      });
-      _yt.comments(video).then((list) {
-        if (state.videoId == videoId) {
-          state = state.copyWith(
-            comments: list
-                .map((c) => CommentItem(
-                      author: c.author,
-                      text: c.text,
-                      time: '',
-                      likeCount: c.likeCount,
-                    ))
-                .toList(),
-            commentCount: list.length,
-          );
-        }
-      });
-      // Subtitle tracks in background.
-      _loadSubtitleTracks(videoId);
+    } on PureTubeException catch (e) {
+      state = state.copyWith(
+          status: PlayerStatus.error, errorMessage: e.message);
     } catch (e) {
       state = state.copyWith(
-        status: PlayerStatus.error,
-        error: e.toString(),
-      );
+          status: PlayerStatus.error,
+          errorMessage: 'Playback failed: $e');
     }
   }
 
-  PlaybackStreams _pickStreams(
-      String videoId, StreamManifest manifest) {
-    final muxed = [...manifest.muxed]
-      ..sort((a, b) => b.videoResolution.height
-          .compareTo(a.videoResolution.height));
-    final audio = [...manifest.audioOnly]
-      ..sort(
-          (a, b) => b.bitrate.compareTo(a.bitrate));
-
-    if (muxed.isEmpty) {
-      throw Exception('No playable streams');
-    }
-
-    final best = muxed.first;
-    final bestAudio =
-        audio.isNotEmpty ? audio.first : null;
-
-    final seen = <int>{};
-    final qualities = <QualityOption>[];
-    // Standard muxed qualities.
-    const standardHeights = [
-      2160,
-      1440,
-      1080,
-      720,
-      480,
-      360,
-      240,
-      144
-    ];
-    for (final h in standardHeights) {
-      final match = muxed.where(
-          (s) => s.videoResolution.height == h);
-      if (match.isNotEmpty && seen.add(h)) {
-        qualities.add(QualityOption(
-          label: h >= 2160 ? '2160p (4K)' : '${h}p',
-          height: h,
-          url: match.first.url.toString(),
-        ));
-      }
-    }
-    // DASH video-only (1080p+) + best audio.
-    if (bestAudio != null) {
-      final audioUrl = bestAudio.url.toString();
-      final videoOnly = [...manifest.videoOnly]
-        ..sort((a, b) => b.videoResolution.height
-            .compareTo(a.videoResolution.height));
-      for (final v in videoOnly) {
-        final h = v.videoResolution.height;
-        if (h > 720 && seen.add(h)) {
-          qualities.add(QualityOption(
-            label: h >= 2160
-                ? '2160p (4K)'
-                : h >= 1440
-                    ? '1440p (2K)'
-                    : '${h}p',
-            height: h,
-            url: v.url.toString(),
-            audioUrl: audioUrl,
-          ));
-        }
-      }
-    }
-    qualities
-        .sort((a, b) => b.height.compareTo(a.height));
-
-    return PlaybackStreams(
-      videoId: videoId,
-      muxedUrl: best.url.toString(),
-      muxedHeight: best.videoResolution.height,
-      qualities: qualities,
-      audioOnlyUrl: bestAudio?.url.toString() ?? '',
-    );
-  }
-
-  void _maybeSkipSponsor(Duration pos) {
-    if (!state.skipSponsors ||
-        _skipping ||
-        _segments.isEmpty) return;
-    final sec = pos.inMilliseconds / 1000.0;
-    for (final s in _segments) {
-      if (sec >= s.start && sec < s.end - 0.3) {
-        _skipping = true;
-        _handler.player.seek(Duration(
-            milliseconds:
-                (s.end * 1000).round()));
-        final label = _categoryLabel(s.category);
-        _skipBadgeCtrl.add('Skipped $label');
-        Future.delayed(
-            const Duration(seconds: 2),
-            () => _skipBadgeCtrl.add(null));
-        Future.delayed(
-            const Duration(milliseconds: 500),
-            () => _skipping = false);
-        break;
-      }
+  Future<void> retry() async {
+    final id = state.videoId;
+    if (id == null) return;
+    final resumeAt = _handler.player.state.position;
+    await loadVideo(id);
+    if (resumeAt > const Duration(seconds: 3) &&
+        state.status == PlayerStatus.ready) {
+      await _handler.seek(resumeAt);
     }
   }
 
-  String _categoryLabel(String category) {
-    switch (category) {
-      case 'sponsor':
-        return 'Sponsor';
-      case 'intro':
-        return 'Intro';
-      case 'outro':
-        return 'Outro';
-      case 'selfpromo':
-        return 'Self Promo';
-      case 'interaction':
-        return 'Interaction Reminder';
-      case 'preview':
-        return 'Preview';
-      default:
-        return 'Segment';
+  Future<void> stop() async {
+    _cancelSleepTimer();
+    _recoveryAttempts = 0;
+    await _handler.stop();
+    state = const PlayerUiState();
+  }
+
+  void clearError() {
+    if (state.errorMessage != null) {
+      state = state.copyWith(errorMessage: null);
     }
   }
+
+  // ---------------- transport ----------------
 
   Future<void> togglePlayPause() async {
-    final p = _handler.player;
-    if (p.state.playing) {
+    if (_handler.player.state.playing) {
       await _handler.pause();
     } else {
       await _handler.play();
     }
   }
 
+  Future<void> seekTo(Duration position) => _handler.seek(position);
+
   Future<void> seekBy(Duration offset) async {
     final player = _handler.player;
-    final target = player.state.position + offset;
+    var target = player.state.position + offset;
     final duration = player.state.duration;
-    final clamped = target.isNegative
-        ? Duration.zero
-        : (duration > Duration.zero && target > duration
-            ? duration
-            : target);
-    await player.seek(clamped);
-  }
-
-  Future<void> setQuality(QualityOption q) async {
-    if (state.status != PlayerStatus.ready ||
-        state.audioOnly) return;
-    if (q.height == state.currentQualityHeight) return;
-    final pos = _handler.player.state.position;
-    await _handler.switchStream(
-      q.url,
-      audioUrl: q.audioUrl,
-      resumeAt: pos,
-    );
-    state = state.copyWith(
-        currentQualityHeight: q.height);
+    if (target < Duration.zero) target = Duration.zero;
+    if (duration > Duration.zero && target > duration) {
+      target = duration;
+    }
+    await _handler.seek(target);
   }
 
   Future<void> setSpeed(double speed) async {
-    state = state.copyWith(speed: speed);
-    await _handler.setSpeed(speed);
+    final s = speed.clamp(0.5, 2.0);
+    await _handler.setSpeed(s);
+    state = state.copyWith(speed: s);
   }
 
+  /// Toggle between video and background-audio mode, preserving position.
   Future<void> toggleAudioOnly() async {
-    final s = state.streams;
-    if (s == null || s.audioOnlyUrl.isEmpty) return;
-    final toAudio = !state.audioOnly;
-    final pos = _handler.player.state.position;
-    state = state.copyWith(audioOnly: toAudio);
-    await _handler.switchStream(
-      toAudio ? s.audioOnlyUrl : s.muxedUrl,
-      resumeAt: pos,
-    );
+    if (state.status != PlayerStatus.ready ||
+        state.videoId == null) {
+      return;
+    }
+    final goingAudioOnly = !state.audioOnly;
+    try {
+      final streams = await _ensureFreshStreams();
+      final url =
+          goingAudioOnly ? streams.audioOnlyUrl : streams.muxedUrl;
+      await _handler.switchStream(url);
+      state = state.copyWith(audioOnly: goingAudioOnly);
+    } on PureTubeException catch (e) {
+      state = state.copyWith(errorMessage: e.message);
+    }
   }
 
-  void toggleSkipSponsors(bool v) =>
-      state = state.copyWith(skipSponsors: v);
+  Future<void> enterPip() async {
+    if (state.pipSupported && state.status == PlayerStatus.ready) {
+      await _pip.enterPip();
+    }
+  }
 
-  // ── Sleep timer ───────────────────────────────────────────
+  // ---------------- sleep timer ----------------
 
-  void setSleepTimer(Duration duration) {
-    cancelSleepTimer();
-    if (duration == Duration.zero) return;
-    state = state.copyWith(
-      sleepTimer: SleepTimerState(
-          active: true, remaining: duration),
-    );
+  void startSleepTimer(Duration duration) {
+    _cancelSleepTimer();
+    _sleepEndsAt = DateTime.now().add(duration);
+    state = state.copyWith(sleepRemaining: duration);
     _sleepCountdown =
         Timer.periodic(const Duration(seconds: 1), (_) {
-      final rem =
-          state.sleepTimer.remaining - const Duration(seconds: 1);
-      if (rem <= Duration.zero) {
-        cancelSleepTimer();
-        _handler.pause();
+      final endsAt = _sleepEndsAt;
+      if (endsAt == null) return;
+      final left = endsAt.difference(DateTime.now());
+      if (left <= Duration.zero) {
+        _finishSleepTimer();
       } else {
-        state = state.copyWith(
-          sleepTimer:
-              state.sleepTimer.copyWith(remaining: rem),
-        );
+        state = state.copyWith(sleepRemaining: left);
       }
     });
   }
 
-  /// Sleep when the current video ends.
-  void setSleepTimerEndOfVideo() {
-    cancelSleepTimer();
-    final duration =
-        _handler.player.state.duration -
-            _handler.player.state.position;
-    if (duration > Duration.zero) {
-      setSleepTimer(duration);
-    }
-  }
-
   void cancelSleepTimer() {
-    _sleepTimer?.cancel();
+    _cancelSleepTimer();
+    state = state.copyWith(sleepRemaining: null);
+  }
+
+  void _finishSleepTimer() {
+    _cancelSleepTimer();
+    unawaited(_handler.pause());
+    state = state.copyWith(sleepRemaining: null);
+  }
+
+  void _cancelSleepTimer() {
     _sleepCountdown?.cancel();
-    _sleepTimer = null;
     _sleepCountdown = null;
-    if (state.sleepTimer.active) {
-      state = state.copyWith(
-          sleepTimer: const SleepTimerState());
+    _sleepEndsAt = null;
+  }
+
+  // ---------------- SponsorBlock ----------------
+
+  void toggleSkipSponsors(bool value) {
+    state = state.copyWith(skipSponsors: value);
+  }
+
+  void _maybeSkipSponsor(Duration position) {
+    if (!state.skipSponsors || _skipInProgress) return;
+    if (state.status != PlayerStatus.ready) return;
+    for (final seg in state.sponsorSegments) {
+      if (seg.contains(position)) {
+        _skipInProgress = true;
+        _handler
+            .seek(
+                Duration(milliseconds: (seg.end * 1000).toInt() + 250))
+            .whenComplete(() => _skipInProgress = false);
+        break;
+      }
     }
   }
 
-  // ── Subtitles ─────────────────────────────────────────────
+  // ---------------- stream expiry & error recovery ----------------
 
-  Future<void> _loadSubtitleTracks(String videoId) async {
-    try {
-      final tracks =
-          await _yt.captionTracks(videoId);
-      if (state.videoId != videoId) return;
-      // Load cues for each track (limit to avoid overload).
-      final loaded = <SubtitleTrack>[];
-      for (final t in tracks.take(10)) {
-        try {
-          final caps = await _yt.captions(t);
-          loaded.add(SubtitleTrack(
-            language: t.language.name,
-            languageCode: t.language.code,
-            isAutoGenerated: t.isAutoGenerated,
-            cues: caps
-                .map((e) => SubtitleCue(
-                      start: e.offset,
-                      end: e.offset + e.duration,
-                      text: e.text,
-                    ))
-                .toList(),
-          ));
-        } catch (_) {}
-      }
-      if (state.videoId == videoId) {
-        state = state.copyWith(
-            subtitleTracks: loaded);
-      }
-    } catch (_) {}
+  Future<PlaybackStreams> _ensureFreshStreams() async {
+    final current = state.streams;
+    if (current != null && !current.isExpired) return current;
+    final fresh =
+        await _extractor.getPlaybackStreams(state.videoId!);
+    state = state.copyWith(streams: fresh);
+    return fresh;
   }
 
-  Future<void> selectSubtitle(
-      SubtitleTrack? track) async {
-    if (track == null) {
-      state =
-          state.copyWith(clearSubtitle: true);
+  /// media_kit reports fatal errors (expired/403'd URL, lost connection)
+  /// on player.stream.error. Recover by re-extracting fresh URLs and
+  /// resuming at the last position. Bounded to 2 attempts, then the
+  /// error is surfaced to the UI instead of looping forever.
+  Future<void> _onPlayerError(String error) async {
+    if (state.status != PlayerStatus.ready ||
+        state.videoId == null) {
       return;
     }
-    state = state.copyWith(
-        activeSubtitle: track);
-  }
+    if (error.trim().isEmpty) return;
 
-  /// Get the cue text for a position.
-  String? subtitleAt(Duration position) {
-    final track = state.activeSubtitle;
-    if (track == null) return null;
-    for (final cue in track.cues) {
-      if (position >= cue.start &&
-          position <= cue.end) {
-        return cue.text;
-      }
+    if (_recoveryAttempts >= 2) {
+      state = state.copyWith(
+        status: PlayerStatus.error,
+        errorMessage:
+            'Playback failed and could not recover: $error',
+      );
+      return;
     }
-    return null;
-  }
+    _recoveryAttempts++;
 
-  Future<void> retry() async {
-    final id = state.videoId;
-    if (id != null) await loadVideo(id);
+    try {
+      final resumeAt = _handler.player.state.position;
+      final fresh =
+          await _extractor.getPlaybackStreams(state.videoId!);
+      if (state.status != PlayerStatus.ready) return;
+      state = state.copyWith(streams: fresh);
+      final url =
+          state.audioOnly ? fresh.audioOnlyUrl : fresh.muxedUrl;
+      await _handler.switchStream(url, resumeAt: resumeAt);
+    } on PureTubeException catch (e) {
+      // Most likely NetworkException: user lost internet mid-playback.
+      state = state.copyWith(
+          status: PlayerStatus.error, errorMessage: e.message);
+    } catch (e) {
+      state = state.copyWith(
+          status: PlayerStatus.error,
+          errorMessage: 'Playback error: $e');
+    }
   }
 }
 
