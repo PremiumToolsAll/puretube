@@ -132,9 +132,9 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
     playbackState.add(
       playbackState.value.copyWith(
         controls: [
-          MediaControl.rewind,
+          MediaControl.skipToPrevious,
           if (playing) MediaControl.pause else MediaControl.play,
-          MediaControl.fastForward,
+          MediaControl.skipToNext,
         ],
         systemActions: const {
           MediaAction.seek,
@@ -152,6 +152,27 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
       ),
     );
   }
+
+  @override
+  Future<void> skipToNext() async {
+    // Delegate to the app's queue via callback set by PlayerController.
+    if (onSkipToNext != null) {
+      await onSkipToNext!();
+    }
+  }
+
+  @override
+  Future<void> skipToPrevious() async {
+    if (onSkipToPrevious != null) {
+      await onSkipToPrevious!();
+    } else {
+      await _player.seek(Duration.zero);
+    }
+  }
+
+  /// Callbacks for queue navigation, set by PlayerController.
+  Future<void> Function()? onSkipToNext;
+  Future<void> Function()? onSkipToPrevious;
 
   AudioProcessingState _mapProcessingState() {
     final s = _player.state;
