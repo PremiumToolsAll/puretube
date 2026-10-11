@@ -185,6 +185,28 @@ class YoutubeExtractorService {
             sizeBytes: m.size.totalBytes,
           ),
       ];
+      // Video-only (1080p/2K/4K) for download — no audio.
+      try {
+        final videoOnly = [...manifest.videoOnly]
+          ..sort((a, b) => b.videoResolution.height
+              .compareTo(a.videoResolution.height));
+        final seenHeights = <int>{
+          for (final m in muxed) m.videoQuality.height
+        };
+        for (final v in videoOnly) {
+          final h = v.videoResolution.height;
+          if (h > 720 && seenHeights.add(h)) {
+            options.add(DownloadOption(
+              label: h >= 2160
+                  ? '4K (video only)'
+                  : '${h}p (video only)',
+              url: v.url.toString(),
+              audioOnly: false,
+              sizeBytes: v.size.totalBytes,
+            ));
+          }
+        }
+      } catch (_) {}
       if (audio.isNotEmpty) {
         final a = audio.first;
         options.add(DownloadOption(
