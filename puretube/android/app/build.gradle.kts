@@ -25,6 +25,10 @@ android {
 
     buildTypes {
         release {
+            // Disable R8: newer AGP + Flutter triggers missing Play Core
+            // classes during minification. APK is slightly larger but builds.
+            isMinifyEnabled = false
+            isShrinkResources = false
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
