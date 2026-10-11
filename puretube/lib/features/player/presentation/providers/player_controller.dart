@@ -174,6 +174,7 @@ class PlayerController extends Notifier<PlayerUiState>
   Future<void> loadVideo(String videoId) async {
     final previousSpeed = state.speed;
     final previousSkip = state.skipSponsors;
+    final previousAudioOnly = state.audioOnly;
     _recoveryAttempts = 0;
     _cancelSleepTimer();
     await _handler.player.stop();
@@ -183,6 +184,7 @@ class PlayerController extends Notifier<PlayerUiState>
       videoId: videoId,
       speed: previousSpeed,
       skipSponsors: previousSkip,
+      audioOnly: previousAudioOnly,
     );
 
     try {
