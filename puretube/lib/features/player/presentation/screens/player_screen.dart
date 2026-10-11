@@ -7,6 +7,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shimmer/shimmer.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/di/providers.dart';
@@ -349,6 +350,63 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         ),
       ),
     );
+  }
+
+  void _showQualityMenu(BuildContext buttonContext) {
+    final notifier = ref.read(playerControllerProvider.notifier);
+    final uiState = ref.read(playerControllerProvider);
+    final qualities = uiState.availableQualities;
+    if (qualities.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Loading qualities…'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      // Retry the background fetch in case it failed earlier.
+      unawaited(notifier.loadQualities());
+      return;
+    }
+    final current = uiState.currentQuality;
+    final box = buttonContext.findRenderObject() as RenderBox?;
+    final pos = box?.localToGlobal(Offset.zero) ?? Offset.zero;
+    final size = box?.size ?? Size.zero;
+    final position = RelativeRect.fromLTRB(
+      pos.dx,
+      pos.dy + size.height + 4,
+      pos.dx + 200,
+      pos.dy + size.height + 4 + qualities.length * 48.0,
+    );
+    showMenu<MuxedQuality>(
+      context: context,
+      position: position,
+      color: const Color(0xFF232323),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8)),
+      items: [
+        for (final q in qualities)
+          PopupMenuItem<MuxedQuality>(
+            value: q,
+            height: 44,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(q.label,
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 15)),
+                ),
+                if (current?.height == q.height)
+                  const Icon(Icons.check,
+                      color: _accent, size: 18),
+              ],
+            ),
+          ),
+      ],
+    ).then((selected) {
+      if (selected != null && mounted) {
+        notifier.setQuality(selected);
+      }
+    });
   }
 
   void _showSleepSheet() {
@@ -800,7 +858,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   Widget _buildTopBar(PlayerUiState uiState) {
-    final notifier = ref.read(playerControllerProvider.notifier);
+    final qualityLabel = uiState.currentQuality != null
+        ? '${uiState.currentQuality!.height}p'
+        : (uiState.streams != null
+            ? '${uiState.streams!.muxedHeight}p'
+            : 'Auto');
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -812,10 +874,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       child: Row(
         children: [
           IconButton(
+            tooltip: 'Close',
             // Back keeps audio playing in the background (mini player).
             onPressed: () => Navigator.pop(context),
             icon:
-                const Icon(Icons.arrow_back, color: Colors.white),
+                const Icon(Icons.close, color: Colors.white),
           ),
           Expanded(
             child: Text(
@@ -843,21 +906,49 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     ? _accent
                     : Colors.white),
           ),
-          IconButton(
-            tooltip: 'Audio only',
-            onPressed: notifier.toggleAudioOnly,
-            icon: Icon(Icons.headphones,
-                color: uiState.audioOnly
-                    ? _accent
-                    : Colors.white),
-          ),
-          if (uiState.pipSupported)
-            IconButton(
-              tooltip: 'Picture in picture',
-              onPressed: notifier.enterPip,
-              icon: const Icon(Icons.picture_in_picture_alt,
-                  color: Colors.white),
+          Builder(
+            builder: (btnCtx) => TextButton(
+              onPressed: () => _showQualityMenu(btnCtx),
+              style: TextButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize:
+                    MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(qualityLabel,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13)),
             ),
+          ),
+          TextButton(
+            onPressed: _showSpeedSheet,
+            style: TextButton.styleFrom(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: Size.zero,
+              tapTargetSize:
+                  MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text('${uiState.speed}x',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13)),
+          ),
+          IconButton(
+            tooltip: 'Save to playlist',
+            onPressed: () {
+              final v = uiState.video;
+              if (v != null) {
+                showSaveToPlaylistSheet(context, v);
+              }
+            },
+            icon: const Icon(Icons.playlist_add,
+                color: Colors.white),
+          ),
           IconButton(
             onPressed: _showMoreSheet,
             icon:
@@ -961,38 +1052,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             ),
           ),
           const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            children: [
-              OutlinedButton.icon(
-                onPressed: notifier.toggleAudioOnly,
-                icon:
-                    const Icon(Icons.headphones, size: 16),
-                label: Text(
-                    uiState.audioOnly ? 'Video mode' : 'Audio only'),
-              ),
-              OutlinedButton.icon(
-                onPressed: _showSpeedSheet,
-                icon: const Icon(Icons.speed, size: 16),
-                label: Text('${uiState.speed}x'),
-              ),
-              OutlinedButton.icon(
-                onPressed: _showSleepSheet,
-                icon: const Icon(Icons.bedtime, size: 16),
-                label: Text(uiState.sleepRemaining != null
-                    ? formatDuration(uiState.sleepRemaining)
-                    : 'Sleep timer'),
-              ),
-              if (uiState.pipSupported)
-                OutlinedButton.icon(
-                  onPressed: notifier.enterPip,
-                  icon: const Icon(
-                      Icons.picture_in_picture_alt,
-                      size: 16),
-                  label: const Text('PiP'),
-                ),
-            ],
-          ),
+          _buildActionRow(uiState, notifier),
+          const SizedBox(height: 16),
+          if (video.id.isNotEmpty)
+            _UpNextSection(videoId: video.id),
           if (video.description.isNotEmpty) ...[
             const SizedBox(height: 16),
             const Text('Description',
@@ -1013,6 +1076,283 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               videoId: '', showUnavailable: true),
         ],
       ),
+    );
+  }
+  /// Icon-above-label action row under the video, matching the
+  /// reference design: Add To | Background | Popup | Download.
+  Widget _buildActionRow(
+      PlayerUiState uiState, PlayerController notifier) {
+    Widget item({
+      required IconData icon,
+      required String label,
+      required VoidCallback onTap,
+      bool active = false,
+    }) {
+      final color = active ? _accent : Colors.white70;
+      return Expanded(
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, color: color, size: 26),
+                const SizedBox(height: 4),
+                Text(label,
+                    style: TextStyle(color: color, fontSize: 12)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final video = uiState.video;
+    return Row(
+      children: [
+        item(
+          icon: Icons.playlist_add,
+          label: 'Add To',
+          onTap: () {
+            if (video != null) {
+              showSaveToPlaylistSheet(context, video);
+            }
+          },
+        ),
+        item(
+          icon: Icons.headphones,
+          label: 'Background',
+          active: uiState.audioOnly,
+          onTap: notifier.toggleAudioOnly,
+        ),
+        item(
+          icon: Icons.picture_in_picture_alt,
+          label: 'Popup',
+          onTap: () {
+            if (uiState.pipSupported) {
+              notifier.enterPip();
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                      'Picture-in-picture is not supported on this device.'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            }
+          },
+        ),
+        item(
+          icon: Icons.download_outlined,
+          label: 'Download',
+          onTap: () {
+            if (video != null) _showDownloadSheet(video);
+          },
+        ),
+      ],
+    );
+  }
+}
+
+/// "Up Next" suggestions below the player, loaded from the
+/// extractor's related-videos search. Shimmer while loading,
+/// retry button on empty/error.
+class _UpNextSection extends ConsumerStatefulWidget {
+  final String videoId;
+  const _UpNextSection({required this.videoId});
+
+  @override
+  ConsumerState<_UpNextSection> createState() =>
+      _UpNextSectionState();
+}
+
+class _UpNextSectionState extends ConsumerState<_UpNextSection> {
+  Future<List<VideoDetails>>? _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future =
+        ref.read(extractorProvider).getRelatedVideos(widget.videoId);
+  }
+
+  @override
+  void didUpdateWidget(covariant _UpNextSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoId != widget.videoId) {
+      setState(() {
+        _future = ref
+            .read(extractorProvider)
+            .getRelatedVideos(widget.videoId);
+      });
+    }
+  }
+
+  void _retry() {
+    setState(() {
+      _future =
+          ref.read(extractorProvider).getRelatedVideos(widget.videoId);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<VideoDetails>>(
+      future: _future,
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Up Next',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Colors.white)),
+              const SizedBox(height: 8),
+              for (var i = 0; i < 3; i++)
+                Padding(
+                  padding:
+                      const EdgeInsets.only(bottom: 10),
+                  child: Shimmer.fromColors(
+                    baseColor: const Color(0xFF1A1A1A),
+                    highlightColor: const Color(0xFF2E2E2E),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 120,
+                          height: 68,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius:
+                                BorderRadius.circular(8),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Container(
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius:
+                                  BorderRadius.circular(6),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          );
+        }
+        final videos = snap.data ?? [];
+        if (videos.isEmpty) {
+          return Row(
+            children: [
+              const Expanded(
+                child: Text('Up Next',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.white)),
+              ),
+              TextButton(
+                onPressed: _retry,
+                child: const Text('Retry'),
+              ),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Up Next',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: Colors.white)),
+            const SizedBox(height: 8),
+            for (final v in videos)
+              InkWell(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        PlayerScreen(videoId: v.id),
+                  ),
+                ),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius:
+                            BorderRadius.circular(8),
+                        child: CachedNetworkImage(
+                          imageUrl: v.thumbnailUrl,
+                          width: 120,
+                          height: 68,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) => Container(
+                            width: 120,
+                            height: 68,
+                            color:
+                                const Color(0xFF1A1A1A),
+                          ),
+                          errorWidget: (_, __, ___) =>
+                              Container(
+                            width: 120,
+                            height: 68,
+                            color:
+                                const Color(0xFF1A1A1A),
+                            child: const Icon(
+                                Icons.broken_image,
+                                color: Colors.grey,
+                                size: 20),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            Text(v.title,
+                                maxLines: 2,
+                                overflow:
+                                    TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight:
+                                        FontWeight.w500)),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${v.author}'
+                              '${v.viewCount != null ? ' • ${formatCount(v.viewCount)} views' : ''}',
+                              maxLines: 1,
+                              overflow:
+                                  TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
