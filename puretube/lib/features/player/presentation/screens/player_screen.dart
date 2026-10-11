@@ -1179,24 +1179,66 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               style: const TextStyle(
                   fontSize: 17, fontWeight: FontWeight.bold)),
           const SizedBox(height: 6),
-          Text(
-            '${video.author}  •  ${formatCount(video.viewCount)} views  •  ${timeAgo(video.uploadDate)}',
-            style:
-                const TextStyle(color: Colors.grey, fontSize: 13),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${formatCount(video.viewCount)} views  •  ${timeAgo(video.uploadDate)}',
+                  style: const TextStyle(
+                      color: Colors.grey, fontSize: 13),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
+          // YouTube-style action row: Share, Download, Save.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildYtAction(
+                  icon: Icons.share,
+                  label: 'Share',
+                  onPressed: () {
+                    // Share handled in 3-dot menu.
+                  },
+                ),
+                const SizedBox(width: 8),
+                _buildYtAction(
+                  icon: Icons.download_outlined,
+                  label: 'Download',
+                  onPressed: () =>
+                      _showDownloadSheet(video),
+                ),
+                const SizedBox(width: 8),
+                _buildYtAction(
+                  icon: Icons.playlist_add,
+                  label: 'Save',
+                  onPressed: () =>
+                      showSaveToPlaylistSheet(
+                          context, video),
+                ),
+                const SizedBox(width: 8),
+                _buildYtAction(
+                  icon: Icons.headphones,
+                  label: uiState.audioOnly
+                      ? 'Video'
+                      : 'Audio',
+                  isActive: uiState.audioOnly,
+                  onPressed: notifier.toggleAudioOnly,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Channel row.
+          _buildChannelRow(video, uiState),
+          const SizedBox(height: 12),
+          // PureTube features row.
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              _buildPremiumChip(
-                icon: Icons.headphones,
-                label: uiState.audioOnly
-                    ? 'Video mode'
-                    : 'Audio only',
-                isActive: uiState.audioOnly,
-                onPressed: notifier.toggleAudioOnly,
-              ),
               _buildPremiumChip(
                 icon: Icons.speed,
                 label: '${uiState.speed}x',
@@ -1252,6 +1294,106 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           const CommentsSection(),
         ],
       ),
+    );
+  }
+
+  /// YouTube-style action button (Share, Download, Save).
+  Widget _buildYtAction({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+    bool isActive = false,
+  }) {
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          color: isActive
+              ? const Color(0xFF6200EA)
+                  .withOpacity(0.2)
+              : Colors.white.withOpacity(0.08),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+                size: 18,
+                color: isActive
+                    ? const Color(0xFF6200EA)
+                    : Colors.white70),
+            const SizedBox(width: 8),
+            Text(label,
+                style: TextStyle(
+                    color: isActive
+                        ? const Color(0xFF6200EA)
+                        : Colors.white70,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Channel row with Subscribe button.
+  Widget _buildChannelRow(
+      VideoDetails video, PlayerUiState uiState) {
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 20,
+          backgroundColor:
+              Colors.purple.withOpacity(0.3),
+          child: Text(
+            video.author.isNotEmpty
+                ? video.author[0].toUpperCase()
+                : '?',
+            style: const TextStyle(
+                color: Colors.white, fontSize: 18),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
+            children: [
+              Text(video.author,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14)),
+              const Text('Subscribe for updates',
+                  style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 12)),
+            ],
+          ),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            // Subscribe is UI-only (no YouTube login).
+            ScaffoldMessenger.of(context)
+                .showSnackBar(
+              const SnackBar(
+                  content: Text(
+                      'Subscriptions need YouTube login')),
+            );
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.white,
+            foregroundColor: Colors.black,
+            shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(20)),
+          ),
+          child: const Text('Subscribe'),
+        ),
+      ],
     );
   }
 
