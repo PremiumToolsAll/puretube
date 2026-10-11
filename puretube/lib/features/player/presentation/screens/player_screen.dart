@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/di/providers.dart';
 import '../../../../core/utils/format.dart';
+import '../../../../core/widgets/press_scale.dart';
 import '../../../../features/library/domain/entities/library_models.dart';
 import '../../../../features/library/presentation/providers/library_providers.dart';
 import '../../../../features/library/presentation/screens/downloads_screen.dart';
@@ -1372,7 +1373,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
           child: Row(
             children: [
-              IconButton(
+              PressIconButton(
                 tooltip: 'Back',
                 icon: const Icon(Icons.keyboard_arrow_down,
                     color: Colors.white, size: 30),
@@ -1397,7 +1398,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   ],
                 ),
               ),
-              IconButton(
+              PressIconButton(
                 tooltip: 'More',
                 icon: const Icon(Icons.more_vert,
                     color: Colors.white),
@@ -1440,13 +1441,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       fontSize: 18),
                 ),
               ),
-              IconButton(
+              PressIconButton(
                 tooltip: 'Download',
                 icon: const Icon(Icons.download_outlined,
                     color: Colors.white70),
                 onPressed: () => _showDownloadSheet(video),
               ),
-              IconButton(
+              PressIconButton(
                 tooltip: _liked ? 'Liked' : 'Like',
                 icon: Icon(
                     _liked
@@ -1490,7 +1491,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             mainAxisAlignment:
                 MainAxisAlignment.spaceEvenly,
             children: [
-              IconButton(
+              PressIconButton(
                 tooltip: 'Shuffle',
                 icon: Icon(Icons.shuffle,
                     color: _shuffle
@@ -1507,7 +1508,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   ));
                 },
               ),
-              IconButton(
+              PressIconButton(
                 tooltip: 'Previous',
                 iconSize: 42,
                 icon: const Icon(Icons.skip_previous,
@@ -1518,7 +1519,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 stream: player.stream.playing,
                 builder: (context, snap) {
                   final playing = snap.data ?? false;
-                  return GestureDetector(
+                  return PressScale(
                     onTap: notifier.togglePlayPause,
                     child: Container(
                       width: 76,
@@ -1538,14 +1539,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   );
                 },
               ),
-              IconButton(
+              PressIconButton(
                 tooltip: 'Next',
                 iconSize: 42,
                 icon: const Icon(Icons.skip_next,
                     color: Colors.white),
                 onPressed: _playNext,
               ),
-              IconButton(
+              PressIconButton(
                 tooltip: 'Repeat',
                 icon: Icon(
                     _repeatMode == 2
@@ -1867,7 +1868,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       ),
       child: Row(
         children: [
-          IconButton(
+          PressIconButton(
             tooltip: 'Close',
             // Back keeps audio playing in the background (mini player).
             onPressed: () => Navigator.pop(context),
@@ -1884,15 +1885,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             ),
           ),
           if (uiState.sleepRemaining != null)
-            TextButton(
-              onPressed: _showSleepSheet,
-              child: Text(
-                '⏾ ${formatDuration(uiState.sleepRemaining)}',
-                style: const TextStyle(
-                    color: _accent, fontSize: 12),
+            PressScale(
+              onTap: _showSleepSheet,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  '⏾ ${formatDuration(uiState.sleepRemaining)}',
+                  style: const TextStyle(
+                      color: _accent, fontSize: 12),
+                ),
               ),
             ),
-          IconButton(
+          PressIconButton(
             tooltip: 'Subtitles',
             onPressed: () => SubtitleSheet.show(context),
             icon: Icon(Icons.closed_caption_outlined,
@@ -1901,38 +1906,32 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     : Colors.white),
           ),
           Builder(
-            builder: (btnCtx) => TextButton(
-              onPressed: () => _showQualityMenu(btnCtx),
-              style: TextButton.styleFrom(
+            builder: (btnCtx) => PressScale(
+              onTap: () => _showQualityMenu(btnCtx),
+              child: Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: Size.zero,
-                tapTargetSize:
-                    MaterialTapTargetSize.shrinkWrap,
+                child: Text(qualityLabel,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13)),
               ),
-              child: Text(qualityLabel,
+            ),
+          ),
+          PressScale(
+            onTap: _showSpeedSheet,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8),
+              child: Text('${uiState.speed}x',
                   style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
                       fontSize: 13)),
             ),
           ),
-          TextButton(
-            onPressed: _showSpeedSheet,
-            style: TextButton.styleFrom(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8),
-              minimumSize: Size.zero,
-              tapTargetSize:
-                  MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: Text('${uiState.speed}x',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13)),
-          ),
-          IconButton(
+          PressIconButton(
             tooltip: 'Save to playlist',
             onPressed: () {
               final v = uiState.video;
@@ -1943,14 +1942,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             icon: const Icon(Icons.playlist_add,
                 color: Colors.white),
           ),
-          IconButton(
+          PressIconButton(
             onPressed: _showMoreSheet,
             icon:
                 const Icon(Icons.more_vert, color: Colors.white),
           ),
           // Fullscreen only: cycle video fit (contain/cover/fill).
           if (_isFullscreen)
-            IconButton(
+            PressIconButton(
               tooltip: 'Video fit: ${_videoFit.name}',
               onPressed: _cycleVideoFit,
               icon: const Icon(Icons.aspect_ratio,
@@ -1973,7 +1972,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
+            PressIconButton(
               tooltip: 'Previous',
               iconSize: 48,
               onPressed: _playPrevious,
@@ -1981,7 +1980,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   color: Colors.white),
             ),
             const SizedBox(width: 24),
-            IconButton(
+            PressIconButton(
               tooltip: playing ? 'Pause' : 'Play',
               iconSize: 64,
               onPressed: notifier.togglePlayPause,
@@ -1991,7 +1990,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               ),
             ),
             const SizedBox(width: 24),
-            IconButton(
+            PressIconButton(
               tooltip: 'Next',
               iconSize: 48,
               onPressed: _playNext,
@@ -2023,7 +2022,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             _TimeLabel(player: player, current: true),
             Expanded(child: _PlayerSeekBar(player: player)),
             _TimeLabel(player: player, current: false),
-            IconButton(
+            PressIconButton(
               tooltip: _isFullscreen
                   ? 'Exit fullscreen'
                   : 'Fullscreen',
@@ -2273,11 +2272,16 @@ class _UpNextSection extends ConsumerWidget {
                     fontSize: 16,
                     color: Colors.white)),
           ),
-          TextButton(
-            onPressed: () => ref
+          PressScale(
+            onTap: () => ref
                 .read(playerControllerProvider.notifier)
                 .retryRelated(),
-            child: const Text('Retry'),
+            child: const Padding(
+              padding:
+                  EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text('Retry',
+                  style: TextStyle(color: Colors.white)),
+            ),
           ),
         ],
       );
@@ -2488,7 +2492,7 @@ class _DescriptionSheetState
                             fontSize: 16,
                             fontWeight: FontWeight.bold)),
                   ),
-                  IconButton(
+                  PressIconButton(
                     onPressed: () => Navigator.of(context).pop(),
                     icon: const Icon(Icons.close,
                         color: Colors.white),
