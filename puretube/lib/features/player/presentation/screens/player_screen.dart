@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -18,7 +17,6 @@ import '../../../../features/library/presentation/screens/playlists_screen.dart'
     show showSaveToPlaylistSheet;
 import '../../domain/entities/playback_models.dart';
 import '../providers/player_controller.dart';
-import '../widgets/comments_section.dart';
 
 class _Gauge {
   final IconData icon;
@@ -44,7 +42,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   VideoController? _videoController;
   bool _showControls = true;
   Timer? _hideTimer;
-  bool _isFullscreen = false;
 
   // double-tap
   Offset? _doubleTapPos;
@@ -143,12 +140,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _hideTimer?.cancel();
     _seekFlashTimer?.cancel();
     _gaugeTimer?.cancel();
-    // Restore portrait + system UI on exit.
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-    ]);
-    SystemChrome.setEnabledSystemUIMode(
-        SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
@@ -164,24 +155,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void _toggleControls() {
     setState(() => _showControls = !_showControls);
     _restartHideTimer();
-  }
-
-  void _toggleFullscreen() {
-    setState(() => _isFullscreen = !_isFullscreen);
-    if (_isFullscreen) {
-      SystemChrome.setPreferredOrientations([
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
-      SystemChrome.setEnabledSystemUIMode(
-          SystemUiMode.immersiveSticky);
-    } else {
-      SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-      ]);
-      SystemChrome.setEnabledSystemUIMode(
-          SystemUiMode.edgeToEdge);
-    }
   }
 
   // ---------------- double-tap: -10s / +10s / play-pause ----------------
@@ -252,9 +225,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final player = ref.read(mediaKitPlayerProvider);
     final delta = -d.delta.dy / 280; // ~280px swipe covers the full range
     if (_dragOnRightSide && _dragStartVolume != null) {
-      final raw = (_dragStartVolume! + delta * 100).clamp(0.0, 100.0);
-      // Snap to 10% steps.
-      final v = (raw / 10).round() * 10.0;
+      final v =
+          (_dragStartVolume! + delta * 100).clamp(0.0, 100.0);
       player.setVolume(v);
       _showGauge(_Gauge(
         icon: v == 0 ? Icons.volume_off : Icons.volume_up,
@@ -263,9 +235,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       ));
     } else if (!_dragOnRightSide &&
         _dragStartBrightness != null) {
-      final raw = (_dragStartBrightness! + delta).clamp(0.05, 1.0);
-      // Snap to 10% steps.
-      final b = ((raw * 10).round() / 10).clamp(0.05, 1.0);
+      final b = (_dragStartBrightness! + delta).clamp(0.05, 1.0);
       try {
         ScreenBrightness().setScreenBrightness(b);
       } catch (_) {}
@@ -377,60 +347,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
-  void _showQualitySheet() {
-    final notifier = ref.read(playerControllerProvider.notifier);
-    final uiState = ref.read(playerControllerProvider);
-    final streams = uiState.streams;
-    if (streams == null || streams.qualities.isEmpty) return;
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-                title: Text('Video quality',
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold))),
-            ListTile(
-              title: const Text('Auto'),
-              subtitle: const Text('Best quality for your connection',
-                  style: TextStyle(
-                      color: Colors.grey, fontSize: 12)),
-              trailing: uiState.currentQualityHeight == 0
-                  ? const Icon(Icons.check, color: _accent)
-                  : null,
-              onTap: () {
-                // Auto = highest available quality.
-                if (streams.qualities.isNotEmpty) {
-                  notifier.setQuality(streams.qualities.first);
-                }
-                Navigator.pop(ctx);
-              },
-            ),
-            for (final q in streams.qualities)
-              ListTile(
-                title: Text(q.label),
-                subtitle: q.isVideoOnly
-                    ? const Text('4K/2K quality',
-                        style: TextStyle(
-                            color: Colors.grey, fontSize: 12))
-                    : null,
-                trailing:
-                    q.height == uiState.currentQualityHeight
-                        ? const Icon(Icons.check, color: _accent)
-                        : null,
-                onTap: () {
-                  notifier.setQuality(q);
-                  Navigator.pop(ctx);
-                },
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
   void _showSleepSheet() {
     final notifier = ref.read(playerControllerProvider.notifier);
     showModalBottomSheet(
@@ -531,34 +447,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     if (v != null) {
                       showSaveToPlaylistSheet(context, v);
                     }
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.speed),
-                  title: const Text('Playback speed'),
-                  subtitle: Text(
-                    '${ui.speed}x',
-                    style: const TextStyle(
-                        color: Colors.grey, fontSize: 12),
-                  ),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _showSpeedSheet();
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.high_quality),
-                  title: const Text('Quality'),
-                  subtitle: Text(
-                    ui.currentQualityHeight > 0
-                        ? '${ui.currentQualityHeight}p'
-                        : 'Auto',
-                    style: const TextStyle(
-                        color: Colors.grey, fontSize: 12),
-                  ),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _showQualitySheet();
                   },
                 ),
                 ListTile(
@@ -716,103 +604,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: _isFullscreen
-            ? _buildFullscreenVideo(uiState, player)
-            : Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.stretch,
-                children: [
-                  _buildVideoArea(uiState, player),
-                  Expanded(
-                      child:
-                          _buildMeta(uiState, notifier)),
-                ],
-              ),
-      ),
-    );
-  }
-
-  /// Fullscreen: video fills entire screen.
-  Widget _buildFullscreenVideo(
-      PlayerUiState uiState, Player player) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        _buildVideoAreaFullscreen(uiState, player),
-        // Exit button top-left.
-        Positioned(
-          top: 8,
-          left: 8,
-          child: IconButton(
-            icon: const Icon(Icons.fullscreen_exit,
-                color: Colors.white),
-            onPressed: _toggleFullscreen,
-          ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildVideoArea(uiState, player),
+            Expanded(child: _buildMeta(uiState, notifier)),
+          ],
         ),
-      ],
-    );
-  }
-
-  Widget _buildVideoAreaFullscreen(
-      PlayerUiState uiState, Player player) {
-    final isReady =
-        uiState.status == PlayerStatus.ready;
-    return Container(
-      color: Colors.black,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (uiState.audioOnly && uiState.video != null)
-            _buildAudioArt(uiState)
-          else if (_videoController != null)
-            Video(
-                controller: _videoController!,
-                controls: NoVideoControls),
-          if (isReady)
-            GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: _toggleControls,
-              child: Stack(
-                children: [
-                  if (_showControls)
-                    _buildTopBar(uiState),
-                  if (_showControls)
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: _buildBottomControls(
-                          player, uiState),
-                    ),
-                  if (_showControls)
-                    Center(
-                      child: StreamBuilder<bool>(
-                        stream: player.stream.playing,
-                        builder: (context, snap) {
-                          final playing =
-                              snap.data ?? false;
-                          return IconButton(
-                            iconSize: 64,
-                            onPressed: () => ref
-                                .read(
-                                    playerControllerProvider
-                                        .notifier)
-                                .togglePlayPause(),
-                            icon: Icon(
-                              playing
-                                  ? Icons.pause_circle_filled
-                                  : Icons.play_circle_filled,
-                              color: Colors.white
-                                  .withOpacity(0.9),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                ],
-              ),
-            ),
-        ],
       ),
     );
   }
@@ -1079,60 +877,26 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               children: [
                 _TimeLabel(player: player, current: true),
                 const Spacer(),
+                TextButton(
+                  onPressed: _showSpeedSheet,
+                  child: Text('${uiState.speed}x',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold)),
+                ),
                 StreamBuilder<bool>(
                   stream: player.stream.playing,
                   builder: (context, snap) {
                     final playing = snap.data ?? false;
-                    return Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          tooltip: 'Previous',
-                          onPressed: notifier.hasPrevious
-                              ? notifier.playPrevious
-                              : null,
-                          icon: Icon(
-                            Icons.skip_previous,
-                            color: notifier.hasPrevious
-                                ? Colors.white
-                                : Colors.white30,
-                          ),
-                        ),
-                        Container(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: _accent.withOpacity(0.5),
-                                blurRadius: 20,
-                                spreadRadius: 2,
-                              ),
-                            ],
-                          ),
-                          child: IconButton(
-                            iconSize: 48,
-                            onPressed: notifier.togglePlayPause,
-                            icon: Icon(
-                              playing
-                                  ? Icons.pause_circle_filled
-                                  : Icons.play_circle_filled,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Next',
-                          onPressed: notifier.hasNext
-                              ? notifier.playNext
-                              : null,
-                          icon: Icon(
-                            Icons.skip_next,
-                            color: notifier.hasNext
-                                ? Colors.white
-                                : Colors.white30,
-                          ),
-                        ),
-                      ],
+                    return IconButton(
+                      iconSize: 40,
+                      onPressed: notifier.togglePlayPause,
+                      icon: Icon(
+                        playing
+                            ? Icons.pause_circle_filled
+                            : Icons.play_circle_filled,
+                        color: Colors.white,
+                      ),
                     );
                   },
                 ),
@@ -1143,18 +907,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       color: uiState.sleepRemaining != null
                           ? _accent
                           : Colors.white),
-                ),
-                IconButton(
-                  tooltip: _isFullscreen
-                      ? 'Exit fullscreen'
-                      : 'Fullscreen',
-                  onPressed: _toggleFullscreen,
-                  icon: Icon(
-                    _isFullscreen
-                        ? Icons.fullscreen_exit
-                        : Icons.fullscreen,
-                    color: Colors.white,
-                  ),
                 ),
                 const Spacer(),
                 _TimeLabel(player: player, current: false),
@@ -1179,95 +931,41 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               style: const TextStyle(
                   fontSize: 17, fontWeight: FontWeight.bold)),
           const SizedBox(height: 6),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${formatCount(video.viewCount)} views  •  ${timeAgo(video.uploadDate)}',
-                  style: const TextStyle(
-                      color: Colors.grey, fontSize: 13),
-                ),
-              ),
-            ],
+          Text(
+            '${video.author}  •  ${formatCount(video.viewCount)} views  •  ${timeAgo(video.uploadDate)}',
+            style:
+                const TextStyle(color: Colors.grey, fontSize: 13),
           ),
-          const SizedBox(height: 12),
-          // YouTube-style action row: Share, Download, Save.
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _buildYtAction(
-                  icon: Icons.share,
-                  label: 'Share',
-                  onPressed: () {
-                    // Share handled in 3-dot menu.
-                  },
-                ),
-                const SizedBox(width: 8),
-                _buildYtAction(
-                  icon: Icons.download_outlined,
-                  label: 'Download',
-                  onPressed: () =>
-                      _showDownloadSheet(video),
-                ),
-                const SizedBox(width: 8),
-                _buildYtAction(
-                  icon: Icons.playlist_add,
-                  label: 'Save',
-                  onPressed: () =>
-                      showSaveToPlaylistSheet(
-                          context, video),
-                ),
-                const SizedBox(width: 8),
-                _buildYtAction(
-                  icon: Icons.headphones,
-                  label: uiState.audioOnly
-                      ? 'Video'
-                      : 'Audio',
-                  isActive: uiState.audioOnly,
-                  onPressed: notifier.toggleAudioOnly,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Channel row.
-          _buildChannelRow(video, uiState),
-          const SizedBox(height: 12),
-          // PureTube features row.
+          const SizedBox(height: 14),
           Wrap(
             spacing: 8,
-            runSpacing: 8,
             children: [
-              _buildPremiumChip(
-                icon: Icons.speed,
-                label: '${uiState.speed}x',
-                onPressed: _showSpeedSheet,
+              OutlinedButton.icon(
+                onPressed: notifier.toggleAudioOnly,
+                icon:
+                    const Icon(Icons.headphones, size: 16),
+                label: Text(
+                    uiState.audioOnly ? 'Video mode' : 'Audio only'),
               ),
-              if (uiState.streams != null &&
-                  uiState.streams!.qualities.length > 1)
-                _buildPremiumChip(
-                  icon: Icons.high_quality,
-                  label: uiState.currentQualityHeight > 0
-                      ? '${uiState.currentQualityHeight}p'
-                      : 'Quality',
-                  onPressed: _showQualitySheet,
-                ),
-              _buildPremiumChip(
-                icon: Icons.bedtime,
-                label: uiState.sleepRemaining != null
-                    ? formatDuration(
-                        uiState.sleepRemaining)
-                    : 'Sleep timer',
-                isActive:
-                    uiState.sleepRemaining != null,
+              OutlinedButton.icon(
+                onPressed: _showSpeedSheet,
+                icon: const Icon(Icons.speed, size: 16),
+                label: Text('${uiState.speed}x'),
+              ),
+              OutlinedButton.icon(
                 onPressed: _showSleepSheet,
+                icon: const Icon(Icons.bedtime, size: 16),
+                label: Text(uiState.sleepRemaining != null
+                    ? formatDuration(uiState.sleepRemaining)
+                    : 'Sleep timer'),
               ),
               if (uiState.pipSupported)
-                _buildPremiumChip(
-                  icon: Icons.picture_in_picture_alt,
-                  label: 'PiP',
+                OutlinedButton.icon(
                   onPressed: notifier.enterPip,
+                  icon: const Icon(
+                      Icons.picture_in_picture_alt,
+                      size: 16),
+                  label: const Text('PiP'),
                 ),
             ],
           ),
@@ -1280,235 +978,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 style: const TextStyle(
                     color: Colors.grey, fontSize: 13)),
           ],
-          if (uiState.relatedVideos.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            const Text('Up next',
-                style: TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            ...uiState.relatedVideos.map((v) => _buildRelatedTile(
-                context, v, notifier)),
-          ],
-          // Comments section.
-          const SizedBox(height: 8),
-          const CommentsSection(),
         ],
-      ),
-    );
-  }
-
-  /// YouTube-style action button (Share, Download, Save).
-  Widget _buildYtAction({
-    required IconData icon,
-    required String label,
-    required VoidCallback onPressed,
-    bool isActive = false,
-  }) {
-    return InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          color: isActive
-              ? const Color(0xFF6200EA)
-                  .withOpacity(0.2)
-              : Colors.white.withOpacity(0.08),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon,
-                size: 18,
-                color: isActive
-                    ? const Color(0xFF6200EA)
-                    : Colors.white70),
-            const SizedBox(width: 8),
-            Text(label,
-                style: TextStyle(
-                    color: isActive
-                        ? const Color(0xFF6200EA)
-                        : Colors.white70,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Channel row with Subscribe button.
-  Widget _buildChannelRow(
-      VideoDetails video, PlayerUiState uiState) {
-    return Row(
-      children: [
-        CircleAvatar(
-          radius: 20,
-          backgroundColor:
-              Colors.purple.withOpacity(0.3),
-          child: Text(
-            video.author.isNotEmpty
-                ? video.author[0].toUpperCase()
-                : '?',
-            style: const TextStyle(
-                color: Colors.white, fontSize: 18),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
-            children: [
-              Text(video.author,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14)),
-              const Text('Subscribe for updates',
-                  style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 12)),
-            ],
-          ),
-        ),
-        ElevatedButton(
-          onPressed: () {
-            // Subscribe is UI-only (no YouTube login).
-            ScaffoldMessenger.of(context)
-                .showSnackBar(
-              const SnackBar(
-                  content: Text(
-                      'Subscriptions need YouTube login')),
-            );
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.white,
-            foregroundColor: Colors.black,
-            shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(20)),
-          ),
-          child: const Text('Subscribe'),
-        ),
-      ],
-    );
-  }
-
-  /// Premium chip button with gradient border.
-  Widget _buildPremiumChip({
-    required IconData icon,
-    required String label,
-    required VoidCallback onPressed,
-    bool isActive = false,
-  }) {
-    return InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          gradient: isActive
-              ? const LinearGradient(
-                  colors: [
-                    Color(0xFF6200EA),
-                    Color(0xFF2962FF)
-                  ],
-                )
-              : null,
-          border: Border.all(
-            color: isActive
-                ? Colors.transparent
-                : Colors.white.withOpacity(0.3),
-            width: 1,
-          ),
-          color: isActive
-              ? null
-              : Colors.white.withOpacity(0.06),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 16,
-              color: isActive
-                  ? Colors.white
-                  : const Color(0xFF6200EA),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: isActive
-                    ? Colors.white
-                    : const Color(0xFF6200EA),
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRelatedTile(BuildContext context, VideoDetails v,
-      PlayerController notifier) {    return InkWell(
-      onTap: () => notifier.loadVideo(v.id),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.network(
-                v.thumbnailUrl,
-                width: 140,
-                height: 80,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  width: 140,
-                  height: 80,
-                  color: Colors.grey[900],
-                  child: const Icon(Icons.broken_image,
-                      color: Colors.grey),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(v.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500)),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${v.author} • ${formatCount(v.viewCount)} views',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: Colors.grey, fontSize: 12),
-                  ),
-                  if (v.duration != null)
-                    Text(formatDuration(v.duration),
-                        style: const TextStyle(
-                            color: Colors.grey, fontSize: 12)),
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -1645,21 +1115,12 @@ class _SeekBarPainter extends CustomPainter {
       ..strokeWidth = 4;
     canvas.drawLine(
         Offset(0, y), Offset(w * bufferedFrac, y), buf);
-    // Gradient played bar: purple to blue.
     final played = Paint()
-      ..shader = const LinearGradient(
-        colors: [Color(0xFF6200EA), Color(0xFF2962FF)],
-      ).createShader(Rect.fromLTWH(0, 0, w * playedFrac, 4))
+      ..color = _accent
       ..strokeCap = StrokeCap.round
       ..strokeWidth = 4;
     canvas.drawLine(
         Offset(0, y), Offset(w * playedFrac, y), played);
-    // Glowing knob.
-    canvas.drawCircle(
-        Offset(w * playedFrac, y),
-        9,
-        Paint()
-          ..color = const Color(0xFF6200EA).withOpacity(0.3));
     canvas.drawCircle(
         Offset(w * playedFrac, y), 7, Paint()..color = _accent);
     canvas.drawCircle(
