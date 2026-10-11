@@ -18,6 +18,7 @@ import '../../../../features/library/presentation/screens/playlists_screen.dart'
     show showSaveToPlaylistSheet;
 import '../../domain/entities/playback_models.dart';
 import '../providers/player_controller.dart';
+import '../widgets/comments_section.dart';
 
 class _Gauge {
   final IconData icon;
@@ -715,13 +716,103 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildVideoArea(uiState, player),
-            Expanded(child: _buildMeta(uiState, notifier)),
-          ],
+        child: _isFullscreen
+            ? _buildFullscreenVideo(uiState, player)
+            : Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.stretch,
+                children: [
+                  _buildVideoArea(uiState, player),
+                  Expanded(
+                      child:
+                          _buildMeta(uiState, notifier)),
+                ],
+              ),
+      ),
+    );
+  }
+
+  /// Fullscreen: video fills entire screen.
+  Widget _buildFullscreenVideo(
+      PlayerUiState uiState, Player player) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        _buildVideoAreaFullscreen(uiState, player),
+        // Exit button top-left.
+        Positioned(
+          top: 8,
+          left: 8,
+          child: IconButton(
+            icon: const Icon(Icons.fullscreen_exit,
+                color: Colors.white),
+            onPressed: _toggleFullscreen,
+          ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildVideoAreaFullscreen(
+      PlayerUiState uiState, Player player) {
+    final isReady =
+        uiState.status == PlayerStatus.ready;
+    return Container(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (uiState.audioOnly && uiState.video != null)
+            _buildAudioArt(uiState)
+          else if (_videoController != null)
+            Video(
+                controller: _videoController!,
+                controls: NoVideoControls),
+          if (isReady)
+            GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _toggleControls,
+              child: Stack(
+                children: [
+                  if (_showControls)
+                    _buildTopBar(uiState),
+                  if (_showControls)
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: _buildBottomControls(
+                          player, uiState),
+                    ),
+                  if (_showControls)
+                    Center(
+                      child: StreamBuilder<bool>(
+                        stream: player.stream.playing,
+                        builder: (context, snap) {
+                          final playing =
+                              snap.data ?? false;
+                          return IconButton(
+                            iconSize: 64,
+                            onPressed: () => ref
+                                .read(
+                                    playerControllerProvider
+                                        .notifier)
+                                .togglePlayPause(),
+                            icon: Icon(
+                              playing
+                                  ? Icons.pause_circle_filled
+                                  : Icons.play_circle_filled,
+                              color: Colors.white
+                                  .withOpacity(0.9),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1007,14 +1098,26 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                                 : Colors.white30,
                           ),
                         ),
-                        IconButton(
-                          iconSize: 40,
-                          onPressed: notifier.togglePlayPause,
-                          icon: Icon(
-                            playing
-                                ? Icons.pause_circle_filled
-                                : Icons.play_circle_filled,
-                            color: Colors.white,
+                        Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: _accent.withOpacity(0.5),
+                                blurRadius: 20,
+                                spreadRadius: 2,
+                              ),
+                            ],
+                          ),
+                          child: IconButton(
+                            iconSize: 48,
+                            onPressed: notifier.togglePlayPause,
+                            icon: Icon(
+                              playing
+                                  ? Icons.pause_circle_filled
+                                  : Icons.play_circle_filled,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                         IconButton(
@@ -1084,42 +1187,45 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           const SizedBox(height: 14),
           Wrap(
             spacing: 8,
+            runSpacing: 8,
             children: [
-              OutlinedButton.icon(
+              _buildPremiumChip(
+                icon: Icons.headphones,
+                label: uiState.audioOnly
+                    ? 'Video mode'
+                    : 'Audio only',
+                isActive: uiState.audioOnly,
                 onPressed: notifier.toggleAudioOnly,
-                icon:
-                    const Icon(Icons.headphones, size: 16),
-                label: Text(
-                    uiState.audioOnly ? 'Video mode' : 'Audio only'),
               ),
-              OutlinedButton.icon(
+              _buildPremiumChip(
+                icon: Icons.speed,
+                label: '${uiState.speed}x',
                 onPressed: _showSpeedSheet,
-                icon: const Icon(Icons.speed, size: 16),
-                label: Text('${uiState.speed}x'),
               ),
               if (uiState.streams != null &&
                   uiState.streams!.qualities.length > 1)
-                OutlinedButton.icon(
-                  onPressed: _showQualitySheet,
-                  icon: const Icon(Icons.high_quality, size: 16),
-                  label: Text(uiState.currentQualityHeight > 0
+                _buildPremiumChip(
+                  icon: Icons.high_quality,
+                  label: uiState.currentQualityHeight > 0
                       ? '${uiState.currentQualityHeight}p'
-                      : 'Quality'),
+                      : 'Quality',
+                  onPressed: _showQualitySheet,
                 ),
-              OutlinedButton.icon(
+              _buildPremiumChip(
+                icon: Icons.bedtime,
+                label: uiState.sleepRemaining != null
+                    ? formatDuration(
+                        uiState.sleepRemaining)
+                    : 'Sleep timer',
+                isActive:
+                    uiState.sleepRemaining != null,
                 onPressed: _showSleepSheet,
-                icon: const Icon(Icons.bedtime, size: 16),
-                label: Text(uiState.sleepRemaining != null
-                    ? formatDuration(uiState.sleepRemaining)
-                    : 'Sleep timer'),
               ),
               if (uiState.pipSupported)
-                OutlinedButton.icon(
+                _buildPremiumChip(
+                  icon: Icons.picture_in_picture_alt,
+                  label: 'PiP',
                   onPressed: notifier.enterPip,
-                  icon: const Icon(
-                      Icons.picture_in_picture_alt,
-                      size: 16),
-                  label: const Text('PiP'),
                 ),
             ],
           ),
@@ -1141,14 +1247,76 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             ...uiState.relatedVideos.map((v) => _buildRelatedTile(
                 context, v, notifier)),
           ],
+          // Comments section.
+          const SizedBox(height: 8),
+          const CommentsSection(),
         ],
       ),
     );
   }
 
-  Widget _buildRelatedTile(BuildContext context, VideoDetails v,
-      PlayerController notifier) {
+  /// Premium chip button with gradient border.
+  Widget _buildPremiumChip({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+    bool isActive = false,
+  }) {
     return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: isActive
+              ? const LinearGradient(
+                  colors: [
+                    Color(0xFF6200EA),
+                    Color(0xFF2962FF)
+                  ],
+                )
+              : null,
+          border: Border.all(
+            color: isActive
+                ? Colors.transparent
+                : Colors.white.withOpacity(0.3),
+            width: 1,
+          ),
+          color: isActive
+              ? null
+              : Colors.white.withOpacity(0.06),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: isActive
+                  ? Colors.white
+                  : const Color(0xFF6200EA),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: isActive
+                    ? Colors.white
+                    : const Color(0xFF6200EA),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRelatedTile(BuildContext context, VideoDetails v,
+      PlayerController notifier) {    return InkWell(
       onTap: () => notifier.loadVideo(v.id),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1335,12 +1503,21 @@ class _SeekBarPainter extends CustomPainter {
       ..strokeWidth = 4;
     canvas.drawLine(
         Offset(0, y), Offset(w * bufferedFrac, y), buf);
+    // Gradient played bar: purple to blue.
     final played = Paint()
-      ..color = _accent
+      ..shader = const LinearGradient(
+        colors: [Color(0xFF6200EA), Color(0xFF2962FF)],
+      ).createShader(Rect.fromLTWH(0, 0, w * playedFrac, 4))
       ..strokeCap = StrokeCap.round
       ..strokeWidth = 4;
     canvas.drawLine(
         Offset(0, y), Offset(w * playedFrac, y), played);
+    // Glowing knob.
+    canvas.drawCircle(
+        Offset(w * playedFrac, y),
+        9,
+        Paint()
+          ..color = const Color(0xFF6200EA).withOpacity(0.3));
     canvas.drawCircle(
         Offset(w * playedFrac, y), 7, Paint()..color = _accent);
     canvas.drawCircle(
