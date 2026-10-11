@@ -8,6 +8,10 @@ import 'package:media_kit/media_kit.dart';
 /// Created once in main() via AudioService.init and shared by the whole app,
 /// so playback survives the UI being destroyed.
 class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
+  /// Callbacks for next/previous from notification (set by controller).
+  Future<void> Function()? onSkipNext;
+  Future<void> Function()? onSkipPrevious;
+
   PureTubeAudioHandler() {
     _playingSub = _player.stream.playing.listen((_) => _broadcastState());
     _positionSub = _player.stream.position.listen((_) => _broadcastState());
@@ -74,6 +78,13 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> pause() => _player.pause();
+
+  @override
+  Future<void> skipToNext() => onSkipNext?.call() ?? Future.value();
+
+  @override
+  Future<void> skipToPrevious() =>
+      onSkipPrevious?.call() ?? Future.value();
 
   @override
   Future<void> seek(Duration position) => _player.seek(position);
