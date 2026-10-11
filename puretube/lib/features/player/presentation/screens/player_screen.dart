@@ -15,6 +15,7 @@ import '../../../../core/di/providers.dart';
 import '../../../../core/utils/format.dart';
 import '../../../../features/library/domain/entities/library_models.dart';
 import '../../../../features/library/presentation/providers/library_providers.dart';
+import '../../../../features/library/presentation/screens/downloads_screen.dart';
 import '../../../../features/library/presentation/screens/playlists_screen.dart'
     show showSaveToPlaylistSheet;
 import '../../../ai/ai_summary_section.dart';
@@ -24,12 +25,18 @@ import '../providers/player_controller.dart';
 import '../widgets/live_chat_widget.dart';
 import '../widgets/subtitle_sheet.dart';
 
+enum _GaugeKind { volume, brightness, info }
+
 class _Gauge {
   final IconData icon;
   final String label;
   final double value; // 0..1
+  final _GaugeKind kind;
   const _Gauge(
-      {required this.icon, required this.label, required this.value});
+      {required this.icon,
+      required this.label,
+      required this.value,
+      this.kind = _GaugeKind.info});
 }
 
 class PlayerScreen extends ConsumerStatefulWidget {
@@ -66,6 +73,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _dragOnRightSide = true;
   double? _dragStartVolume; // 0..100
   double? _dragStartBrightness; // 0..1
+  double _lastVolume = 50; // restored by mute toggle
+
+  // video fit mode (fullscreen defaults to cover: fills the display)
+  BoxFit _videoFit = BoxFit.contain;
 
   // horizontal scrub state
   Duration? _scrubStartPosition;
@@ -182,7 +193,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       _isFullscreen = !_isFullscreen;
       // Entering fullscreen: make sure the controls (incl. the exit
       // button) are visible, since auto-hide is disabled there.
-      if (_isFullscreen) _showControls = true;
+      // Fullscreen fills the display (cover); normal mode contains.
+      if (_isFullscreen) {
+        _showControls = true;
+        _videoFit = BoxFit.cover;
+      } else {
+        _videoFit = BoxFit.contain;
+      }
     });
     if (_isFullscreen) {
       await SystemChrome.setEnabledSystemUIMode(
@@ -200,6 +217,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _restartHideTimer();
   }
 
+  /// Cycle video fit: contain -> cover -> fill -> contain.
+  void _cycleVideoFit() {
+    setState(() {
+      _videoFit = _videoFit == BoxFit.contain
+          ? BoxFit.cover
+          : _videoFit == BoxFit.cover
+              ? BoxFit.fill
+              : BoxFit.contain;
+    });
+    _restartHideTimer();
+  }
+
   // ---------------- prev / next ----------------
 
   /// Previous: restart the current video.
@@ -210,41 +239,30 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _restartHideTimer();
   }
 
-  /// Next: play the first Up Next suggestion.
-  Future<void> _playNext() async {
-    final videoId =
-        ref.read(playerControllerProvider).videoId;
-    if (videoId == null) return;
-    try {
-      final related = await ref
-          .read(extractorProvider)
-          .getRelatedVideos(videoId);
-      if (!mounted) return;
-      if (related.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No next video found'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-        return;
-      }
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) =>
-              PlayerScreen(videoId: related.first.id),
+  /// Next: play the first video from the already-loaded Up Next list
+  /// (no extra API call — suggestions come from controller state).
+  void _playNext() {
+    final related =
+        ref.read(playerControllerProvider).relatedVideos;
+    if (related.isEmpty) {
+      // Kick off a reload in the background in case it failed earlier.
+      unawaited(ref
+          .read(playerControllerProvider.notifier)
+          .retryRelated());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No next video found'),
+          duration: Duration(seconds: 2),
         ),
       );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not load next video: $e'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
+      return;
     }
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) =>
+            PlayerScreen(videoId: related.first.id),
+      ),
+    );
     _restartHideTimer();
   }
 
@@ -319,11 +337,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       final v =
           (_dragStartVolume! + delta * 100).clamp(0.0, 100.0);
       player.setVolume(v);
+      if (v > 0) _lastVolume = v;
+      // 0-10% zone shows the mute icon (MX Player style).
       _showGauge(_Gauge(
-        icon: v == 0 ? Icons.volume_off : Icons.volume_up,
-        label: 'Volume ${v.round()}%',
+        icon: v <= 10
+            ? Icons.volume_off
+            : (v <= 50 ? Icons.volume_down : Icons.volume_up),
+        label: v == 0 ? 'Muted' : 'Volume ${v.round()}%',
         value: v / 100,
+        kind: _GaugeKind.volume,
       ));
+      _hideGaugeSoon();
     } else if (!_dragOnRightSide &&
         _dragStartBrightness != null) {
       final b = (_dragStartBrightness! + delta).clamp(0.05, 1.0);
@@ -331,11 +355,57 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         ScreenBrightness().setScreenBrightness(b);
       } catch (_) {}
       _showGauge(_Gauge(
-        icon: Icons.brightness_6,
+        icon: b <= 0.15 ? Icons.brightness_low : Icons.brightness_6,
         label: 'Brightness ${(b * 100).round()}%',
         value: b,
+        kind: _GaugeKind.brightness,
       ));
+      _hideGaugeSoon();
     }
+  }
+
+  /// Set volume from the gauge's mute / full buttons.
+  Future<void> _setVolumeGauge(double v) async {
+    v = v.clamp(0.0, 100.0);
+    await ref.read(mediaKitPlayerProvider).setVolume(v);
+    if (v > 0) _lastVolume = v;
+    _showGauge(_Gauge(
+      icon: v <= 10
+          ? Icons.volume_off
+          : (v <= 50 ? Icons.volume_down : Icons.volume_up),
+      label: v == 0 ? 'Muted' : 'Volume ${v.round()}%',
+      value: v / 100,
+      kind: _GaugeKind.volume,
+    ));
+    _hideGaugeSoon();
+  }
+
+  /// Mute toggle: 0 <-> last non-zero volume.
+  Future<void> _toggleMute() async {
+    final current =
+        ref.read(mediaKitPlayerProvider).state.volume;
+    if (current > 0) {
+      _lastVolume = current;
+      await _setVolumeGauge(0);
+    } else {
+      await _setVolumeGauge(
+          _lastVolume > 0 ? _lastVolume : 50);
+    }
+  }
+
+  /// Set brightness from the gauge's min / max buttons.
+  Future<void> _setBrightnessGauge(double b) async {
+    b = b.clamp(0.05, 1.0);
+    try {
+      await ScreenBrightness().setScreenBrightness(b);
+    } catch (_) {}
+    _showGauge(_Gauge(
+      icon: b <= 0.15 ? Icons.brightness_low : Icons.brightness_6,
+      label: 'Brightness ${(b * 100).round()}%',
+      value: b,
+      kind: _GaugeKind.brightness,
+    ));
+    _hideGaugeSoon();
   }
 
   // ---------------- horizontal drag: scrub ----------------
@@ -385,6 +455,88 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   // ---------------- gauge overlay ----------------
+
+  /// MX Player-style gauge: volume gets mute + full-volume buttons,
+  /// brightness gets min + max buttons. Tapping the speaker icon
+  /// toggles mute.
+  Widget _buildGauge() {
+    final g = _gauge!;
+    Widget iconRow;
+    if (g.kind == _GaugeKind.volume) {
+      iconRow = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: 'Mute',
+            onPressed: () => _setVolumeGauge(0),
+            icon: const Icon(Icons.volume_off,
+                color: Colors.white70, size: 22),
+          ),
+          GestureDetector(
+            onTap: _toggleMute,
+            child: Icon(g.icon,
+                color: Colors.white, size: 32),
+          ),
+          IconButton(
+            tooltip: 'Full volume',
+            onPressed: () => _setVolumeGauge(100),
+            icon: const Icon(Icons.volume_up,
+                color: Colors.white70, size: 22),
+          ),
+        ],
+      );
+    } else if (g.kind == _GaugeKind.brightness) {
+      iconRow = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: 'Minimum brightness',
+            onPressed: () => _setBrightnessGauge(0.05),
+            icon: const Icon(Icons.brightness_low,
+                color: Colors.white70, size: 22),
+          ),
+          Icon(g.icon, color: Colors.white, size: 32),
+          IconButton(
+            tooltip: 'Maximum brightness',
+            onPressed: () => _setBrightnessGauge(1.0),
+            icon: const Icon(Icons.brightness_high,
+                color: Colors.white70, size: 22),
+          ),
+        ],
+      );
+    } else {
+      iconRow =
+          Icon(g.icon, color: Colors.white, size: 28);
+    }
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: 22, vertical: 14),
+        decoration: BoxDecoration(
+            color: Colors.black87,
+            borderRadius: BorderRadius.circular(12)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            iconRow,
+            const SizedBox(height: 8),
+            SizedBox(
+              width: 150,
+              child: LinearProgressIndicator(
+                value: g.value,
+                backgroundColor: Colors.white24,
+                color: _accent,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(g.label,
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
 
   void _showGauge(_Gauge gauge) {
     _gaugeTimer?.cancel();
@@ -726,12 +878,41 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     Navigator.pop(ctx);
                     notifier.startDownload(o, video);
                     ScaffoldMessenger.of(context)
-                        .showSnackBar(const SnackBar(
-                      content: Text('Download started'),
-                      duration: Duration(seconds: 2),
+                        .showSnackBar(SnackBar(
+                      content:
+                          const Text('Download started'),
+                      duration:
+                          const Duration(seconds: 3),
+                      action: SnackBarAction(
+                        label: 'View',
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  const DownloadsScreen(),
+                            ),
+                          );
+                        },
+                      ),
                     ));
                   },
                 ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(
+                    Icons.download_done,
+                    color: Colors.white70),
+                title: const Text('View downloads'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          const DownloadsScreen(),
+                    ),
+                  );
+                },
+              ),
             ],
           ),
         );
@@ -804,7 +985,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             else if (_videoController != null)
               Video(
                   controller: _videoController!,
-                  controls: NoVideoControls),
+                  controls: NoVideoControls,
+                  fit: _videoFit),
             if (isReady)
               GestureDetector(
                 behavior: HitTestBehavior.translucent,
@@ -860,38 +1042,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   ),
                 ),
               ),
-            if (_gauge != null)
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 22, vertical: 14),
-                  decoration: BoxDecoration(
-                      color: Colors.black87,
-                      borderRadius:
-                          BorderRadius.circular(12)),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(_gauge!.icon,
-                          color: Colors.white, size: 28),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: 150,
-                        child: LinearProgressIndicator(
-                          value: _gauge!.value,
-                          backgroundColor: Colors.white24,
-                          color: _accent,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(_gauge!.label,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12)),
-                    ],
-                  ),
-                ),
-              ),
+            if (_gauge != null) _buildGauge(),
             if (_showControls && isReady) ...[
               Positioned(
                 top: 0,
@@ -1071,6 +1222,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             icon:
                 const Icon(Icons.more_vert, color: Colors.white),
           ),
+          // Fullscreen only: cycle video fit (contain/cover/fill).
+          if (_isFullscreen)
+            IconButton(
+              tooltip: 'Video fit: ${_videoFit.name}',
+              onPressed: _cycleVideoFit,
+              icon: const Icon(Icons.aspect_ratio,
+                  color: Colors.white),
+            ),
         ],
       ),
     );
@@ -1165,9 +1324,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(video.title,
-              style: const TextStyle(
-                  fontSize: 17, fontWeight: FontWeight.bold)),
+          InkWell(
+            onTap: () => _DescriptionSheet.show(context, video),
+            borderRadius: BorderRadius.circular(4),
+            child: Text(video.title,
+                style: const TextStyle(
+                    fontSize: 17, fontWeight: FontWeight.bold)),
+          ),
           const SizedBox(height: 6),
           InkWell(
             onTap: () {
@@ -1189,17 +1352,47 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           const SizedBox(height: 14),
           _buildActionRow(uiState, notifier),
           const SizedBox(height: 16),
-          if (video.id.isNotEmpty)
-            _UpNextSection(videoId: video.id),
           if (video.description.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            const Text('Description',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 6),
-            Text(video.description,
-                style: const TextStyle(
-                    color: Colors.grey, fontSize: 13)),
+            InkWell(
+              onTap: () => _DescriptionSheet.show(context, video),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF212121),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment:
+                      CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${formatCount(video.viewCount)} views • ${timeAgo(video.uploadDate)}',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      video.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: Colors.grey, fontSize: 13),
+                    ),
+                    const SizedBox(height: 2),
+                    const Text('...more',
+                        style: TextStyle(
+                            color: Colors.grey, fontSize: 13)),
+                  ],
+                ),
+              ),
+            ),
           ],
+          if (video.id.isNotEmpty)
+            const _UpNextSection(),
           const SizedBox(height: 16),
           AiSummarySection(
             title: video.title,
@@ -1291,206 +1484,521 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 }
 
-/// "Up Next" suggestions below the player, loaded from the
-/// extractor's related-videos search. Shimmer while loading,
-/// retry button on empty/error.
-class _UpNextSection extends ConsumerStatefulWidget {
-  final String videoId;
-  const _UpNextSection({required this.videoId});
+/// "Up Next" suggestions below the player. Reads the already-loaded
+/// related videos from the player controller (same list the Next button
+/// plays from) — no extra fetch. Shimmer while loading, retry on error.
+class _UpNextSection extends ConsumerWidget {
+  const _UpNextSection();
 
   @override
-  ConsumerState<_UpNextSection> createState() =>
-      _UpNextSectionState();
-}
-
-class _UpNextSectionState extends ConsumerState<_UpNextSection> {
-  Future<List<VideoDetails>>? _future;
-
-  @override
-  void initState() {
-    super.initState();
-    _future =
-        ref.read(extractorProvider).getRelatedVideos(widget.videoId);
-  }
-
-  @override
-  void didUpdateWidget(covariant _UpNextSection oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.videoId != widget.videoId) {
-      setState(() {
-        _future = ref
-            .read(extractorProvider)
-            .getRelatedVideos(widget.videoId);
-      });
-    }
-  }
-
-  void _retry() {
-    setState(() {
-      _future =
-          ref.read(extractorProvider).getRelatedVideos(widget.videoId);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<VideoDetails>>(
-      future: _future,
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Up Next',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: Colors.white)),
-              const SizedBox(height: 8),
-              for (var i = 0; i < 3; i++)
-                Padding(
-                  padding:
-                      const EdgeInsets.only(bottom: 10),
-                  child: Shimmer.fromColors(
-                    baseColor: const Color(0xFF1A1A1A),
-                    highlightColor: const Color(0xFF2E2E2E),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 120,
-                          height: 68,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius:
-                                BorderRadius.circular(8),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Container(
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius:
-                                  BorderRadius.circular(6),
-                            ),
-                          ),
-                        ),
-                      ],
+  Widget build(BuildContext context, WidgetRef ref) {
+    final uiState = ref.watch(playerControllerProvider);
+    final videos = uiState.relatedVideos;
+    if (videos.isEmpty && !uiState.relatedFailed) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Up Next',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.white)),
+          const SizedBox(height: 8),
+          for (var i = 0; i < 3; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Shimmer.fromColors(
+                baseColor: const Color(0xFF1A1A1A),
+                highlightColor: const Color(0xFF2E2E2E),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 120,
+                      height: 68,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Container(
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-            ],
-          );
-        }
-        final videos = snap.data ?? [];
-        if (videos.isEmpty) {
-          return Row(
-            children: [
-              const Expanded(
-                child: Text('Up Next',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: Colors.white)),
               ),
-              TextButton(
-                onPressed: _retry,
-                child: const Text('Retry'),
-              ),
-            ],
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Up Next',
+            ),
+        ],
+      );
+    }
+    if (videos.isEmpty) {
+      return Row(
+        children: [
+          const Expanded(
+            child: Text('Up Next',
                 style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
                     color: Colors.white)),
-            const SizedBox(height: 8),
-            for (final v in videos)
-              InkWell(
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        PlayerScreen(videoId: v.id),
+          ),
+          TextButton(
+            onPressed: () => ref
+                .read(playerControllerProvider.notifier)
+                .retryRelated(),
+            child: const Text('Retry'),
+          ),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Up Next',
+            style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: Colors.white)),
+        const SizedBox(height: 8),
+        for (final v in videos)
+          InkWell(
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => PlayerScreen(videoId: v.id),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: CachedNetworkImage(
+                      imageUrl: v.thumbnailUrl,
+                      width: 120,
+                      height: 68,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => Container(
+                        width: 120,
+                        height: 68,
+                        color: const Color(0xFF1A1A1A),
+                      ),
+                      errorWidget: (_, __, ___) => Container(
+                        width: 120,
+                        height: 68,
+                        color: const Color(0xFF1A1A1A),
+                        child: const Icon(Icons.broken_image,
+                            color: Colors.grey, size: 20),
+                      ),
+                    ),
                   ),
-                ),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.only(bottom: 10),
-                  child: Row(
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        Text(v.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500)),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${v.author}'
+                          '${v.viewCount != null ? ' • ${formatCount(v.viewCount)} views' : ''}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.grey, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// YouTube-style description bottom sheet: opened by tapping the video
+/// title or the collapsed description box. Dark theme (#0F0F0F / #212121).
+class _DescriptionSheet extends ConsumerStatefulWidget {
+  final VideoDetails video;
+  const _DescriptionSheet({required this.video});
+
+  static void show(BuildContext context, VideoDetails video) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0F0F0F),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => _DescriptionSheet(video: video),
+    );
+  }
+
+  @override
+  ConsumerState<_DescriptionSheet> createState() =>
+      _DescriptionSheetState();
+}
+
+class _DescriptionSheetState
+    extends ConsumerState<_DescriptionSheet> {
+  bool _descExpanded = false;
+  ChannelInfo? _channel;
+  bool _subscribed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribed = ref
+        .read(subscriptionRepositoryProvider)
+        .isSubscribed(widget.video.channelId);
+    _loadChannel();
+  }
+
+  Future<void> _loadChannel() async {
+    final id = widget.video.channelId;
+    if (id.isEmpty) return;
+    try {
+      final ch =
+          await ref.read(extractorProvider).getChannel(id);
+      if (!mounted) return;
+      setState(() {
+        _channel = ch;
+        _subscribed = ref
+            .read(subscriptionRepositoryProvider)
+            .isSubscribed(id);
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _toggleSubscribe() async {
+    final repo = ref.read(subscriptionRepositoryProvider);
+    final id = widget.video.channelId;
+    try {
+      if (_subscribed) {
+        await repo.unsubscribe(id);
+      } else {
+        await repo.subscribe(
+          channelId: id,
+          name: _channel?.title ?? widget.video.author,
+          subscriberCount: _channel?.subscriberCount,
+        );
+      }
+      if (mounted) setState(() => _subscribed = !_subscribed);
+    } catch (_) {}
+  }
+
+  String _fullDate(DateTime? dt) {
+    if (dt == null) return '–';
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
+  }
+
+  Widget _statCard(IconData icon, String value) {
+    return Expanded(
+      child: Container(
+        padding:
+            const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF212121),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: Colors.white, size: 20),
+            const SizedBox(height: 6),
+            Text(value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final video = widget.video;
+    return DraggableScrollableSheet(
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return SingleChildScrollView(
+          controller: scrollController,
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Description',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close,
+                        color: Colors.white),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(video.title,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _statCard(
+                      Icons.thumb_up,
+                      video.likeCount != null
+                          ? formatCount(video.likeCount)
+                          : '–'),
+                  const SizedBox(width: 8),
+                  _statCard(Icons.remove_red_eye,
+                      formatCount(video.viewCount)),
+                  const SizedBox(width: 8),
+                  _statCard(Icons.calendar_today,
+                      _fullDate(video.uploadDate)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (video.description.isNotEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF212121),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
                     crossAxisAlignment:
                         CrossAxisAlignment.start,
                     children: [
-                      ClipRRect(
-                        borderRadius:
-                            BorderRadius.circular(8),
-                        child: CachedNetworkImage(
-                          imageUrl: v.thumbnailUrl,
-                          width: 120,
-                          height: 68,
-                          fit: BoxFit.cover,
-                          placeholder: (_, __) => Container(
-                            width: 120,
-                            height: 68,
-                            color:
-                                const Color(0xFF1A1A1A),
-                          ),
-                          errorWidget: (_, __, ___) =>
-                              Container(
-                            width: 120,
-                            height: 68,
-                            color:
-                                const Color(0xFF1A1A1A),
-                            child: const Icon(
-                                Icons.broken_image,
-                                color: Colors.grey,
-                                size: 20),
-                          ),
-                        ),
+                      Text(
+                        video.description,
+                        maxLines: _descExpanded ? null : 4,
+                        overflow: _descExpanded
+                            ? TextOverflow.visible
+                            : TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            height: 1.4),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
-                          children: [
-                            Text(v.title,
-                                maxLines: 2,
-                                overflow:
-                                    TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 13,
-                                    fontWeight:
-                                        FontWeight.w500)),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${v.author}'
-                              '${v.viewCount != null ? ' • ${formatCount(v.viewCount)} views' : ''}',
-                              maxLines: 1,
-                              overflow:
-                                  TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 12),
-                            ),
-                          ],
+                      const SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: () => setState(
+                            () => _descExpanded = !_descExpanded),
+                        child: Text(
+                          _descExpanded
+                              ? 'Show less'
+                              : 'See more',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600),
                         ),
                       ),
                     ],
                   ),
                 ),
+              const SizedBox(height: 20),
+              const Text('Transcript',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              const Text('Follow along using the transcript.',
+                  style:
+                      TextStyle(color: Colors.grey, fontSize: 13)),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content:
+                          Text('Transcript not available'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(
+                      color: Color(0xFF3F3F3F)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+                child: const Text('Show transcript',
+                    style: TextStyle(color: Colors.white)),
               ),
-          ],
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundColor:
+                        const Color(0xFF3F3F3F),
+                    backgroundImage: _channel?.logoUrl != null
+                        ? CachedNetworkImageProvider(
+                            _channel!.logoUrl)
+                        : null,
+                    child: _channel?.logoUrl == null
+                        ? Text(
+                            video.author.isNotEmpty
+                                ? video.author[0]
+                                    .toUpperCase()
+                                : '?',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _channel?.title ?? video.author,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600),
+                        ),
+                        Text(
+                          _channel?.subscriberCount != null
+                              ? '${formatCount(_channel!.subscriberCount)} subscribers'
+                              : 'Channel',
+                          style: const TextStyle(
+                              color: Colors.grey, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ElevatedButton(
+                    onPressed: _toggleSubscribe,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _subscribed
+                          ? const Color(0xFF3F3F3F)
+                          : Colors.white,
+                      foregroundColor: _subscribed
+                          ? Colors.white
+                          : Colors.black,
+                      shape: RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(20),
+                      ),
+                    ),
+                    child: Text(_subscribed
+                        ? 'Subscribed'
+                        : 'Subscribe'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        if (video.channelId.isNotEmpty) {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => ChannelScreen(
+                                  channelId:
+                                      video.channelId),
+                            ),
+                          );
+                        }
+                      },
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(
+                            color: Color(0xFF3F3F3F)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(20),
+                        ),
+                      ),
+                      child: const Text('Videos',
+                          style:
+                              TextStyle(color: Colors.white)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        final name =
+                            _channel?.title ?? video.author;
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(
+                          SnackBar(
+                            content: Text('About: $name'),
+                            duration:
+                                const Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(
+                            color: Color(0xFF3F3F3F)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(20),
+                        ),
+                      ),
+                      child: const Text('About',
+                          style:
+                              TextStyle(color: Colors.white)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         );
       },
     );
   }
 }
+
 
 /// Combined "0:02 / 45:56" time label, bottom-left of the video.
 /// Clock-style mm:ss (or h:mm:ss) used by the bottom time labels.
