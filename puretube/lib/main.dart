@@ -53,7 +53,7 @@ Future<void> main() async {
         androidNotificationChannelName: 'PureTube playback',
         androidNotificationOngoing: true,
         androidShowNotificationBadge: false,
-        androidStopForegroundOnPause: true,
+        androidStopForegroundOnPause: false,
       ),
     ) as PureTubeAudioHandler;
   } catch (e) {
