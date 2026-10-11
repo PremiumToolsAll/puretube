@@ -1405,6 +1405,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     color: Colors.white),
                 onPressed: _showMoreSheet,
               ),
+              PressIconButton(
+                tooltip: 'Video mode',
+                icon: const Icon(Icons.videocam,
+                    color: Colors.white),
+                onPressed: () => ref
+                    .read(playerControllerProvider.notifier)
+                    .toggleAudioOnly(),
+              ),
             ],
           ),
         ),
