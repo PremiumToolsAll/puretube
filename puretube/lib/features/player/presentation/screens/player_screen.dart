@@ -225,8 +225,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final player = ref.read(mediaKitPlayerProvider);
     final delta = -d.delta.dy / 280; // ~280px swipe covers the full range
     if (_dragOnRightSide && _dragStartVolume != null) {
-      final v =
-          (_dragStartVolume! + delta * 100).clamp(0.0, 100.0);
+      final raw = (_dragStartVolume! + delta * 100).clamp(0.0, 100.0);
+      // Snap to 10% steps.
+      final v = (raw / 10).round() * 10.0;
       player.setVolume(v);
       _showGauge(_Gauge(
         icon: v == 0 ? Icons.volume_off : Icons.volume_up,
@@ -235,7 +236,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       ));
     } else if (!_dragOnRightSide &&
         _dragStartBrightness != null) {
-      final b = (_dragStartBrightness! + delta).clamp(0.05, 1.0);
+      final raw = (_dragStartBrightness! + delta).clamp(0.05, 1.0);
+      // Snap to 10% steps.
+      final b = ((raw * 10).round() / 10).clamp(0.05, 1.0);
       try {
         ScreenBrightness().setScreenBrightness(b);
       } catch (_) {}
