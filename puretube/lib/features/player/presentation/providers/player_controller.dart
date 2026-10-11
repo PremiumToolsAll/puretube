@@ -285,7 +285,8 @@ class PlayerController extends Notifier<PlayerUiState>
     }
   }
 
-  /// Switch to a different muxed quality, preserving position.
+  /// Switch to a different quality, preserving position.
+  /// Supports both muxed (<=720p) and video-only (1080p+) streams.
   Future<void> setQuality(QualityOption quality) async {
     if (state.status != PlayerStatus.ready ||
         state.videoId == null ||
@@ -295,25 +296,29 @@ class PlayerController extends Notifier<PlayerUiState>
     if (quality.height == state.currentQualityHeight) return;
     try {
       final position = _handler.player.state.position;
-      await _handler.switchStream(quality.url);
-      await _handler.seek(position);
-      state = state.copyWith(
-        currentQualityHeight: quality.height,
-        streams: state.streams,
+      await _handler.switchStream(
+        quality.url,
+        audioUrl: quality.audioUrl,
+        resumeAt: position,
       );
-      // Update the stored muxed URL so expiry recovery uses new quality.
+      // Update the stored stream info.
       final s = state.streams;
       if (s != null) {
         state = state.copyWith(
+          currentQualityHeight: quality.height,
           streams: PlaybackStreams(
             videoId: s.videoId,
-            muxedUrl: quality.url,
+            muxedUrl: quality.isVideoOnly ? s.muxedUrl : quality.url,
             muxedHeight: quality.height,
             qualities: s.qualities,
             audioOnlyUrl: s.audioOnlyUrl,
             audioBitrate: s.audioBitrate,
             fetchedAt: s.fetchedAt,
           ),
+        );
+      } else {
+        state = state.copyWith(
+          currentQualityHeight: quality.height,
         );
       }
     } on PureTubeException catch (e) {
