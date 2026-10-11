@@ -313,8 +313,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _restartHideTimer();
   }
 
-  /// Next: play the first video from the already-loaded Up Next list
-  /// (no extra API call — suggestions come from controller state).
+  /// Next: load the first video from the already-loaded Up Next list
+  /// in-place (no route push — preserves fullscreen/rotation state).
   void _playNext() {
     final related =
         ref.read(playerControllerProvider).relatedVideos;
@@ -331,12 +331,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       );
       return;
     }
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) =>
-            PlayerScreen(videoId: related.first.id),
-      ),
-    );
+    // Load in the same screen: keeps fullscreen, fit mode, and controls.
+    ref
+        .read(playerControllerProvider.notifier)
+        .loadVideo(related.first.id);
     _restartHideTimer();
   }
 
