@@ -1,21 +1,25 @@
-import 'package:android_intent_plus/android_intent.dart';
+import 'package:flutter/services.dart';
 
 /// Broadcast intents for automation apps (Tasker, MacroDroid).
+/// Uses a MethodChannel to the native Android side.
 class AutomationService {
   AutomationService._();
   static final AutomationService instance =
       AutomationService._();
+
+  static const _channel = MethodChannel(
+      'com.puretube.app/automation');
 
   static const _prefix = 'com.puretube';
 
   Future<void> _send(
       String action, Map<String, dynamic>? extras) async {
     try {
-      final intent = AndroidIntent(
-        action: action,
-        arguments: extras,
-      );
-      await intent.sendBroadcast();
+      await _channel.invokeMethod(
+          'sendBroadcast', {
+        'action': action,
+        'extras': extras ?? {},
+      });
     } catch (_) {}
   }
 
