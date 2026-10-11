@@ -11,7 +11,7 @@ class PureTubeException implements Exception {
   const PureTubeException(this.message, [this.cause]);
 
   @override
-  String toString() => 'PureTubeException: $message'
+  String toString() => 'PureTubeException: $message';
 }
 
 /// YouTube data layer — talks DIRECTLY to YouTube's InnerTube API via
@@ -40,7 +40,11 @@ class YoutubeService {
   YoutubeExplode _client(YoutubeApiClient apiClient) =>
       _clients.putIfAbsent(
         apiClient,
-        () => YoutubeExplode(YoutubeHttpClient(), apiClient),
+        // NOTE: youtube_explode_dart 2.5.3's YoutubeExplode takes only an
+        // optional YoutubeHttpClient — the InnerTube client (ANDROID/WEB/TV/
+        // IOS) is selected per-call (e.g. getManifest(ytClients: [...])),
+        // so the extra constructor arg was removed.
+        () => YoutubeExplode(YoutubeHttpClient()),
       );
 
   /// Runs [action] against each client in fallback order.
@@ -80,9 +84,12 @@ class YoutubeService {
     );
   }
 
-  static const List<YoutubeApiClient> _fallbackOrder = [
+  // NOTE: not `const` — YoutubeApiClient.ios is `static final` (not const).
+  // NOTE: there is no YoutubeApiClient.web in 2.5.3 — `safari` is the WEB
+  // client (its payload clientName is 'WEB'), so it takes the WEB slot.
+  static final List<YoutubeApiClient> _fallbackOrder = [
     YoutubeApiClient.android,
-    YoutubeApiClient.web,
+    YoutubeApiClient.safari,
     YoutubeApiClient.tv,
     YoutubeApiClient.ios,
   ];
@@ -95,14 +102,17 @@ class YoutubeService {
     int limit = 25,
   }) =>
       _withFallback('search', (yt) async {
-        final results = await yt.search.search(query);
+        // NOTE: youtube_explode_dart 2.5.3 paginates via nextPage()
+        // (returns null when there are no more results), not nextBatch().
         final videos = <Video>[];
-        await for (final batch in results.nextBatch(limit)) {
-          for (final e in batch) {
-            if (e is Video) videos.add(e);
+        VideoSearchList? page = await yt.search.search(query);
+        while (page != null && videos.length < limit) {
+          for (final e in page) {
             if (videos.length >= limit) break;
+            videos.add(e);
           }
           if (videos.length >= limit) break;
+          page = await page.nextPage();
         }
         return videos;
       });
@@ -130,17 +140,14 @@ class YoutubeService {
         for (final q in queries) {
           if (out.length >= limit) break;
           try {
-            final results = await yt.search.search(q);
-            await for (final batch
-                in results.nextBatch(limit)) {
-              for (final e in batch) {
-                if (e is Video &&
-                    seen.add(e.id.value)) {
-                  out.add(e);
-                  if (out.length >= limit) break;
-                }
+            VideoSearchList? page = await yt.search.search(q);
+            while (page != null && out.length < limit) {
+              for (final e in page) {
+                if (out.length >= limit) break;
+                if (seen.add(e.id.value)) out.add(e);
               }
               if (out.length >= limit) break;
+              page = await page.nextPage();
             }
           } catch (_) {
             // One trending query failing must not kill the feed.
@@ -148,7 +155,8 @@ class YoutubeService {
           }
         }
         if (out.isEmpty) {
-          throw const TransientFailureException(
+          // NOTE: TransientFailureException has no const constructor.
+          throw TransientFailureException(
               'Empty trending response');
         }
         return out;
@@ -169,9 +177,12 @@ class YoutubeService {
   Future<List<Video>> related(Video video,
       {int limit = 15}) =>
       _withFallback('related', (yt) async {
+        // NOTE: getRelatedVideos returns null when no related videos
+        // were found — null-check before take().
         final related = await yt.videos
             .getRelatedVideos(video)
             .timeout(const Duration(seconds: 20));
+        if (related == null) return <Video>[];
         return related
             .take(limit)
             .toList(growable: false);
@@ -208,7 +219,9 @@ class YoutubeService {
   Future<List<ClosedCaptionTrackInfo>> captionTracks(
           String videoId) =>
       _withFallback('captionTracks', (yt) async {
-        final manifest = await yt.videos.closedCaptionsClient
+        // NOTE: in youtube_explode_dart 2.5.3 the captions API is
+        // yt.videos.closedCaptions (ClosedCaptionClient on VideoClient).
+        final manifest = await yt.videos.closedCaptions
             .getManifest(videoId);
         return manifest.tracks.toList(growable: false);
       });
@@ -218,7 +231,7 @@ class YoutubeService {
   ) =>
       _withFallback(
           'captions',
-          (yt) => yt.videos.closedCaptionsClient
+          (yt) => yt.videos.closedCaptions
               .get(track)
               .then((c) => c.captions.toList()));
 
