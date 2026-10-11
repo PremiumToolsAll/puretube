@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-import '../domain/entities/models.dart';
+import '../../domain/entities/models.dart';
 
 /// SponsorBlock integration (sponsor.ajay.app).
 /// Auto-skip sponsors, intros, outros, etc.
