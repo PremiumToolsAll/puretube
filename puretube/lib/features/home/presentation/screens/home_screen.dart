@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shimmer/shimmer.dart';
 
 import '../../../player/presentation/providers/player_controller.dart';
+import '../../../search/presentation/widgets/search_filter_sheet.dart';
+import '../../../shorts/presentation/screens/shorts_screen.dart';
 import '../providers/search_provider.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/video_card.dart';
@@ -42,6 +44,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     ref.read(searchControllerProvider.notifier).search(q);
   }
 
+  Future<void> _openFilters() async {
+    final current =
+        ref.read(searchControllerProvider).filters;
+    final picked =
+        await SearchFilterSheet.show(context, current);
+    if (picked != null && mounted) {
+      await ref
+          .read(searchControllerProvider.notifier)
+          .setFilters(picked);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final search = ref.watch(searchControllerProvider);
@@ -60,6 +74,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               fontWeight: FontWeight.bold),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Shorts',
+            icon: const Icon(
+                Icons.slow_motion_video_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                  builder: (_) =>
+                      const ShortsScreen()),
+            ),
+          ),
           IconButton(
             tooltip: 'Downloads',
             icon: const Icon(Icons.download_outlined),
@@ -90,36 +114,78 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: TextField(
-              controller: _searchController,
-              textInputAction: TextInputAction.search,
-              onSubmitted: _search,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Search YouTube…',
-                hintStyle:
-                    const TextStyle(color: Colors.grey),
-                prefixIcon:
-                    const Icon(Icons.search, color: Colors.grey),
-                suffixIcon: IconButton(
-                  icon:
-                      const Icon(Icons.clear, color: Colors.grey),
-                  onPressed: () {
-                    _searchController.clear();
-                    ref
-                        .read(searchControllerProvider.notifier)
-                        .clear();
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    textInputAction:
+                        TextInputAction.search,
+                    onSubmitted: _search,
+                    style: const TextStyle(
+                        color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Search YouTube…',
+                      hintStyle: const TextStyle(
+                          color: Colors.grey),
+                      prefixIcon: const Icon(
+                          Icons.search,
+                          color: Colors.grey),
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.clear,
+                            color: Colors.grey),
+                        onPressed: () {
+                          _searchController.clear();
+                          ref
+                              .read(
+                                  searchControllerProvider
+                                      .notifier)
+                              .clear();
+                        },
+                      ),
+                      filled: true,
+                      fillColor:
+                          const Color(0xFF121212),
+                      contentPadding:
+                          const EdgeInsets.symmetric(
+                              vertical: 0),
+                      border:
+                          OutlineInputBorder(
+                        borderRadius:
+                            BorderRadius.circular(
+                                24),
+                        borderSide:
+                            BorderSide.none,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Consumer(
+                  builder: (_, ref, __) {
+                    final hasFilters = !ref
+                        .watch(
+                            searchControllerProvider)
+                        .filters
+                        .isEmpty;
+                    return IconButton(
+                      tooltip: 'Search filters',
+                      style: IconButton.styleFrom(
+                        backgroundColor:
+                            hasFilters
+                                ? const Color(
+                                    0xFF6200EA)
+                                : const Color(
+                                    0xFF121212),
+                      ),
+                      icon: const Icon(
+                          Icons.tune,
+                          color: Colors.white),
+                      onPressed: _openFilters,
+                    );
                   },
                 ),
-                filled: true,
-                fillColor: const Color(0xFF121212),
-                contentPadding:
-                    const EdgeInsets.symmetric(vertical: 0),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
-                ),
-              ),
+              ],
             ),
           ),
           SizedBox(
