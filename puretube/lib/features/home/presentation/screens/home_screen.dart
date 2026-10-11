@@ -6,8 +6,9 @@ import '../../../player/presentation/providers/player_controller.dart';
 import '../../../search/presentation/widgets/search_filter_sheet.dart';
 import '../../../shorts/presentation/screens/shorts_screen.dart';
 import '../providers/search_provider.dart';
-import '../widgets/mini_player.dart';
+import '../../../player/presentation/widgets/mini_player_bar.dart';
 import '../widgets/video_card.dart';
+import '../../../player/presentation/widgets/popup_player.dart';
 import '../../../library/presentation/screens/downloads_screen.dart';
 import '../../../library/presentation/screens/history_screen.dart';
 import '../../../library/presentation/screens/playlists_screen.dart';
@@ -87,7 +88,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final search = ref.watch(searchControllerProvider);
     final player = ref.watch(playerControllerProvider);
     final showMini =
-        player.status == PlayerStatus.ready && player.video != null;
+        player.status == PlayerStatus.ready &&
+            player.video != null &&
+            !ref.watch(popupVisibleProvider);
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -249,7 +252,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ],
       ),
       bottomNavigationBar:
-          showMini ? const MiniPlayer() : null,
+          showMini ? const MiniPlayerBar() : null,
     );
   }
 
