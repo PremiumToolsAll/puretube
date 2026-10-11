@@ -36,23 +36,6 @@ class VideoDetails {
       );
 }
 
-/// A quality option: muxed (video+audio) or video-only (1080p+ with separate audio).
-class QualityOption {
-  final String label; // "720p", "1080p", "4K", ...
-  final int height;
-  final String url;
-  final String? audioUrl; // set for video-only streams (1080p+)
-
-  const QualityOption({
-    required this.label,
-    required this.height,
-    required this.url,
-    this.audioUrl,
-  });
-
-  bool get isVideoOnly => audioUrl != null;
-}
-
 class PlaybackStreams {
   /// YouTube-issued stream URLs expire after ~6 hours. We treat them as
   /// stale a little early so refresh happens before a 403 mid-playback.
@@ -61,7 +44,6 @@ class PlaybackStreams {
   final String videoId;
   final String muxedUrl; // audio+video in one URL, up to 720p
   final int muxedHeight;
-  final List<QualityOption> qualities; // all muxed options, best first
   final String audioOnlyUrl; // highest-bitrate audio, for background mode
   final int audioBitrate;
   final DateTime fetchedAt;
@@ -70,7 +52,6 @@ class PlaybackStreams {
     required this.videoId,
     required this.muxedUrl,
     required this.muxedHeight,
-    this.qualities = const [],
     required this.audioOnlyUrl,
     required this.audioBitrate,
     required this.fetchedAt,
@@ -91,54 +72,5 @@ class DownloadOption {
     required this.url,
     required this.audioOnly,
     this.sizeBytes,
-  });
-}
-
-/// A YouTube comment.
-class CommentInfo {
-  final String author;
-  final String text;
-  final int likeCount;
-  final String publishedTime;
-  final String authorAvatarUrl;
-  final int replyCount;
-
-  const CommentInfo({
-    required this.author,
-    required this.text,
-    required this.likeCount,
-    required this.publishedTime,
-    required this.authorAvatarUrl,
-    required this.replyCount,
-  });
-}
-
-/// A YouTube channel.
-class ChannelInfo {
-  final String id;
-  final String title;
-  final String logoUrl;
-  final String? bannerUrl;
-  final int subscriberCount;
-  final String description;
-
-  const ChannelInfo({
-    required this.id,
-    required this.title,
-    required this.logoUrl,
-    this.bannerUrl,
-    required this.subscriberCount,
-    required this.description,
-  });
-}
-
-/// A video chapter.
-class ChapterInfo {
-  final String title;
-  final Duration start;
-
-  const ChapterInfo({
-    required this.title,
-    required this.start,
   });
 }
