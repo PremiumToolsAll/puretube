@@ -35,7 +35,28 @@ class SearchState {
 
 class SearchController extends Notifier<SearchState> {
   @override
-  SearchState build() => const SearchState();
+  SearchState build() {
+    // Auto-load trending on startup.
+    Future.microtask(() => loadTrending());
+    return const SearchState();
+  }
+
+  Future<void> loadTrending() async {
+    state = state.copyWith(status: SearchStatus.loading, query: '');
+    try {
+      final results =
+          await ref.read(extractorProvider).getTrendingVideos();
+      state = state.copyWith(
+          status: SearchStatus.done, results: results);
+    } on PureTubeException catch (e) {
+      state = state.copyWith(
+          status: SearchStatus.error, errorMessage: e.message);
+    } catch (e) {
+      state = state.copyWith(
+          status: SearchStatus.error,
+          errorMessage: 'Failed to load: $e');
+    }
+  }
 
   Future<void> search(String query) async {
     final q = query.trim();
