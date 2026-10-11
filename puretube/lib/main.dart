@@ -56,7 +56,6 @@ Future<void> main() async {
         // (and its controls) stays alive and responsive.
         androidStopForegroundOnPause: false,
         androidNotificationClickStartsActivity: true,
-        androidNotificationOngoing: true,
         // Rewind/fast-forward buttons seek ±10s via handler.rewind/fastForward.
         fastForwardInterval: Duration(seconds: 10),
         rewindInterval: Duration(seconds: 10),
