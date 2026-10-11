@@ -6,6 +6,7 @@ import 'core/l10n/app_localizations.dart';
 import 'core/theme/app_theme.dart';
 import 'features/home/presentation/screens/home_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
+import 'features/player/presentation/widgets/popup_player.dart';
 import 'features/settings/presentation/screens/settings_screen.dart';
 
 class PureTubeApp extends ConsumerStatefulWidget {
@@ -45,6 +46,13 @@ class _PureTubeAppState extends ConsumerState<PureTubeApp> {
       localizationsDelegates:
           AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
+      // Floating popup player floats above every screen.
+      builder: (context, child) => Stack(
+        children: [
+          child!,
+          const PopupPlayerHost(),
+        ],
+      ),
       home: _showOnboarding == null
           ? const Scaffold(
               backgroundColor: Colors.black,
