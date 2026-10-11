@@ -609,6 +609,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   },
                 ),
                 ListTile(
+                  leading: const Icon(Icons.bedtime),
+                  title: const Text('Sleep timer'),
+                  subtitle: Text(ui.sleepRemaining != null
+                      ? 'Ends in ${formatDuration(ui.sleepRemaining)}'
+                      : 'Stop playback after a while'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showSleepSheet();
+                  },
+                ),
+                ListTile(
                   leading:
                       const Icon(Icons.share_outlined),
                   title: const Text('Share'),
@@ -741,6 +752,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final player = ref.watch(mediaKitPlayerProvider);
     final notifier = ref.read(playerControllerProvider.notifier);
 
+    // Fullscreen: video fills the whole landscape screen with the same
+    // clean controls; tap still toggles their visibility.
+    if (_isFullscreen) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: _buildVideoArea(uiState, player, fillScreen: true),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -755,11 +775,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
-  Widget _buildVideoArea(PlayerUiState uiState, Player player) {
+  Widget _buildVideoArea(PlayerUiState uiState, Player player,
+      {bool fillScreen = false}) {
     final isReady = uiState.status == PlayerStatus.ready;
-    return AspectRatio(
-      aspectRatio: 16 / 9,
-      child: Container(
+    final content = Container(
         color: Colors.black,
         child: Stack(
           fit: StackFit.expand,
@@ -874,8 +893,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             ],
           ],
         ),
-      ),
     );
+    // Fullscreen (landscape): the video fills the whole screen; the same
+    // clean controls render on top and tap still toggles them.
+    if (fillScreen) return SizedBox.expand(child: content);
+    return AspectRatio(aspectRatio: 16 / 9, child: content);
   }
 
   Widget _buildAudioArt(PlayerUiState uiState) {
@@ -1055,7 +1077,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               iconSize: 48,
               onPressed: _playPrevious,
               icon: const Icon(Icons.skip_previous,
-                  color: Colors.white70),
+                  color: Colors.white),
             ),
             const SizedBox(width: 24),
             IconButton(
@@ -1073,7 +1095,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               iconSize: 48,
               onPressed: _playNext,
               icon: const Icon(Icons.skip_next,
-                  color: Colors.white70),
+                  color: Colors.white),
             ),
           ],
         );
@@ -1081,6 +1103,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
+  /// Bottom controls: one compact row —
+  /// current time | seekbar | total time | fullscreen.
   Widget _buildBottomControls(
       Player player, PlayerUiState uiState) {
     return Container(
@@ -1091,44 +1115,27 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           colors: [Colors.black87, Colors.transparent],
         ),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _PlayerSeekBar(player: player),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
-            child: Row(
-              children: [
-                // "0:02 / 45:56" bottom-left.
-                _CombinedTimeLabel(player: player),
-                const Spacer(),
-                IconButton(
-                  tooltip: 'Sleep timer',
-                  onPressed: _showSleepSheet,
-                  icon: Icon(Icons.bedtime,
-                      color: uiState.sleepRemaining != null
-                          ? _accent
-                          : Colors.white),
-                ),
-                // Fullscreen bottom-right.
-                IconButton(
-                  tooltip: _isFullscreen
-                      ? 'Exit fullscreen'
-                      : 'Fullscreen',
-                  onPressed: _toggleFullscreen,
-                  icon: Icon(
-                    _isFullscreen
-                        ? Icons.fullscreen_exit
-                        : Icons.fullscreen,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 0, 6),
+        child: Row(
+          children: [
+            _TimeLabel(player: player, current: true),
+            Expanded(child: _PlayerSeekBar(player: player)),
+            _TimeLabel(player: player, current: false),
+            IconButton(
+              tooltip: _isFullscreen
+                  ? 'Exit fullscreen'
+                  : 'Fullscreen',
+              onPressed: _toggleFullscreen,
+              icon: Icon(
+                _isFullscreen
+                    ? Icons.fullscreen_exit
+                    : Icons.fullscreen,
+                color: Colors.white,
+              ),
             ),
-          ),
-          // Thin red progress bar at the very bottom edge.
-          _ThinProgressBar(player: player),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1470,9 +1477,19 @@ class _UpNextSectionState extends ConsumerState<_UpNextSection> {
 }
 
 /// Combined "0:02 / 45:56" time label, bottom-left of the video.
-class _CombinedTimeLabel extends StatelessWidget {
+/// Clock-style mm:ss (or h:mm:ss) used by the bottom time labels.
+String _clock(Duration d) {
+  final h = d.inHours;
+  final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+  final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+  return h > 0 ? '$h:$m:$s' : '$m:$s';
+}
+
+/// Bottom-row time label: current position on the left, total on the right.
+class _TimeLabel extends StatelessWidget {
   final Player player;
-  const _CombinedTimeLabel({required this.player});
+  final bool current;
+  const _TimeLabel({required this.player, required this.current});
 
   @override
   Widget build(BuildContext context) {
@@ -1485,46 +1502,9 @@ class _CombinedTimeLabel extends StatelessWidget {
           builder: (context, posSnap) {
             final position = posSnap.data ?? Duration.zero;
             return Text(
-              '${formatDuration(position)} / ${formatDuration(duration)}',
+              _clock(current ? position : duration),
               style: const TextStyle(
-                  color: Colors.white70, fontSize: 12),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-/// Thin red progress bar pinned to the very bottom edge of the video.
-class _ThinProgressBar extends StatelessWidget {
-  final Player player;
-  const _ThinProgressBar({required this.player});
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<Duration>(
-      stream: player.stream.duration,
-      builder: (context, durSnap) {
-        final total =
-            durSnap.data?.inMilliseconds ?? 0;
-        return StreamBuilder<Duration>(
-          stream: player.stream.position,
-          builder: (context, posSnap) {
-            final pos =
-                posSnap.data?.inMilliseconds ?? 0;
-            final frac = total > 0
-                ? (pos / total).clamp(0.0, 1.0)
-                : 0.0;
-            return SizedBox(
-              height: 3,
-              child: LinearProgressIndicator(
-                value: frac,
-                backgroundColor: Colors.white24,
-                valueColor:
-                    const AlwaysStoppedAnimation<Color>(
-                        Colors.red),
-              ),
+                  color: Colors.white, fontSize: 13),
             );
           },
         );
@@ -1624,7 +1604,7 @@ class _PlayerSeekBarState extends State<_PlayerSeekBar> {
 class _SeekBarPainter extends CustomPainter {
   final double playedFrac;
   final double bufferedFrac;
-  static const _accent = Color(0xFF6200EA);
+  static const _track = Colors.amber;
 
   _SeekBarPainter(
       {required this.playedFrac, required this.bufferedFrac});
@@ -1645,13 +1625,13 @@ class _SeekBarPainter extends CustomPainter {
     canvas.drawLine(
         Offset(0, y), Offset(w * bufferedFrac, y), buf);
     final played = Paint()
-      ..color = _accent
+      ..color = _track
       ..strokeCap = StrokeCap.round
       ..strokeWidth = 4;
     canvas.drawLine(
         Offset(0, y), Offset(w * playedFrac, y), played);
     canvas.drawCircle(
-        Offset(w * playedFrac, y), 7, Paint()..color = _accent);
+        Offset(w * playedFrac, y), 7, Paint()..color = _track);
     canvas.drawCircle(
         Offset(w * playedFrac, y),
         7,
