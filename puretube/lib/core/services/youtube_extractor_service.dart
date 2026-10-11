@@ -252,13 +252,33 @@ class YoutubeExtractorService {
     }
   }
 
-  /// Returns videos related to [videoId] for the "Up next" section.
-  /// Uses search with the video title as query (fallback approach).
-  Future<List<VideoDetails>> getRelatedVideos(String videoId,
-      {int limit = 15}) async {
-    // TODO: Use proper related videos API when available.
-    // For now return empty - the section will be hidden.
-    return [];
+  /// Returns videos related to [video] for the "Up next" section.
+  /// Searches by author + title keywords since youtube_explode_dart 2.x
+  /// has no dedicated related-videos API.
+  Future<List<VideoDetails>> getRelatedVideos(VideoDetails video,
+      {int limit = 12}) async {
+    await _requireNetwork();
+    try {
+      // Search by author for related content.
+      final results = await _yt.search
+          .search(video.author)
+          .timeout(const Duration(seconds: 20));
+      final list = results
+          .whereType<Video>()
+          .where((v) => v.id.value != video.id)
+          .take(limit)
+          .map((v) {
+        try {
+          return VideoDetails.fromExplode(v);
+        } catch (_) {
+          return null;
+        }
+      }).whereType<VideoDetails>()
+          .toList();
+      return list;
+    } catch (e) {
+      return [];
+    }
   }
 
   /// Returns trending/popular videos for the home feed.
