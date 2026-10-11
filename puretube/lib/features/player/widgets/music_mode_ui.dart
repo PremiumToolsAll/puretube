@@ -9,7 +9,7 @@ import 'package:media_kit/media_kit.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/format.dart';
 import '../../player/domain/entities/models.dart';
-import '../providers/player_controller.dart';
+import '../presentation/providers/player_controller.dart';
 
 /// Full-screen audio player UI (Music Mode).
 class MusicModeUI extends StatefulWidget {
