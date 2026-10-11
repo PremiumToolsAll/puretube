@@ -42,25 +42,31 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> loadMedia({
     required MediaItem mediaItem,
     required String streamUrl,
+    String? audioUrl,
     Duration? startAt,
     double speed = 1.0,
   }) async {
     this.mediaItem.add(mediaItem);
     await _player.setRate(speed);
-    await _player.open(
-      Media(streamUrl, start: startAt ?? Duration.zero),
-      play: true,
-    );
+    final media = audioUrl != null
+        ? Media(streamUrl,
+            start: startAt ?? Duration.zero,
+            extras: {'audio-file': audioUrl})
+        : Media(streamUrl, start: startAt ?? Duration.zero);
+    await _player.open(media, play: true);
     _broadcastState();
   }
 
   /// Swap the underlying URL (audio<->video, or a refreshed URL after
   /// expiry) without losing position or play state.
   Future<void> switchStream(String streamUrl,
-      {Duration? resumeAt}) async {
+      {String? audioUrl, Duration? resumeAt}) async {
     final pos = resumeAt ?? _player.state.position;
     final wasPlaying = _player.state.playing;
-    await _player.open(Media(streamUrl, start: pos), play: wasPlaying);
+    final media = audioUrl != null
+        ? Media(streamUrl, start: pos, extras: {'audio-file': audioUrl})
+        : Media(streamUrl, start: pos);
+    await _player.open(media, play: wasPlaying);
   }
 
   @override
