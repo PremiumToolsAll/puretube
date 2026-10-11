@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/theme/app_theme.dart';
-import 'tabs/downloads_tab.dart';
-import 'tabs/history_tab.dart';
-import 'tabs/playlists_tab.dart';
-import 'tabs/saved_tab.dart';
-import 'tabs/subscriptions_tab.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../tabs/downloads_tab.dart';
+import '../tabs/history_tab.dart';
+import '../tabs/playlists_tab.dart';
+import '../tabs/saved_tab.dart';
+import '../tabs/subscriptions_tab.dart';
 
 /// Library screen with 5 tabs.
 class LibraryScreen extends StatelessWidget {
