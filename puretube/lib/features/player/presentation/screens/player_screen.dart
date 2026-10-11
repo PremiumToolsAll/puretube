@@ -39,6 +39,69 @@ class _Gauge {
       this.kind = _GaugeKind.info});
 }
 
+/// iPhone-style slim vertical pill indicator.
+///
+/// 48dp wide × 132dp tall. Dark translucent (#1C1C1E @ 90%) background,
+/// white fill rising from the bottom proportional to [value] (0..1),
+/// with the kind icon (headphones / sun) centered in dark grey.
+/// Fill height animates smoothly on value changes.
+class _IosPill extends StatelessWidget {
+  final double value;
+  final _GaugeKind kind;
+
+  const _IosPill({required this.value, required this.kind});
+
+  @override
+  Widget build(BuildContext context) {
+    const width = 48.0;
+    const height = 132.0;
+    const radius = 14.0;
+    final clamped = value.clamp(0.0, 1.0);
+    final icon = kind == _GaugeKind.volume
+        ? Icons.headphones
+        : Icons.wb_sunny;
+    // Muted state: show the muted icon variant.
+    final showMuted =
+        kind == _GaugeKind.volume && clamped <= 0.0;
+
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: const Color(0x1C1C1E).withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: Stack(
+          children: [
+            // White fill from the bottom.
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOut,
+                height: height * clamped,
+                color: Colors.white,
+              ),
+            ),
+            // Centered icon in dark grey.
+            Center(
+              child: Icon(
+                showMuted ? Icons.volume_off : icon,
+                size: 26,
+                color: const Color(0xFF3A3A3C),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class PlayerScreen extends ConsumerStatefulWidget {
   final String videoId;
   final Duration? initialPosition;
@@ -464,58 +527,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   // ---------------- gauge overlay ----------------
 
-  /// MX Player-style gauge: volume gets mute + full-volume buttons,
-  /// brightness gets min + max buttons. Tapping the speaker icon
-  /// toggles mute.
+  /// iPhone-style vertical pill indicator for volume/brightness.
+  /// Slim pill (48dp wide × 132dp tall), dark translucent background,
+  /// white fill rising from the bottom, icon centered in dark grey.
+  /// The scrub-preview ("info") kind keeps the old centered box style.
   Widget _buildGauge() {
     final g = _gauge!;
-    Widget iconRow;
-    if (g.kind == _GaugeKind.volume) {
-      iconRow = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            tooltip: 'Mute',
-            onPressed: () => _setVolumeGauge(0),
-            icon: const Icon(Icons.volume_off,
-                color: Colors.white70, size: 22),
-          ),
-          GestureDetector(
-            onTap: _toggleMute,
-            child: Icon(g.icon,
-                color: Colors.white, size: 32),
-          ),
-          IconButton(
-            tooltip: 'Full volume',
-            onPressed: () => _setVolumeGauge(100),
-            icon: const Icon(Icons.volume_up,
-                color: Colors.white70, size: 22),
-          ),
-        ],
-      );
-    } else if (g.kind == _GaugeKind.brightness) {
-      iconRow = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            tooltip: 'Minimum brightness',
-            onPressed: () => _setBrightnessGauge(0.05),
-            icon: const Icon(Icons.brightness_low,
-                color: Colors.white70, size: 22),
-          ),
-          Icon(g.icon, color: Colors.white, size: 32),
-          IconButton(
-            tooltip: 'Maximum brightness',
-            onPressed: () => _setBrightnessGauge(1.0),
-            icon: const Icon(Icons.brightness_high,
-                color: Colors.white70, size: 22),
-          ),
-        ],
-      );
-    } else {
-      iconRow =
-          Icon(g.icon, color: Colors.white, size: 28);
+    if (g.kind == _GaugeKind.volume ||
+        g.kind == _GaugeKind.brightness) {
+      return Center(child: _IosPill(value: g.value, kind: g.kind));
     }
+    // Scrub preview keeps the compact box style.
     return Center(
       child: Container(
         padding: const EdgeInsets.symmetric(
@@ -526,7 +548,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            iconRow,
+            Icon(g.icon, color: Colors.white, size: 28),
             const SizedBox(height: 8),
             SizedBox(
               width: 150,
@@ -553,7 +575,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   void _hideGaugeSoon() {
     _gaugeTimer?.cancel();
-    _gaugeTimer = Timer(const Duration(milliseconds: 800), () {
+    _gaugeTimer = Timer(const Duration(milliseconds: 1500), () {
       if (mounted) setState(() => _gauge = null);
     });
   }
@@ -2742,6 +2764,18 @@ class _PlayerSeekBar extends ConsumerStatefulWidget {
 class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
   bool _dragging = false;
   double _dragFrac = 0;
+  final _barKey = GlobalKey();
+
+  double _fracFromGlobal(Offset globalPos) {
+    final box =
+        _barKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return 0;
+    final local = box.globalToLocal(globalPos);
+    final width = box.size.width;
+    if (width <= 0) return 0;
+    // Account for the 12dp horizontal padding.
+    return ((local.dx - 12) / (width - 24)).clamp(0.0, 1.0);
+  }
 
   double _fracFromDx(double dx) {
     final width = context.size?.width ?? 1;
@@ -2795,29 +2829,36 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
                     : 0.0;
                 final frac =
                     _dragging ? _dragFrac : playedFrac;
-                return GestureDetector(
+                // Listener (raw pointer events) instead of GestureDetector:
+                // bypasses the gesture arena so horizontal drags on the
+                // seekbar can't be stolen by the video-area scrub/volume
+                // recognizers behind it.
+                return Listener(
                   behavior: HitTestBehavior.opaque,
-                  onHorizontalDragStart: (d) => setState(() {
-                    _dragging = true;
-                    _dragFrac =
-                        _fracFromDx(d.localPosition.dx);
-                  }),
-                  onHorizontalDragUpdate: (d) => setState(() =>
-                      _dragFrac =
-                          _fracFromDx(d.localPosition.dx)),
-                  onHorizontalDragEnd: (_) async {
-                    final frac = _dragFrac;
+                  onPointerDown: (e) {
+                    setState(() {
+                      _dragging = true;
+                      _dragFrac = _fracFromGlobal(e.position);
+                    });
+                  },
+                  onPointerMove: (e) {
+                    if (!_dragging) return;
+                    setState(() =>
+                        _dragFrac = _fracFromGlobal(e.position));
+                  },
+                  onPointerUp: (_) async {
+                    final f = _dragFrac;
                     setState(() => _dragging = false);
-                    await _seekToFrac(frac, duration);
+                    await _seekToFrac(f, duration);
                   },
-                  onTapDown: (d) async {
-                    await _seekToFrac(
-                        _fracFromDx(d.localPosition.dx), duration);
-                  },
+                  onPointerCancel: (_) =>
+                      setState(() => _dragging = false),
                   child: Container(
-                    height: 30,
+                    key: _barKey,
+                    height: 36,
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12),
+                    color: Colors.transparent,
                     child: CustomPaint(
                       painter: _SeekBarPainter(
                         playedFrac: frac,
