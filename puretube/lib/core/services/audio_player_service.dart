@@ -84,14 +84,22 @@ class PureTubeAudioHandler extends BaseAudioHandler
   }) async {
     mediaItem.add(item);
     await _player.setRate(speed);
-    final media = Media(
-      streamUrl,
-      start: startAt,
-      // media_kit native audio track for DASH video-only streams.
-      extras:
-          audioUrl != null ? {'audio-file': audioUrl} : null,
+    // NOTE: media_kit ignores Media.extras['audio-file'] — the DASH audio
+    // track must be attached via the mpv 'audio-file' property instead,
+    // otherwise video-only streams (1080p/1440p/4K) play SILENT.
+    await _player.open(
+      Media(streamUrl, start: startAt),
+      play: true,
     );
-    await _player.open(media, play: true);
+    // NOTE: setProperty is defined on NativePlayer (not Player) in
+    // media_kit — access it via _player.platform with an `is` guard so
+    // the DASH external-audio attachment keeps working on Android/iOS/
+    // desktop and is a no-op on web.
+    final platform = _player.platform;
+    if (platform is NativePlayer) {
+      await platform.setProperty(
+          'audio-file', audioUrl ?? 'no');
+    }
     _broadcast();
   }
 
@@ -105,15 +113,16 @@ class PureTubeAudioHandler extends BaseAudioHandler
     final pos = resumeAt ?? _player.state.position;
     final wasPlaying = _player.state.playing;
     await _player.open(
-      Media(
-        streamUrl,
-        start: pos,
-        extras: audioUrl != null
-            ? {'audio-file': audioUrl}
-            : null,
-      ),
+      Media(streamUrl, start: pos),
       play: wasPlaying,
     );
+    // 'no' clears a previously attached external audio track when
+    // switching back to a muxed stream.
+    final platform = _player.platform;
+    if (platform is NativePlayer) {
+      await platform.setProperty(
+          'audio-file', audioUrl ?? 'no');
+    }
     _broadcast();
   }
 
