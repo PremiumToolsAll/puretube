@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../library/presentation/providers/library_providers.dart';
+import '../../../../main.dart';
 
 /// null = follow the system language.
 final localeProvider = StateProvider<Locale?>((ref) => null);
@@ -261,6 +262,24 @@ class SettingsScreen extends ConsumerWidget {
             subtitle: const Text('PureTube v1.0.0',
                 style: TextStyle(color: Colors.grey)),
             onTap: () => _showAbout(context),
+          ),
+          const Divider(color: Color(0xFF1A1A1A)),
+          // Background playback diagnostic.
+          ListTile(
+            leading: Icon(
+                audioServiceReady
+                    ? Icons.check_circle
+                    : Icons.error,
+                color: audioServiceReady
+                    ? Colors.green
+                    : Colors.red),
+            title: const Text('Background service',
+                style: TextStyle(color: Colors.white)),
+            subtitle: Text(
+                audioServiceReady
+                    ? 'Running — notifications should work'
+                    : 'NOT running — background will fail',
+                style: const TextStyle(color: Colors.grey)),
           ),
         ],
       ),
