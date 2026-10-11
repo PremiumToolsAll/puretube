@@ -56,11 +56,22 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
 
   /// Swap the underlying URL (audio<->video, or a refreshed URL after
   /// expiry) without losing position or play state.
+  ///
+  /// [audioUrl] attaches a separate audio track via mpv's 'audio-file'
+  /// property — required for video-only DASH streams (1080p/1440p/2160p),
+  /// which would otherwise play SILENT. Pass null (or switch back to a
+  /// muxed URL without audioUrl) to clear it with 'no'.
   Future<void> switchStream(String streamUrl,
-      {Duration? resumeAt}) async {
+      {String? audioUrl, Duration? resumeAt}) async {
     final pos = resumeAt ?? _player.state.position;
     final wasPlaying = _player.state.playing;
     await _player.open(Media(streamUrl, start: pos), play: wasPlaying);
+    // setProperty is defined on NativePlayer (not Player) in media_kit —
+    // guard with `is` so this is a no-op on web.
+    final platform = _player.platform;
+    if (platform is NativePlayer) {
+      await platform.setProperty('audio-file', audioUrl ?? 'no');
+    }
   }
 
   @override
