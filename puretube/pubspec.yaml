@@ -10,6 +10,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
 
   # State management
   flutter_riverpod: ^2.4.9
@@ -48,6 +50,11 @@ dependencies:
   # UI polish
   google_fonts: ^6.1.0
   shimmer: ^3.0.0
+  smooth_page_indicator: ^1.2.0
+  shared_preferences: ^2.3.2
+
+  # Crash reporting (works without DSN; user adds real DSN later)
+  sentry_flutter: ^8.14.0
 
 dev_dependencies:
   flutter_test:
@@ -56,3 +63,4 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  generate: true
