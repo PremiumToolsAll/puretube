@@ -162,6 +162,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   void _restartHideTimer() {
     _hideTimer?.cancel();
+    // In fullscreen the exit button must stay reachable: no auto-hide,
+    // the user toggles controls manually by tapping the video.
+    if (_isFullscreen) return;
     _hideTimer = Timer(const Duration(seconds: 4), () {
       if (mounted) setState(() => _showControls = false);
     });
@@ -175,7 +178,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // ---------------- fullscreen ----------------
 
   Future<void> _toggleFullscreen() async {
-    setState(() => _isFullscreen = !_isFullscreen);
+    setState(() {
+      _isFullscreen = !_isFullscreen;
+      // Entering fullscreen: make sure the controls (incl. the exit
+      // button) are visible, since auto-hide is disabled there.
+      if (_isFullscreen) _showControls = true;
+    });
     if (_isFullscreen) {
       await SystemChrome.setEnabledSystemUIMode(
           SystemUiMode.immersiveSticky);
@@ -753,11 +761,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final notifier = ref.read(playerControllerProvider.notifier);
 
     // Fullscreen: video fills the whole landscape screen with the same
-    // clean controls; tap still toggles their visibility.
+    // clean controls; tap still toggles their visibility. The system back
+    // button/gesture exits fullscreen instead of closing the player, so
+    // the user always has a way out.
     if (_isFullscreen) {
-      return Scaffold(
-        backgroundColor: Colors.black,
-        body: _buildVideoArea(uiState, player, fillScreen: true),
+      return PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _toggleFullscreen();
+        },
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: _buildVideoArea(uiState, player, fillScreen: true),
+        ),
       );
     }
 
