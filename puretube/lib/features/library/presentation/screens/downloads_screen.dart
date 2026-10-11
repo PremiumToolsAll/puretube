@@ -134,12 +134,18 @@ class _DownloadTile extends ConsumerWidget {
   String _statusLabel() => switch (record.status) {
         DownloadStatus.queued => 'Queued',
         DownloadStatus.downloading =>
-          '${(record.progress * 100).round()}%',
+          '${(record.progress * 100).round()}% • ${_formatSpeed(record.speedMbps)}',
         DownloadStatus.paused => 'Paused',
         DownloadStatus.completed => 'Completed',
         DownloadStatus.failed => 'Failed',
         DownloadStatus.canceled => 'Canceled',
       };
+
+  String _formatSpeed(double mbps) {
+    if (mbps < 0.1) return '0 Mbps';
+    if (mbps < 10) return '${mbps.toStringAsFixed(1)} Mbps';
+    return '${mbps.round()} Mbps';
+  }
 
   String _fileSize(int bytes) {
     if (bytes >= 1 << 30) {
