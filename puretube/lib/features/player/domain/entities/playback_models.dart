@@ -36,6 +36,19 @@ class VideoDetails {
       );
 }
 
+/// A single muxed (video+audio) quality option.
+class QualityOption {
+  final String label; // "720p", "480p", ...
+  final int height;
+  final String url;
+
+  const QualityOption({
+    required this.label,
+    required this.height,
+    required this.url,
+  });
+}
+
 class PlaybackStreams {
   /// YouTube-issued stream URLs expire after ~6 hours. We treat them as
   /// stale a little early so refresh happens before a 403 mid-playback.
@@ -44,6 +57,7 @@ class PlaybackStreams {
   final String videoId;
   final String muxedUrl; // audio+video in one URL, up to 720p
   final int muxedHeight;
+  final List<QualityOption> qualities; // all muxed options, best first
   final String audioOnlyUrl; // highest-bitrate audio, for background mode
   final int audioBitrate;
   final DateTime fetchedAt;
@@ -52,6 +66,7 @@ class PlaybackStreams {
     required this.videoId,
     required this.muxedUrl,
     required this.muxedHeight,
+    this.qualities = const [],
     required this.audioOnlyUrl,
     required this.audioBitrate,
     required this.fetchedAt,
