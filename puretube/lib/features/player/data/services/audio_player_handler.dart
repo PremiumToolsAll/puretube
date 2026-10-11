@@ -127,17 +127,21 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
     playbackState.add(
       playbackState.value.copyWith(
         controls: [
+          MediaControl.skipToPrevious,
           MediaControl.rewind,
           if (playing) MediaControl.pause else MediaControl.play,
           MediaControl.fastForward,
+          MediaControl.skipToNext,
         ],
         systemActions: const {
           MediaAction.seek,
           MediaAction.seekForward,
           MediaAction.seekBackward,
           MediaAction.setSpeed,
+          MediaAction.skipToNext,
+          MediaAction.skipToPrevious,
         },
-        androidCompactActionIndices: const [1],
+        androidCompactActionIndices: const [1, 2, 3],
         processingState: _mapProcessingState(),
         playing: playing,
         updatePosition: _player.state.position,
