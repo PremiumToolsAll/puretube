@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/format.dart';
 import '../providers/player_controller.dart';
+import 'subtitle_widgets.dart';
 import 'seek_bar.dart';
 
 /// Top overlay bar: back, title, PiP, popup, more.
@@ -50,6 +52,7 @@ class PlayerTopBar extends StatelessWidget {
                 style: AppTheme.body.copyWith(
                     color: Colors.white)),
           ),
+          _CcButton(),
           IconButton(
             icon: const Icon(
                 Icons
@@ -226,6 +229,28 @@ class PlayerBottomBar extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// CC button with active state.
+class _CcButton extends ConsumerWidget {
+  @override
+  Widget build(
+      BuildContext context, WidgetRef ref) {
+    final ui =
+        ref.watch(playerControllerProvider);
+    final notifier = ref
+        .read(playerControllerProvider.notifier);
+    return IconButton(
+      icon: Icon(
+          Icons.closed_caption_outlined,
+          color: ui.activeSubtitle != null
+              ? AppTheme.primary
+              : Colors.white),
+      tooltip: 'Subtitles',
+      onPressed: () => SubtitleSheet.show(
+          context, notifier, ui),
     );
   }
 }
