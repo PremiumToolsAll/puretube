@@ -114,6 +114,29 @@ class SearchController extends Notifier<SearchState> {
     }
   }
 
+  /// Loads the default home feed on app startup.
+  /// youtube_explode_dart has no trending API, so a broad popular
+  /// query is used; results are shown with an empty query string.
+  Future<void> loadTrending() async {
+    if (state.status == SearchStatus.loading) return;
+    state =
+        state.copyWith(status: SearchStatus.loading, query: '');
+    try {
+      final results = await ref
+          .read(extractorProvider)
+          .searchVideos('trending videos', limit: 30);
+      state = state.copyWith(
+          status: SearchStatus.done, results: results);
+    } on PureTubeException catch (e) {
+      state = state.copyWith(
+          status: SearchStatus.error, errorMessage: e.message);
+    } catch (e) {
+      state = state.copyWith(
+          status: SearchStatus.error,
+          errorMessage: 'Could not load home feed: $e');
+    }
+  }
+
   void clear() => state = const SearchState();
 }
 
