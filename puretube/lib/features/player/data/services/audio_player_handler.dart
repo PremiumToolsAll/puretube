@@ -8,10 +8,6 @@ import 'package:media_kit/media_kit.dart';
 /// Created once in main() via AudioService.init and shared by the whole app,
 /// so playback survives the UI being destroyed.
 class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
-  /// Callbacks for next/previous from notification (set by controller).
-  Future<void> Function()? onSkipNext;
-  Future<void> Function()? onSkipPrevious;
-
   PureTubeAudioHandler() {
     _playingSub = _player.stream.playing.listen((_) => _broadcastState());
     _positionSub = _player.stream.position.listen((_) => _broadcastState());
@@ -46,31 +42,25 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> loadMedia({
     required MediaItem mediaItem,
     required String streamUrl,
-    String? audioUrl,
     Duration? startAt,
     double speed = 1.0,
   }) async {
     this.mediaItem.add(mediaItem);
     await _player.setRate(speed);
-    final media = audioUrl != null
-        ? Media(streamUrl,
-            start: startAt ?? Duration.zero,
-            extras: {'audio-file': audioUrl})
-        : Media(streamUrl, start: startAt ?? Duration.zero);
-    await _player.open(media, play: true);
+    await _player.open(
+      Media(streamUrl, start: startAt ?? Duration.zero),
+      play: true,
+    );
     _broadcastState();
   }
 
   /// Swap the underlying URL (audio<->video, or a refreshed URL after
   /// expiry) without losing position or play state.
   Future<void> switchStream(String streamUrl,
-      {String? audioUrl, Duration? resumeAt}) async {
+      {Duration? resumeAt}) async {
     final pos = resumeAt ?? _player.state.position;
     final wasPlaying = _player.state.playing;
-    final media = audioUrl != null
-        ? Media(streamUrl, start: pos, extras: {'audio-file': audioUrl})
-        : Media(streamUrl, start: pos);
-    await _player.open(media, play: wasPlaying);
+    await _player.open(Media(streamUrl, start: pos), play: wasPlaying);
   }
 
   @override
@@ -78,13 +68,6 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> pause() => _player.pause();
-
-  @override
-  Future<void> skipToNext() => onSkipNext?.call() ?? Future.value();
-
-  @override
-  Future<void> skipToPrevious() =>
-      onSkipPrevious?.call() ?? Future.value();
 
   @override
   Future<void> seek(Duration position) => _player.seek(position);
@@ -127,21 +110,17 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
     playbackState.add(
       playbackState.value.copyWith(
         controls: [
-          MediaControl.skipToPrevious,
           MediaControl.rewind,
           if (playing) MediaControl.pause else MediaControl.play,
           MediaControl.fastForward,
-          MediaControl.skipToNext,
         ],
         systemActions: const {
           MediaAction.seek,
           MediaAction.seekForward,
           MediaAction.seekBackward,
           MediaAction.setSpeed,
-          MediaAction.skipToNext,
-          MediaAction.skipToPrevious,
         },
-        androidCompactActionIndices: const [1, 2, 3],
+        androidCompactActionIndices: const [1],
         processingState: _mapProcessingState(),
         playing: playing,
         updatePosition: _player.state.position,
