@@ -54,7 +54,6 @@ dependencies:
   shared_preferences: ^2.3.2
 
   # Crash reporting (works without DSN; user adds real DSN later)
-  sentry_flutter: ^8.14.0
 
 dev_dependencies:
   flutter_test:
