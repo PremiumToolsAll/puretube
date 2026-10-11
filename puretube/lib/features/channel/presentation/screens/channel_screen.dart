@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
-import '../../../core/services/youtube_service.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/format.dart';
-import '../../home/presentation/widgets/video_card.dart';
-import '../../library/data/library_database.dart';
-import '../../player/domain/entities/models.dart';
-import '../../player/presentation/player_screen.dart';
-import 'tabs/community_tab.dart';
+import '../../../../core/services/youtube_service.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/format.dart';
+import '../../../home/presentation/widgets/video_card.dart';
+import '../../../library/data/library_database.dart';
+import '../../../player/domain/entities/models.dart';
+import '../../../player/presentation/player_screen.dart';
+import '../tabs/community_tab.dart';
 
 /// Channel page with tabs.
 class ChannelScreen extends ConsumerStatefulWidget {
@@ -270,7 +270,9 @@ class _ChannelScreenState
   }
 
   Widget _aboutTab() {
-    final ch = _channel!;
+    // youtube_explode_dart's Channel has no description field;
+    // safe fallback so the About tab renders without crashing.
+    const description = '';
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -282,8 +284,8 @@ class _ChannelScreenState
                   fontWeight:
                       FontWeight.bold)),
           const SizedBox(height: 12),
-          if (ch.description.isNotEmpty)
-            Text(ch.description,
+          if (description.isNotEmpty)
+            Text(description,
                 style: AppTheme.body.copyWith(
                     color:
                         AppTheme.textSecondary)),
