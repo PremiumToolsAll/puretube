@@ -41,16 +41,12 @@ class QualityOption {
   final String label; // "720p", "480p", ...
   final int height;
   final String url;
-  final String? audioUrl; // for video-only streams (1080p+), paired audio
 
   const QualityOption({
     required this.label,
     required this.height,
     required this.url,
-    this.audioUrl,
   });
-
-  bool get isVideoOnly => audioUrl != null;
 }
 
 class PlaybackStreams {
