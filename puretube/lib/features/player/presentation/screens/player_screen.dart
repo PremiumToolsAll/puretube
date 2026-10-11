@@ -26,6 +26,8 @@ import '../providers/player_controller.dart';
 import '../widgets/live_chat_widget.dart';
 import '../widgets/popup_player.dart';
 import '../widgets/subtitle_sheet.dart';
+import '../../../../features/settings/presentation/screens/settings_screen.dart'
+    show doubleTapSecondsProvider;
 
 enum _GaugeKind { volume, brightness, info }
 
@@ -138,6 +140,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   String? _seekFlash;
   bool _seekFlashLeft = true;
   Timer? _seekFlashTimer;
+
+  // stats for nerds overlay
+  bool _showStats = false;
 
   // volume / brightness / scrub overlay
   _Gauge? _gauge;
@@ -347,12 +352,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     if (pos == null) return;
     final width = MediaQuery.of(context).size.width;
     final notifier = ref.read(playerControllerProvider.notifier);
+    // User-configurable double-tap seek interval (Settings → Double-tap to seek).
+    int secs = 10;
+    try {
+      secs = ref.read(doubleTapSecondsProvider);
+    } catch (_) {}
     if (pos.dx < width * 0.35) {
-      notifier.seekBy(const Duration(seconds: -10));
-      _flashSeek('-10s', left: true);
+      notifier.seekBy(Duration(seconds: -secs));
+      _flashSeek('-${secs}s', left: true);
     } else if (pos.dx > width * 0.65) {
-      notifier.seekBy(const Duration(seconds: 10));
-      _flashSeek('+10s', left: false);
+      notifier.seekBy(Duration(seconds: secs));
+      _flashSeek('+${secs}s', left: false);
     } else {
       notifier.togglePlayPause();
     }
@@ -599,13 +609,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     style:
                         TextStyle(fontWeight: FontWeight.bold))),
             for (final s in [
+              0.25,
               0.5,
               0.75,
               1.0,
               1.25,
               1.5,
               1.75,
-              2.0
+              2.0,
+              2.5,
+              3.0,
+              4.0
             ])
               ListTile(
                 title: Text('${s}x'),
@@ -847,6 +861,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   value: ui.skipSponsors,
                   activeColor: _accent,
                   onChanged: notifier.toggleSkipSponsors,
+                ),
+                SwitchListTile(
+                  secondary: const Icon(Icons.analytics_outlined),
+                  title: const Text('Stats for nerds'),
+                  subtitle: const Text(
+                      'Show playback debug overlay'),
+                  value: _showStats,
+                  activeColor: _accent,
+                  onChanged: (v) {
+                    Navigator.pop(ctx);
+                    setState(() => _showStats = v);
+                  },
                 ),
                 ListTile(
                   leading: Icon(
@@ -1779,6 +1805,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 ),
               ),
             if (_gauge != null) _buildGauge(),
+            if (_showStats && isReady)
+              Positioned(
+                top: 8,
+                left: 8,
+                child: IgnorePointer(
+                  child: _StatsOverlay(
+                    uiState: uiState,
+                    player: player,
+                  ),
+                ),
+              ),
             if (_showControls && isReady) ...[
               Positioned(
                 top: 0,
@@ -3041,6 +3078,68 @@ class _SeekBarPainter extends CustomPainter {
       old.bufferedFrac != bufferedFrac ||
       old.activeColor != activeColor ||
       old.dragging != dragging;
+}
+
+/// "Stats for nerds" debug overlay (YouTube parity): monospace readout of
+/// video ID, quality, codec/fps/bitrate, position/duration/buffer.
+class _StatsOverlay extends StatelessWidget {
+  final PlayerUiState uiState;
+  final Player player;
+
+  const _StatsOverlay({required this.uiState, required this.player});
+
+  String _fmt(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final q = uiState.currentQuality;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: StreamBuilder<Duration>(
+        stream: player.stream.position,
+        builder: (context, posSnap) {
+          return StreamBuilder<Duration>(
+            stream: player.stream.buffer,
+            builder: (context, bufSnap) {
+              final pos = posSnap.data ?? Duration.zero;
+              final buf = bufSnap.data ?? Duration.zero;
+              final dur =
+                  uiState.video?.duration ?? Duration.zero;
+              final lines = [
+                'id: ${uiState.videoId ?? '-'}',
+                'quality: ${q?.label ?? '-'}',
+                'codec: ${(q?.codec.isNotEmpty ?? false) ? q!.codec : 'n/a'}'
+                    ' / ${(q?.fps ?? 0) > 0 ? '${q!.fps}fps' : 'n/a'}'
+                    ' / ${(q?.bitrateKbps ?? 0) > 0 ? '${(q!.bitrateKbps / 1000).toStringAsFixed(1)}Mbps' : 'n/a'}',
+                'pos: ${_fmt(pos)} / ${_fmt(dur)}'
+                    '  buf: ${_fmt(buf)}',
+                'speed: ${uiState.speed}x',
+              ];
+              return Text(
+                lines.join('\n'),
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontFamilyFallback: ['Courier'],
+                  fontSize: 11,
+                  height: 1.4,
+                  color: Colors.white,
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
 }
 
 /// Seek bar for the audio (music) mode: gold track with time labels.
