@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../core/theme/app_theme.dart';
+import '../../../core/theme/app_theme.dart';
 import './tabs/downloads_tab.dart';
 import './tabs/history_tab.dart';
 import './tabs/playlists_tab.dart';
