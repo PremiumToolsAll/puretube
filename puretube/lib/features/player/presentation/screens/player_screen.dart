@@ -2038,21 +2038,44 @@ class _TimeLabel extends StatelessWidget {
 }
 
 /// Custom seek bar: buffered track + played track + knob, tap & drag to seek.
-class _PlayerSeekBar extends StatefulWidget {
+class _PlayerSeekBar extends ConsumerStatefulWidget {
   final Player player;
   const _PlayerSeekBar({required this.player});
 
   @override
-  State<_PlayerSeekBar> createState() => _PlayerSeekBarState();
+  ConsumerState<_PlayerSeekBar> createState() =>
+      _PlayerSeekBarState();
 }
 
-class _PlayerSeekBarState extends State<_PlayerSeekBar> {
+class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
   bool _dragging = false;
   double _dragFrac = 0;
 
   double _fracFromDx(double dx) {
     final width = context.size?.width ?? 1;
     return ((dx - 12) / (width - 24)).clamp(0.0, 1.0);
+  }
+
+  /// Total duration, preferring the synchronous player state over the
+  /// stream snapshot (which can lag or still hold zero during rebuilds).
+  Duration _totalDuration(Duration streamDuration) {
+    final stateDuration = widget.player.state.duration;
+    if (stateDuration > Duration.zero) return stateDuration;
+    return streamDuration;
+  }
+
+  Future<void> _seekToFrac(double frac, Duration streamDuration) async {
+    final total = _totalDuration(streamDuration);
+    if (total <= Duration.zero) return;
+    var target = Duration(
+        milliseconds: (frac.clamp(0.0, 1.0) * total.inMilliseconds).round());
+    if (target < Duration.zero) target = Duration.zero;
+    if (target > total) target = total;
+    // Route through the controller so seeking shares the same path as
+    // scrub gestures, double-tap ±10s, and notification seeks.
+    await ref
+        .read(playerControllerProvider.notifier)
+        .seekTo(target);
   }
 
   @override
@@ -2091,18 +2114,13 @@ class _PlayerSeekBarState extends State<_PlayerSeekBar> {
                       _dragFrac =
                           _fracFromDx(d.localPosition.dx)),
                   onHorizontalDragEnd: (_) async {
-                    final target = Duration(
-                        milliseconds:
-                            (_dragFrac * total).round());
+                    final frac = _dragFrac;
                     setState(() => _dragging = false);
-                    await widget.player.seek(target);
+                    await _seekToFrac(frac, duration);
                   },
                   onTapDown: (d) async {
-                    final frac =
-                        _fracFromDx(d.localPosition.dx);
-                    await widget.player.seek(Duration(
-                        milliseconds:
-                            (frac * total).round()));
+                    await _seekToFrac(
+                        _fracFromDx(d.localPosition.dx), duration);
                   },
                   child: Container(
                     height: 30,
