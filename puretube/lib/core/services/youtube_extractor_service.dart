@@ -219,5 +219,30 @@ class YoutubeExtractorService {
     return [];
   }
 
+  /// Returns trending/popular videos for the home feed.
+  /// Uses a generic popular search since youtube_explode_dart 2.x
+  /// has no dedicated trending API.
+  Future<List<VideoDetails>> getTrendingVideos({int limit = 25}) async {
+    await _requireNetwork();
+    try {
+      // "trending" search returns popular current videos.
+      final results = await _yt.search
+          .search('trending')
+          .timeout(const Duration(seconds: 25));
+      return results
+          .whereType<Video>()
+          .take(limit)
+          .map(VideoDetails.fromExplode)
+          .toList();
+    } on TimeoutException {
+      throw ExtractorException('Trending timed out. Retry.');
+    } on PureTubeException {
+      rethrow;
+    } catch (e) {
+      throw ExtractorException(
+          'Could not load trending: ${_friendlyError(e)}');
+    }
+  }
+
   void dispose() => _yt.close();
 }
