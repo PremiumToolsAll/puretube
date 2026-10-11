@@ -1,10 +1,10 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/format.dart';
-import '../../player/domain/entities/models.dart';
-import '../../player/presentation/player_screen.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/format.dart';
+import '../../../player/domain/entities/models.dart';
+import '../../../player/presentation/player_screen.dart';
 
 /// YouTube-like video card.
 class VideoCard extends StatelessWidget {
