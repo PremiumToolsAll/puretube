@@ -11,6 +11,7 @@ import '../widgets/video_card.dart';
 import '../../../library/presentation/screens/downloads_screen.dart';
 import '../../../library/presentation/screens/history_screen.dart';
 import '../../../library/presentation/screens/playlists_screen.dart';
+import '../../../settings/presentation/screens/settings_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -21,6 +22,17 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-load the home feed so videos appear on launch.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(searchControllerProvider.notifier).loadTrending();
+      }
+    });
+  }
 
   static const _categories = [
     'Music',
@@ -106,6 +118,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(
                   builder: (_) => const PlaylistsScreen()),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                  builder: (_) => const SettingsScreen()),
             ),
           ),
         ],
