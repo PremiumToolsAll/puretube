@@ -1,6 +1,7 @@
 package com.puretube.app
 
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
 import android.util.Rational
@@ -21,6 +22,8 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val PIP_CHANNEL = "puretube/pip"
+        private const val AUTOMATION_CHANNEL =
+            "com.puretube.app/automation"
     }
 
     private var pipChannel: MethodChannel? = null
@@ -43,6 +46,47 @@ class MainActivity : FlutterActivity() {
                     result.success(isInPictureInPictureModeCompat())
                 }
                 else -> result.notImplemented()
+            }
+        }
+
+        // Automation: broadcast intents for Tasker/MacroDroid.
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            AUTOMATION_CHANNEL
+        ).setMethodCallHandler { call, result ->
+            if (call.method == "sendBroadcast") {
+                val action: String? =
+                    call.argument("action")
+                @Suppress("UNCHECKED_CAST")
+                val extras: Map<String, Any?> =
+                    call.argument("extras")
+                        as? Map<String, Any?>
+                        ?: emptyMap()
+                if (action != null) {
+                    val intent =
+                        Intent(action)
+                    for ((k, v) in extras) {
+                        when (v) {
+                            is Int -> intent.putExtra(
+                                k, v)
+                            is Long -> intent.putExtra(
+                                k, v)
+                            is String -> intent.putExtra(
+                                k, v)
+                            is Boolean -> intent.putExtra(
+                                k, v)
+                        }
+                    }
+                    sendBroadcast(intent)
+                    result.success(true)
+                } else {
+                    result.error(
+                        "NO_ACTION",
+                        "Missing action",
+                        null)
+                }
+            } else {
+                result.notImplemented()
             }
         }
     }
