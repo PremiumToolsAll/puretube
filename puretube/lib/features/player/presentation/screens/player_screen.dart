@@ -941,15 +941,44 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   stream: player.stream.playing,
                   builder: (context, snap) {
                     final playing = snap.data ?? false;
-                    return IconButton(
-                      iconSize: 40,
-                      onPressed: notifier.togglePlayPause,
-                      icon: Icon(
-                        playing
-                            ? Icons.pause_circle_filled
-                            : Icons.play_circle_filled,
-                        color: Colors.white,
-                      ),
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Previous',
+                          onPressed: notifier.hasPrevious
+                              ? notifier.playPrevious
+                              : null,
+                          icon: Icon(
+                            Icons.skip_previous,
+                            color: notifier.hasPrevious
+                                ? Colors.white
+                                : Colors.white30,
+                          ),
+                        ),
+                        IconButton(
+                          iconSize: 40,
+                          onPressed: notifier.togglePlayPause,
+                          icon: Icon(
+                            playing
+                                ? Icons.pause_circle_filled
+                                : Icons.play_circle_filled,
+                            color: Colors.white,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Next',
+                          onPressed: notifier.hasNext
+                              ? notifier.playNext
+                              : null,
+                          icon: Icon(
+                            Icons.skip_next,
+                            color: notifier.hasNext
+                                ? Colors.white
+                                : Colors.white30,
+                          ),
+                        ),
+                      ],
                     );
                   },
                 ),
