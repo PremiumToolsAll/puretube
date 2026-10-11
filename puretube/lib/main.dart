@@ -15,6 +15,10 @@ import 'features/player/data/services/audio_player_handler.dart';
 /// If false, the player shows a message instead of crashing.
 bool mediaKitReady = false;
 
+/// Tracks whether AudioService.init succeeded (true) or fell back (false).
+/// Used for background-playback diagnostics.
+bool audioServiceReady = false;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -45,6 +49,7 @@ Future<void> main() async {
   // still open if it fails (e.g. manifest/service edge cases).
   // Fallback: plain handler without the foreground service.
   late final PureTubeAudioHandler audioHandler;
+  bool audioServiceOk = false;
   try {
     audioHandler = await AudioService.init(
       builder: () => PureTubeAudioHandler(),
@@ -61,10 +66,13 @@ Future<void> main() async {
         rewindInterval: Duration(seconds: 10),
       ),
     );
+    audioServiceOk = true;
   } catch (e) {
     debugPrint('AudioService init failed, using fallback handler: $e');
     audioHandler = PureTubeAudioHandler();
   }
+  // Store for diagnostics UI.
+  audioServiceReady = audioServiceOk;
 
   Future<void> launchApp() async {
     runApp(
