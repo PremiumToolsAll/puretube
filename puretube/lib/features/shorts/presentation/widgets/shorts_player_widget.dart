@@ -6,12 +6,12 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../../core/services/audio_player_service.dart';
-import '../../../core/services/youtube_service.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/format.dart';
-import '../../player/domain/entities/models.dart';
-import '../../player/presentation/providers/player_controller.dart'
+import '../../../../core/services/audio_player_service.dart';
+import '../../../../core/services/youtube_service.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/format.dart';
+import '../../../player/domain/entities/models.dart';
+import '../../../player/presentation/providers/player_controller.dart'
     as pc;
 
 /// Single full-screen vertical short player (9:16).
@@ -58,7 +58,7 @@ class _ShortsPlayerWidgetState
   @override
   void dispose() {
     try {
-      _videoController?.dispose();
+      // VideoController has no dispose(); the Player owns the resources.
       _player?.dispose();
     } catch (_) {}
     super.dispose();
@@ -77,9 +77,9 @@ class _ShortsPlayerWidgetState
           .instance
           .streams(widget.video.id);
       final muxed = [...manifest.muxed]
-        ..sort((a, b) => b.videoQuality.height
+        ..sort((a, b) => b.videoResolution.height
             .compareTo(
-                a.videoQuality.height));
+                a.videoResolution.height));
       if (muxed.isEmpty) {
         if (mounted) {
           setState(() => _loading = false);
@@ -88,7 +88,7 @@ class _ShortsPlayerWidgetState
       }
       // Prefer portrait-friendly (lower res is fine for shorts).
       final best = muxed.firstWhere(
-        (s) => s.videoQuality.height <= 720,
+        (s) => s.videoResolution.height <= 720,
         orElse: () => muxed.last,
       );
       await _player!
