@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../providers/shorts_controller.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../providers/shorts_controller.dart';
 import '../widgets/shorts_player_widget.dart';
 
 /// Full-screen vertical shorts feed (swipe up/down).
