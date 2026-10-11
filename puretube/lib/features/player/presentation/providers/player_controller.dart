@@ -282,9 +282,11 @@ class PlayerController extends Notifier<PlayerUiState>
   // ---------------- transport ----------------
 
   Future<void> togglePlayPause() async {
-    if (_handler.player.state.playing) {
+    final player = _handler.player;
+    if (player.state.playing) {
       await _handler.pause();
     } else {
+      // Resume from current position (don't restart).
       await _handler.play();
     }
   }
