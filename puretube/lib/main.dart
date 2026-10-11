@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:sentry_flutter/sentry_flutter.dart';
 
 import 'app.dart';
 import 'core/database/hive_setup.dart';
@@ -15,10 +14,6 @@ import 'features/player/data/services/audio_player_handler.dart';
 /// Tracks whether media_kit native libs loaded OK.
 /// If false, the player shows a message instead of crashing.
 bool mediaKitReady = false;
-
-/// Sentry DSN placeholder — the user adds the real DSN later.
-/// Leave empty to run without crash reporting.
-const _sentryDsn = '';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -77,22 +72,6 @@ Future<void> main() async {
     );
   }
 
-  // Sentry crash reporting — wrapped so the app always launches
-  // even with no DSN or if Sentry itself fails.
-  if (_sentryDsn.isNotEmpty) {
-    try {
-      await SentryFlutter.init(
-        (o) {
-          o.dsn = _sentryDsn;
-          o.tracesSampleRate = 0.2;
-        },
-        appRunner: launchApp,
-      );
-      return;
-    } catch (e) {
-      debugPrint('Sentry init failed (non-fatal): $e');
-    }
-  }
   await launchApp();
 }
 
