@@ -1,22 +1,16 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../../../core/services/audio_player_service.dart';
-import '../../../../core/services/youtube_service.dart';
-import '../../../../core/theme/app_theme.dart';
+import '../../../../core/di/providers.dart';
 import '../../../../core/utils/format.dart';
-import '../../../player/domain/entities/models.dart';
-import '../../../player/presentation/providers/player_controller.dart'
-    as pc;
+import '../../../player/domain/entities/playback_models.dart';
 
 /// Single full-screen vertical short player (9:16).
 class ShortsPlayerWidget extends ConsumerStatefulWidget {
-  final VideoItem video;
+  final VideoDetails video;
   final bool isActive;
 
   const ShortsPlayerWidget({
@@ -26,19 +20,19 @@ class ShortsPlayerWidget extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ShortsPlayerWidget>
-      createState() => _ShortsPlayerWidgetState();
+  ConsumerState<ShortsPlayerWidget> createState() =>
+      _ShortsPlayerWidgetState();
 }
 
 class _ShortsPlayerWidgetState
     extends ConsumerState<ShortsPlayerWidget> {
+  static const _accent = Color(0xFF6200EA);
   Player? _player;
   VideoController? _videoController;
   bool _playing = true;
   bool _muted = false;
   bool _loading = true;
   bool _liked = false;
-  int _likeCount = 0;
 
   @override
   void initState() {
@@ -58,7 +52,6 @@ class _ShortsPlayerWidgetState
   @override
   void dispose() {
     try {
-      // VideoController has no dispose(); the Player owns the resources.
       _player?.dispose();
     } catch (_) {}
     super.dispose();
@@ -67,32 +60,15 @@ class _ShortsPlayerWidgetState
   Future<void> _init() async {
     try {
       _player = Player(
-          configuration:
-              const PlayerConfiguration(
-                  title: 'PureTube Shorts'));
-      _videoController =
-          VideoController(_player!);
-      // Load stream.
-      final manifest = await YoutubeService
-          .instance
-          .streams(widget.video.id);
-      final muxed = [...manifest.muxed]
-        ..sort((a, b) => b.videoResolution.height
-            .compareTo(
-                a.videoResolution.height));
-      if (muxed.isEmpty) {
-        if (mounted) {
-          setState(() => _loading = false);
-        }
-        return;
-      }
-      // Prefer portrait-friendly (lower res is fine for shorts).
-      final best = muxed.firstWhere(
-        (s) => s.videoResolution.height <= 720,
-        orElse: () => muxed.last,
-      );
+          configuration: const PlayerConfiguration(
+              title: 'PureTube Shorts'));
+      _videoController = VideoController(_player!);
+      // Load stream via puretube's extractor.
+      final streams = await ref
+          .read(extractorProvider)
+          .getPlaybackStreams(widget.video.id);
       await _player!
-          .open(Media(best.url.toString()));
+          .open(Media(streams.muxedUrl));
       if (widget.isActive) {
         await _player!.play();
       } else {
@@ -112,9 +88,7 @@ class _ShortsPlayerWidgetState
     try {
       if (active) {
         await _player?.play();
-        if (mounted) {
-          setState(() => _playing = true);
-        }
+        if (mounted) setState(() => _playing = true);
       } else {
         await _player?.pause();
         if (mounted) {
@@ -132,8 +106,7 @@ class _ShortsPlayerWidgetState
         await _player?.play();
       }
       if (mounted) {
-        setState(
-            () => _playing = !_playing);
+        setState(() => _playing = !_playing);
       }
     } catch (_) {}
   }
@@ -141,11 +114,8 @@ class _ShortsPlayerWidgetState
   Future<void> _toggleMute() async {
     try {
       final next = !_muted;
-      await _player
-          ?.setVolume(next ? 0 : 100);
-      if (mounted) {
-        setState(() => _muted = next);
-      }
+      await _player?.setVolume(next ? 0 : 100);
+      if (mounted) setState(() => _muted = next);
     } catch (_) {}
   }
 
@@ -159,8 +129,7 @@ class _ShortsPlayerWidgetState
           GestureDetector(
             onTap: _togglePlay,
             child: Video(
-                controller:
-                    _videoController!,
+                controller: _videoController!,
                 controls: NoVideoControls),
           )
         else
@@ -168,22 +137,18 @@ class _ShortsPlayerWidgetState
         if (_loading)
           const Center(
               child: CircularProgressIndicator(
-                  color: AppTheme.primary)),
+                  color: _accent)),
         // Play icon when paused.
         if (!_playing && !_loading)
           Center(
             child: Container(
-              padding:
-                  const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.black
-                    .withOpacity(0.5),
+                color: Colors.black.withOpacity(0.5),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
-                  Icons.play_arrow,
-                  size: 48,
-                  color: Colors.white),
+              child: const Icon(Icons.play_arrow,
+                  size: 48, color: Colors.white),
             ),
           ),
         // Right action rail.
@@ -195,38 +160,22 @@ class _ShortsPlayerWidgetState
               _action(
                 icon: _liked
                     ? Icons.favorite
-                    : Icons
-                        .favorite_border,
+                    : Icons.favorite_border,
                 label: formatCount(
-                    _likeCount > 0
-                        ? _likeCount
-                        : widget.video
-                            .viewCount),
-                color: _liked
-                    ? Colors.red
-                    : Colors.white,
+                    widget.video.viewCount),
+                color:
+                    _liked ? Colors.red : Colors.white,
                 onTap: () => setState(() {
                   _liked = !_liked;
-                  _likeCount +=
-                      _liked ? 1 : -1;
                 }),
               ),
               _action(
-                icon: Icons
-                    .thumb_down_outlined,
+                icon: Icons.thumb_down_outlined,
                 label: 'Dislike',
                 onTap: () {},
               ),
               _action(
-                icon:
-                    Icons.comment_outlined,
-                label: 'Comments',
-                onTap: () =>
-                    _commentsSheet(),
-              ),
-              _action(
-                icon:
-                    Icons.share_outlined,
+                icon: Icons.share_outlined,
                 label: 'Share',
                 onTap: () => Share.share(
                     'https://youtu.be/${widget.video.id}'),
@@ -235,9 +184,7 @@ class _ShortsPlayerWidgetState
                 icon: _muted
                     ? Icons.volume_off
                     : Icons.volume_up,
-                label: _muted
-                    ? 'Unmute'
-                    : 'Mute',
+                label: _muted ? 'Unmute' : 'Mute',
                 onTap: _toggleMute,
               ),
             ],
@@ -256,87 +203,36 @@ class _ShortsPlayerWidgetState
                 children: [
                   CircleAvatar(
                     radius: 16,
-                    backgroundColor: AppTheme
-                        .primary
-                        .withOpacity(0.3),
+                    backgroundColor:
+                        _accent.withOpacity(0.3),
                     child: Text(
-                        widget.video.author
-                                .isNotEmpty
-                            ? widget.video
-                                .author[0]
+                        widget.video.author.isNotEmpty
+                            ? widget.video.author[0]
                                 .toUpperCase()
                             : '?',
-                        style:
-                            const TextStyle(
-                                color: Colors
-                                    .white,
-                                fontSize: 13)),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13)),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
-                        widget.video.author,
+                    child: Text(widget.video.author,
                         maxLines: 1,
-                        overflow: TextOverflow
-                            .ellipsis,
-                        style: AppTheme.body
-                            .copyWith(
-                                color: Colors
-                                    .white,
-                                fontWeight:
-                                    FontWeight
-                                        .w600)),
-                  ),
-                  TextButton(
-                    onPressed: () {},
-                    style: TextButton.styleFrom(
-                      backgroundColor:
-                          Colors.white,
-                      padding:
-                          const EdgeInsets
-                              .symmetric(
-                                  horizontal:
-                                      12,
-                                  vertical:
-                                      4),
-                    ),
-                    child: const Text(
-                        'Subscribe',
-                        style: TextStyle(
-                            color: Colors
-                                .black,
-                            fontSize: 12)),
+                        overflow:
+                            TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight:
+                                FontWeight.w600)),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
               Text(widget.video.title,
                   maxLines: 2,
-                  overflow:
-                      TextOverflow.ellipsis,
-                  style: AppTheme.body.copyWith(
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
                       color: Colors.white)),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  const Icon(
-                      Icons.music_note,
-                      size: 14,
-                      color: Colors.white70),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                        'Original audio • ${widget.video.author}',
-                        maxLines: 1,
-                        overflow: TextOverflow
-                            .ellipsis,
-                        style: AppTheme.caption
-                            .copyWith(
-                                color: Colors
-                                    .white70)),
-                  ),
-                ],
-              ),
             ],
           ),
         ),
@@ -357,77 +253,13 @@ class _ShortsPlayerWidgetState
         onTap: onTap,
         child: Column(
           children: [
-            Icon(icon,
-                color: color, size: 30),
+            Icon(icon, color: color, size: 30),
             const SizedBox(height: 4),
             Text(label,
-                style: AppTheme.caption
-                    .copyWith(
-                        color: Colors.white,
-                        fontSize: 11)),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11)),
           ],
-        ),
-      ),
-    );
-  }
-
-  void _commentsSheet() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.6,
-        builder: (_, ctrl) => FutureBuilder(
-          future: YoutubeService.instance
-              .video(widget.video.id)
-              .then((v) =>
-                  YoutubeService.instance
-                      .comments(v)),
-          builder: (_, snap) {
-            if (!snap.hasData) {
-              return const Center(
-                  child:
-                      CircularProgressIndicator());
-            }
-            final comments = snap.data!;
-            if (comments.isEmpty) {
-              return const Center(
-                  child: Text(
-                      'No comments yet.'));
-            }
-            return ListView.builder(
-              controller: ctrl,
-              padding:
-                  const EdgeInsets.all(16),
-              itemCount: comments.length,
-              itemBuilder: (_, i) {
-                final cm = comments[i];
-                return ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor:
-                        AppTheme.card,
-                    child: Text(
-                        cm.author.isNotEmpty
-                            ? cm.author[0]
-                                .toUpperCase()
-                            : '?'),
-                  ),
-                  title: Text(cm.author,
-                      style: AppTheme.caption
-                          .copyWith(
-                              fontWeight:
-                                  FontWeight
-                                      .w600)),
-                  subtitle: Text(cm.text,
-                      style: AppTheme.body
-                          .copyWith(
-                              fontSize:
-                                  13)),
-                );
-              },
-            );
-          },
         ),
       ),
     );
