@@ -2,20 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 
-import '../../core/theme/app_theme.dart';
-import '../home/presentation/home_screen.dart';
+import '../home/presentation/screens/home_screen.dart';
 
-/// 3-page onboarding (shown once).
+/// 3-page onboarding (shown once on first launch).
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
 
   @override
-  State<OnboardingScreen> createState() =>
-      _OnboardingScreenState();
+  State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
-class _OnboardingScreenState
-    extends State<OnboardingScreen> {
+class _OnboardingScreenState extends State<OnboardingScreen> {
+  static const _accent = Color(0xFF6200EA);
   final _pageCtrl = PageController();
   int _page = 0;
 
@@ -48,16 +46,12 @@ class _OnboardingScreenState
 
   Future<void> _finish() async {
     try {
-      final prefs =
-          await SharedPreferences.getInstance();
-      await prefs.setBool(
-          'isOnboardingCompleted', true);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('isOnboardingCompleted', true);
     } catch (_) {}
     if (mounted) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-            builder: (_) =>
-                const HomeScreen()),
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
     }
   }
@@ -65,7 +59,7 @@ class _OnboardingScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: Colors.black,
       body: SafeArea(
         child: Column(
           children: [
@@ -73,20 +67,16 @@ class _OnboardingScreenState
               alignment: Alignment.topRight,
               child: TextButton(
                 onPressed: _finish,
-                child: Text('Skip',
-                    style: AppTheme.body.copyWith(
-                        color: AppTheme
-                            .textSecondary)),
+                child: const Text('Skip',
+                    style: TextStyle(color: Colors.grey)),
               ),
             ),
             Expanded(
               child: PageView.builder(
                 controller: _pageCtrl,
                 itemCount: _pages.length,
-                onPageChanged: (i) =>
-                    setState(() => _page = i),
-                itemBuilder: (_, i) =>
-                    _pages[i],
+                onPageChanged: (i) => setState(() => _page = i),
+                itemBuilder: (_, i) => _pages[i],
               ),
             ),
             SmoothPageIndicator(
@@ -94,53 +84,43 @@ class _OnboardingScreenState
               count: _pages.length,
               effect: const WormEffect(
                 dotColor: Colors.white24,
-                activeDotColor:
-                    AppTheme.primary,
+                activeDotColor: _accent,
                 dotHeight: 8,
                 dotWidth: 8,
               ),
             ),
             const SizedBox(height: 24),
             Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 24),
+              padding: const EdgeInsets.symmetric(horizontal: 24),
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () {
-                    if (_page <
-                        _pages.length - 1) {
+                    if (_page < _pages.length - 1) {
                       _pageCtrl.nextPage(
                         duration:
-                            const Duration(
-                                milliseconds:
-                                    300),
+                            const Duration(milliseconds: 300),
                         curve: Curves.easeInOut,
                       );
                     } else {
                       _finish();
                     }
                   },
-                  style:
-                      ElevatedButton.styleFrom(
-                    backgroundColor:
-                        AppTheme.primary,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _accent,
                     padding:
-                        const EdgeInsets.symmetric(
-                            vertical: 14),
+                        const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
                         borderRadius:
-                            BorderRadius.circular(
-                                12)),
+                            BorderRadius.circular(12)),
                   ),
                   child: Text(
-                      _page < _pages.length - 1
-                          ? 'Next'
-                          : 'Get Started',
-                      style: AppTheme.subtitle
-                          .copyWith(
-                              color:
-                                  Colors.white)),
+                    _page < _pages.length - 1
+                        ? 'Next'
+                        : 'Get Started',
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 16),
+                  ),
                 ),
               ),
             ),
@@ -168,19 +148,24 @@ class _OnboardPage extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.all(32),
       child: Column(
-        mainAxisAlignment:
-            MainAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
             width: 120,
             height: 120,
             decoration: BoxDecoration(
-              gradient:
-                  AppTheme.premiumGradient,
+              gradient: const LinearGradient(
+                colors: [
+                  Color(0xFF6200EA),
+                  Color(0xFF00BCD4)
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: AppTheme.primary
+                  color: const Color(0xFF6200EA)
                       .withOpacity(0.4),
                   blurRadius: 32,
                   spreadRadius: 8,
@@ -193,14 +178,16 @@ class _OnboardPage extends StatelessWidget {
           const SizedBox(height: 40),
           Text(title,
               textAlign: TextAlign.center,
-              style: AppTheme.title.copyWith(
-                  fontSize: 24)),
+              style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white)),
           const SizedBox(height: 16),
           Text(description,
               textAlign: TextAlign.center,
-              style: AppTheme.body.copyWith(
-                  color:
-                      AppTheme.textSecondary,
+              style: const TextStyle(
+                  color: Colors.grey,
+                  fontSize: 15,
                   height: 1.5)),
         ],
       ),
