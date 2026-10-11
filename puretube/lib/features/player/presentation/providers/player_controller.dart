@@ -328,7 +328,8 @@ class PlayerController extends Notifier<PlayerUiState>
     if (state.audioOnly) return; // quality applies to video mode only
     if (state.currentQuality?.height == quality.height) return;
     try {
-      await _handler.switchStream(quality.url);
+      await _handler.switchStream(quality.url,
+          audioUrl: quality.audioUrl);
       // Keep the cached streams record in sync so expiry recovery
       // and audio<->video toggling reuse the chosen quality.
       final s = state.streams;
@@ -512,7 +513,10 @@ class PlayerController extends Notifier<PlayerUiState>
             ),
       );
       final url = state.audioOnly ? fresh.audioOnlyUrl : muxedUrl;
-      await _handler.switchStream(url, resumeAt: resumeAt);
+      await _handler.switchStream(url,
+          audioUrl:
+              state.audioOnly ? null : preservedQuality?.audioUrl,
+          resumeAt: resumeAt);
     } on PureTubeException catch (e) {
       // Most likely NetworkException: user lost internet mid-playback.
       state = state.copyWith(
