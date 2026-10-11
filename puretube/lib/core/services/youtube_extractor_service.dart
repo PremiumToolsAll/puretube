@@ -193,5 +193,26 @@ class YoutubeExtractorService {
     }
   }
 
+  /// Returns videos related to [videoId] for the "Up next" section.
+  Future<List<VideoDetails>> getRelatedVideos(String videoId,
+      {int limit = 15}) async {
+    try {
+      final related = await _yt.videos.getRelatedVideos(videoId);
+      final list = <VideoDetails>[];
+      await for (final v in related) {
+        if (v is Video) {
+          try {
+            list.add(VideoDetails.fromExplode(v));
+          } catch (_) {}
+        }
+        if (list.length >= limit) break;
+      }
+      return list;
+    } catch (e) {
+      // Related videos are nice-to-have; never break playback.
+      return [];
+    }
+  }
+
   void dispose() => _yt.close();
 }
