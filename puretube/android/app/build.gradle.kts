@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("dev.flutter.flutter-gradle-plugin")
@@ -14,10 +17,10 @@ android {
     }
 
     // Release signing via key.properties (see step below).
-    val keystoreProps = java.util.Properties()
+    val keystoreProps = Properties()
     val keystoreFile = rootProject.file("key.properties")
     if (keystoreFile.exists()) {
-        keystoreProps.load(java.io.FileInputStream(keystoreFile))
+        keystoreProps.load(FileInputStream(keystoreFile))
     }
 
     signingConfigs {
