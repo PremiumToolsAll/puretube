@@ -1,14 +1,12 @@
-import java.io.FileInputStream
-import java.util.Properties
-
 plugins {
     id("com.android.application")
+    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
     namespace = "com.puretube.app"
-    compileSdk = 34
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -16,51 +14,19 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    // Release signing via key.properties (see step below).
-    val keystoreProps = Properties()
-    val keystoreFile = rootProject.file("key.properties")
-    if (keystoreFile.exists()) {
-        keystoreProps.load(FileInputStream(keystoreFile))
-    }
-
-    signingConfigs {
-        create("release") {
-            if (keystoreFile.exists()) {
-                keyAlias = keystoreProps["keyAlias"] as String
-                keyPassword = keystoreProps["keyPassword"] as String
-                storeFile = file(keystoreProps["storeFile"] as String)
-                storePassword = keystoreProps["storePassword"] as String
-            }
-        }
-    }
-
     defaultConfig {
         applicationId = "com.puretube.app"
+        // media_kit needs 21+; PiP guarded at runtime.
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // media_kit native libs per ABI
-        ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
-        }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName(
-                if (keystoreFile.exists()) "release" else "debug"
-            )
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-        }
-        debug {
-            // Debug: no shrinking for faster builds
-            isMinifyEnabled = false
+            // Signing with the debug keys for now, so `flutter run --release` works.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 }
