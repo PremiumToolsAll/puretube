@@ -23,6 +23,7 @@ import '../../../channel/presentation/screens/channel_screen.dart';
 import '../../domain/entities/playback_models.dart';
 import '../providers/player_controller.dart';
 import '../widgets/live_chat_widget.dart';
+import '../widgets/popup_player.dart';
 import '../widgets/subtitle_sheet.dart';
 
 enum _GaugeKind { volume, brightness, info }
@@ -165,6 +166,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void initState() {
     super.initState();
     _videoController = VideoController(ref.read(mediaKitPlayerProvider));
+    // Fullscreen player takes over: hide the floating popup window.
+    ref.read(popupVisibleProvider.notifier).state = false;
     final st = ref.read(playerControllerProvider);
     if (st.videoId != widget.videoId ||
         st.status != PlayerStatus.ready) {
@@ -900,6 +903,21 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   onTap: () {
                     Navigator.pop(ctx);
                     notifier.enterPip();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(
+                      Icons.picture_in_picture_outlined),
+                  title: const Text('Popup player'),
+                  subtitle: const Text(
+                      'Floating window over the app'),
+                  onTap: () {
+                    Navigator.pop(ctx); // close the sheet
+                    Navigator.pop(
+                        context); // leave fullscreen player
+                    ref
+                        .read(popupVisibleProvider.notifier)
+                        .state = true;
                   },
                 ),
                 ListTile(
