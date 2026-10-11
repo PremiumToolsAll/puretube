@@ -9,7 +9,6 @@ import '../widgets/video_card.dart';
 import '../../../library/presentation/screens/downloads_screen.dart';
 import '../../../library/presentation/screens/history_screen.dart';
 import '../../../library/presentation/screens/playlists_screen.dart';
-import '../../../settings/presentation/screens/settings_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -83,14 +82,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(
                   builder: (_) => const PlaylistsScreen()),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                  builder: (_) => const SettingsScreen()),
             ),
           ),
         ],
