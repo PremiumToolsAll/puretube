@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/format.dart';
-import '../../player/presentation/player_screen.dart';
-import '../data/library_database.dart';
-import '../data/library_models.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/format.dart';
+import '../../../player/presentation/player_screen.dart';
+import '../../data/library_database.dart';
+import '../../data/library_models.dart';
 
 /// Tab 1: Watch history.
 class HistoryTab extends StatefulWidget {
