@@ -8,6 +8,7 @@ class VideoDetails {
   final Duration? duration;
   final String thumbnailUrl;
   final int? viewCount;
+  final int? likeCount;
   final DateTime? uploadDate;
   final String description;
 
@@ -19,6 +20,7 @@ class VideoDetails {
     required this.duration,
     required this.thumbnailUrl,
     required this.viewCount,
+    required this.likeCount,
     required this.uploadDate,
     required this.description,
   });
@@ -31,6 +33,7 @@ class VideoDetails {
         duration: video.duration,
         thumbnailUrl: video.thumbnails.highResUrl,
         viewCount: video.engagement.viewCount,
+        likeCount: video.engagement.likeCount,
         uploadDate: video.uploadDate,
         description: video.description,
       );
