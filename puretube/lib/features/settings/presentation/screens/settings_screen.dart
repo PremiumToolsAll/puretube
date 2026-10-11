@@ -35,6 +35,38 @@ Future<void> _saveLocale(String? code) async {
   } catch (_) {}
 }
 
+/// Double-tap seek interval in seconds (YouTube parity: 5/10/15/20/30/60).
+final doubleTapSecondsProvider = StateProvider<int>((ref) => 10);
+
+/// Loads the saved double-tap seek interval at startup.
+Future<void> loadSavedDoubleTapSeconds(WidgetRef ref) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getInt('double_tap_seconds');
+    if (v != null && [5, 10, 15, 20, 30, 60].contains(v)) {
+      ref.read(doubleTapSecondsProvider.notifier).state = v;
+    }
+  } catch (_) {}
+}
+
+Future<void> saveDoubleTapSeconds(int seconds) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('double_tap_seconds', seconds);
+  } catch (_) {}
+}
+
+/// Synchronous read of the double-tap interval (for gesture handlers).
+/// Falls back to 10s if prefs are unavailable.
+Future<int> getDoubleTapSeconds() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('double_tap_seconds') ?? 10;
+  } catch (_) {
+    return 10;
+  }
+}
+
 /// Basic settings: language, clear history, clear cache, about.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -91,6 +123,54 @@ class SettingsScreen extends ConsumerWidget {
               onPressed: () async {
                 ref.read(localeProvider.notifier).state = picked;
                 await _saveLocale(picked?.languageCode);
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Apply',
+                  style: TextStyle(color: _accent)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Double-tap seek interval picker (YouTube parity: 5/10/15/20/30/60s).
+  void _showDoubleTapDialog(
+      BuildContext context, WidgetRef ref, int current) {
+    int picked = current;
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text('Double-tap to seek',
+              style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final s in [5, 10, 15, 20, 30, 60])
+                RadioListTile<int>(
+                  value: s,
+                  groupValue: picked,
+                  title: Text('$s seconds',
+                      style:
+                          const TextStyle(color: Colors.white)),
+                  activeColor: _accent,
+                  onChanged: (v) =>
+                      setState(() => picked = v ?? 10),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                ref.read(doubleTapSecondsProvider.notifier).state =
+                    picked;
+                await saveDoubleTapSeconds(picked);
                 if (ctx.mounted) Navigator.pop(ctx);
               },
               child: const Text('Apply',
@@ -231,6 +311,24 @@ class SettingsScreen extends ConsumerWidget {
                 color: Colors.grey),
             onTap: () =>
                 _showLanguageDialog(context, ref, locale),
+          ),
+          const Divider(color: Color(0xFF1A1A1A)),
+          Consumer(
+            builder: (context, ref, _) {
+              final secs = ref.watch(doubleTapSecondsProvider);
+              return ListTile(
+                leading: const Icon(Icons.touch_app_outlined,
+                    color: Colors.white70),
+                title: const Text('Double-tap to seek',
+                    style: TextStyle(color: Colors.white)),
+                subtitle: Text('$secs seconds',
+                    style: const TextStyle(color: Colors.grey)),
+                trailing: const Icon(Icons.chevron_right,
+                    color: Colors.grey),
+                onTap: () =>
+                    _showDoubleTapDialog(context, ref, secs),
+              );
+            },
           ),
           const Divider(color: Color(0xFF1A1A1A)),
           ListTile(
