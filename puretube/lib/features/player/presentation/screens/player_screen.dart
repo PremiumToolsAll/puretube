@@ -598,6 +598,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
+  /// Premium bottom-sheet quality picker (VLC/Seal style): each row shows
+  /// resolution + fps + bitrate + codec with a radio indicator, DASH
+  /// streams get an accent badge.
   void _showQualityMenu(BuildContext buttonContext) {
     final notifier = ref.read(playerControllerProvider.notifier);
     final uiState = ref.read(playerControllerProvider);
@@ -614,45 +617,146 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       return;
     }
     final current = uiState.currentQuality;
-    final box = buttonContext.findRenderObject() as RenderBox?;
-    final pos = box?.localToGlobal(Offset.zero) ?? Offset.zero;
-    final size = box?.size ?? Size.zero;
-    final position = RelativeRect.fromLTRB(
-      pos.dx,
-      pos.dy + size.height + 4,
-      pos.dx + 200,
-      pos.dy + size.height + 4 + qualities.length * 48.0,
-    );
-    showMenu<MuxedQuality>(
+    showModalBottomSheet(
       context: context,
-      position: position,
-      color: const Color(0xFF232323),
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8)),
-      items: [
-        for (final q in qualities)
-          PopupMenuItem<MuxedQuality>(
-            value: q,
-            height: 44,
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(q.label,
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 15)),
+      backgroundColor: const Color(0xFF0F0F0F),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 12),
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
                 ),
-                if (current?.height == q.height)
-                  const Icon(Icons.check,
-                      color: _accent, size: 18),
-              ],
+              ),
             ),
-          ),
-      ],
-    ).then((selected) {
-      if (selected != null && mounted) {
-        notifier.setQuality(selected);
-      }
-    });
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 12, 20, 4),
+              child: Text('Quality',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold)),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text('Select playback quality',
+                  style: TextStyle(color: Colors.grey, fontSize: 13)),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: qualities.length,
+                itemBuilder: (ctx, i) {
+                  final q = qualities[i];
+                  final selected = current != null &&
+                      current.height == q.height &&
+                      current.isDash == q.isDash;
+                  final detail = q.detailLine;
+                  return InkWell(
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      if (mounted) notifier.setQuality(q);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                      child: Row(
+                        children: [
+                          // Radio indicator.
+                          Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: selected
+                                    ? _accent
+                                    : Colors.white38,
+                                width: 2,
+                              ),
+                              color: selected
+                                  ? _accent
+                                  : Colors.transparent,
+                            ),
+                            child: selected
+                                ? const Icon(Icons.check,
+                                    color: Colors.white, size: 14)
+                                : null,
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(q.resolutionLabel,
+                                          style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 16,
+                                              fontWeight:
+                                                  FontWeight.w600)),
+                                    ),
+                                    if (q.isDash) ...[
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets
+                                            .symmetric(
+                                                horizontal: 8,
+                                                vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: _accent.withValues(
+                                              alpha: 0.2),
+                                          borderRadius:
+                                              BorderRadius.circular(
+                                                  4),
+                                        ),
+                                        child: const Text('DASH',
+                                            style: TextStyle(
+                                                color: _accent,
+                                                fontSize: 11,
+                                                fontWeight:
+                                                    FontWeight.bold)),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                if (detail.isNotEmpty)
+                                  Padding(
+                                    padding:
+                                        const EdgeInsets.only(top: 2),
+                                    child: Text(detail,
+                                        style: const TextStyle(
+                                            color: Colors.grey,
+                                            fontSize: 13)),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showSleepSheet() {
@@ -886,6 +990,108 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             : b >= (1 << 30)
                 ? '${(b / (1 << 30)).toStringAsFixed(1)} GB'
                 : '${(b / (1 << 20)).toStringAsFixed(1)} MB';
+
+        /// Premium Seal-style radio row.
+        Widget optionRow({
+          required IconData icon,
+          required String title,
+          required String subtitle,
+          required String? badge,
+          required String sizeText,
+          required bool selected,
+          required VoidCallback onTap,
+        }) {
+          return InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 4, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(icon, color: Colors.white54, size: 26),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(title,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500)),
+                            ),
+                            if (badge != null) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding:
+                                    const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.white12,
+                                  borderRadius:
+                                      BorderRadius.circular(4),
+                                ),
+                                child: Text(badge,
+                                    style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 11)),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(subtitle,
+                            style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(sizeText,
+                      style: const TextStyle(
+                          color: Colors.grey, fontSize: 14)),
+                  const SizedBox(width: 12),
+                  Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color:
+                            selected ? _gold : Colors.white38,
+                        width: 2,
+                      ),
+                      color: selected
+                          ? _gold
+                          : Colors.transparent,
+                    ),
+                    child: selected
+                        ? const Icon(Icons.check,
+                            color: Colors.black, size: 16)
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        Widget sectionLabel(String text) => Padding(
+              padding: const EdgeInsets.only(
+                  top: 12, bottom: 4, left: 4),
+              child: Text(text,
+                  style: const TextStyle(
+                      color: Colors.grey,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500)),
+            );
+
         return StatefulBuilder(
           builder: (ctx, setSheetState) => SafeArea(
             child: SingleChildScrollView(
@@ -903,61 +1109,57 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   const Text('Download',
                       style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          fontSize: 18)),
+                          fontSize: 20)),
                   const SizedBox(height: 4),
                   Text(video.title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           color: Colors.grey, fontSize: 13)),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<DownloadOption?>(
-                    initialValue: selVideo,
-                    dropdownColor: const Color(0xFF212121),
-                    decoration: const InputDecoration(
-                      labelText: 'Video',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.ondemand_video),
-                    ),
-                    items: [
-                      const DropdownMenuItem<DownloadOption?>(
-                        value: null,
-                        child: Text('No video'),
-                      ),
-                      for (final o in videoOpts)
-                        DropdownMenuItem<DownloadOption?>(
-                          value: o,
-                          child: Text(
-                              '${o.label} (${size(o.sizeBytes)})${o.videoOnly ? ' · no audio' : ''}'),
-                        ),
-                    ],
-                    onChanged: (v) =>
-                        setSheetState(() => selVideo = v),
+                  sectionLabel('Video'),
+                  optionRow(
+                    icon: Icons.ondemand_video,
+                    title: 'No video',
+                    subtitle: 'Audio only',
+                    badge: null,
+                    sizeText: '',
+                    selected: selVideo == null,
+                    onTap: () =>
+                        setSheetState(() => selVideo = null),
                   ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<DownloadOption?>(
-                    initialValue: selAudio,
-                    dropdownColor: const Color(0xFF212121),
-                    decoration: const InputDecoration(
-                      labelText: 'Audio',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.music_note),
+                  for (final o in videoOpts)
+                    optionRow(
+                      icon: Icons.play_circle_outline,
+                      title: o.tierTitle,
+                      subtitle: o.tierDescription,
+                      badge: o.tierBadge,
+                      sizeText: size(o.sizeBytes),
+                      selected: selVideo == o,
+                      onTap: () =>
+                          setSheetState(() => selVideo = o),
                     ),
-                    items: [
-                      const DropdownMenuItem<DownloadOption?>(
-                        value: null,
-                        child: Text('No audio'),
-                      ),
-                      for (final o in audioOpts)
-                        DropdownMenuItem<DownloadOption?>(
-                          value: o,
-                          child: Text(
-                              '${o.label} (${size(o.sizeBytes)})'),
-                        ),
-                    ],
-                    onChanged: (v) =>
-                        setSheetState(() => selAudio = v),
+                  sectionLabel('Audio'),
+                  optionRow(
+                    icon: Icons.music_note,
+                    title: 'No audio',
+                    subtitle: 'Video only',
+                    badge: null,
+                    sizeText: '',
+                    selected: selAudio == null,
+                    onTap: () =>
+                        setSheetState(() => selAudio = null),
                   ),
+                  for (final o in audioOpts)
+                    optionRow(
+                      icon: Icons.music_note_outlined,
+                      title: o.tierTitle,
+                      subtitle: o.tierDescription,
+                      badge: o.tierBadge,
+                      sizeText: size(o.sizeBytes),
+                      selected: selAudio == o,
+                      onTap: () =>
+                          setSheetState(() => selAudio = o),
+                    ),
                   if (selVideo != null && selVideo!.videoOnly)
                     const Padding(
                       padding: EdgeInsets.only(top: 8),
@@ -970,6 +1172,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     ),
                   const SizedBox(height: 16),
                   FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _gold,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(12)),
+                    ),
                     onPressed:
                         (selVideo == null && selAudio == null)
                             ? null
@@ -993,7 +1204,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                                 }
                               },
                     icon: const Icon(Icons.download),
-                    label: const Text('Download'),
+                    label: const Text('Download',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16)),
                   ),
                   const Divider(height: 24),
                   ListTile(
