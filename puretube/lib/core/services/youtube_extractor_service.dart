@@ -42,6 +42,19 @@ extension VideoQualityHeight on VideoQuality {
       };
 }
 
+/// Holds a paged YouTube search for infinite scroll.
+/// Created by [YoutubeExtractorService.startPagedSearch]; fetch more
+/// with [YoutubeExtractorService.fetchMoreSearchResults].
+class SearchSession {
+  SearchSession._(this._list, this.firstPage);
+
+  // ignore: prefer_final_fields - reassigned on each nextPage()
+  VideoSearchList _list;
+
+  /// Videos from the first page.
+  final List<VideoDetails> firstPage;
+}
+
 class YoutubeExtractorService {
   YoutubeExtractorService({YoutubeExplode? client, Connectivity? connectivity})
       : _yt = client ?? YoutubeExplode(),
@@ -297,7 +310,8 @@ class YoutubeExtractorService {
   }
 
   Future<List<VideoDetails>> searchVideos(String query,
-      {int limit = 25}) async {    await _requireNetwork();
+      {int limit = 25}) async {
+    await _requireNetwork();
     try {
       final results = await _yt.search
           .search(query)
@@ -313,6 +327,55 @@ class YoutubeExtractorService {
       rethrow;
     } catch (e) {
       throw ExtractorException('Search failed: ${_friendlyError(e)}');
+    }
+  }
+
+  /// Starts a paged search session for infinite scroll.
+  /// Returns the first page; call [fetchMoreSearchResults] for more.
+  Future<SearchSession> startPagedSearch(String query,
+      {int limit = 25}) async {
+    await _requireNetwork();
+    try {
+      final results = await _yt.search
+          .search(query)
+          .timeout(const Duration(seconds: 25));
+      final videos = results
+          .whereType<Video>()
+          .take(limit)
+          .map(VideoDetails.fromExplode)
+          .toList();
+      return SearchSession._(results, videos);
+    } on TimeoutException {
+      throw ExtractorException('Search timed out. Retry.');
+    } on PureTubeException {
+      rethrow;
+    } catch (e) {
+      throw ExtractorException('Search failed: ${_friendlyError(e)}');
+    }
+  }
+
+  /// Fetches the next page of a [SearchSession]. Returns empty list
+  /// when there are no more pages.
+  Future<List<VideoDetails>> fetchMoreSearchResults(
+      SearchSession session,
+      {int limit = 25}) async {
+    try {
+      final next = await session._list
+          .nextPage()
+          ?.timeout(const Duration(seconds: 25));
+      if (next == null) return const [];
+      session._list = next;
+      return next
+          .whereType<Video>()
+          .take(limit)
+          .map(VideoDetails.fromExplode)
+          .toList();
+    } on TimeoutException {
+      throw ExtractorException('Timed out loading more. Retry.');
+    } on PureTubeException {
+      rethrow;
+    } catch (e) {
+      throw ExtractorException('Could not load more: ${_friendlyError(e)}');
     }
   }
 
