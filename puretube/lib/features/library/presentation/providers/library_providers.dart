@@ -169,6 +169,13 @@ class DownloadsController
             _upsert(cur.copyWith(progress: p));
           }
         },
+        onSpeed: (mbps) {
+          final cur = state[id];
+          if (cur != null &&
+              cur.status == DownloadStatus.downloading) {
+            _upsert(cur.copyWith(speedMbps: mbps));
+          }
+        },
       );
       final done = state[id];
       if (done != null) {
