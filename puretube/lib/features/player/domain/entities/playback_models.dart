@@ -93,3 +93,52 @@ class DownloadOption {
     this.sizeBytes,
   });
 }
+
+/// A YouTube comment.
+class CommentInfo {
+  final String author;
+  final String text;
+  final int likeCount;
+  final String publishedTime;
+  final String authorAvatarUrl;
+  final int replyCount;
+
+  const CommentInfo({
+    required this.author,
+    required this.text,
+    required this.likeCount,
+    required this.publishedTime,
+    required this.authorAvatarUrl,
+    required this.replyCount,
+  });
+}
+
+/// A YouTube channel.
+class ChannelInfo {
+  final String id;
+  final String title;
+  final String logoUrl;
+  final String? bannerUrl;
+  final int subscriberCount;
+  final String description;
+
+  const ChannelInfo({
+    required this.id,
+    required this.title,
+    required this.logoUrl,
+    this.bannerUrl,
+    required this.subscriberCount,
+    required this.description,
+  });
+}
+
+/// A video chapter.
+class ChapterInfo {
+  final String title;
+  final Duration start;
+
+  const ChapterInfo({
+    required this.title,
+    required this.start,
+  });
+}
