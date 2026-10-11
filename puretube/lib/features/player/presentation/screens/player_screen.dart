@@ -365,8 +365,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             for (final q in streams.qualities)
               ListTile(
                 title: Text(q.label),
-                subtitle: q.height > 720
-                    ? const Text('High quality',
+                subtitle: q.isVideoOnly
+                    ? const Text('High quality (video+audio)',
                         style: TextStyle(
                             color: Colors.grey, fontSize: 12))
                     : null,
