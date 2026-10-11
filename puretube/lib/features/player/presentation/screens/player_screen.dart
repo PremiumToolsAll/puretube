@@ -347,6 +347,44 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
+  void _showQualitySheet() {
+    final notifier = ref.read(playerControllerProvider.notifier);
+    final uiState = ref.read(playerControllerProvider);
+    final streams = uiState.streams;
+    if (streams == null || streams.qualities.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+                title: Text('Video quality',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold))),
+            for (final q in streams.qualities)
+              ListTile(
+                title: Text(q.label),
+                subtitle: q.height > 720
+                    ? const Text('High quality',
+                        style: TextStyle(
+                            color: Colors.grey, fontSize: 12))
+                    : null,
+                trailing:
+                    q.height == uiState.currentQualityHeight
+                        ? const Icon(Icons.check, color: _accent)
+                        : null,
+                onTap: () {
+                  notifier.setQuality(q);
+                  Navigator.pop(ctx);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showSleepSheet() {
     final notifier = ref.read(playerControllerProvider.notifier);
     showModalBottomSheet(
@@ -952,6 +990,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 icon: const Icon(Icons.speed, size: 16),
                 label: Text('${uiState.speed}x'),
               ),
+              if (uiState.streams != null &&
+                  uiState.streams!.qualities.length > 1)
+                OutlinedButton.icon(
+                  onPressed: _showQualitySheet,
+                  icon: const Icon(Icons.high_quality, size: 16),
+                  label: Text(uiState.currentQualityHeight > 0
+                      ? '${uiState.currentQualityHeight}p'
+                      : 'Quality'),
+                ),
               OutlinedButton.icon(
                 onPressed: _showSleepSheet,
                 icon: const Icon(Icons.bedtime, size: 16),
