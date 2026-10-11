@@ -4,11 +4,12 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
-import '../../../core/services/audio_player_service.dart';
-import '../../../core/services/youtube_service.dart';
-import '../data/services/dislike_service.dart';
-import '../data/services/sponsorblock_service.dart';
-import '../domain/entities/models.dart';
+import '../../../../core/services/audio_player_service.dart';
+import '../../../../core/services/youtube_service.dart';
+import '../../../home/presentation/providers/search_provider.dart';
+import '../../data/services/dislike_service.dart';
+import '../../data/services/sponsorblock_service.dart';
+import '../../domain/entities/models.dart';
 
 enum PlayerStatus { idle, loading, ready, error }
 
@@ -307,8 +308,8 @@ class PlayerController
   PlaybackStreams _pickStreams(
       String videoId, StreamManifest manifest) {
     final muxed = [...manifest.muxed]
-      ..sort((a, b) => b.videoQuality.height
-          .compareTo(a.videoQuality.height));
+      ..sort((a, b) => b.videoResolution.height
+          .compareTo(a.videoResolution.height));
     final audio = [...manifest.audioOnly]
       ..sort(
           (a, b) => b.bitrate.compareTo(a.bitrate));
@@ -336,7 +337,7 @@ class PlayerController
     ];
     for (final h in standardHeights) {
       final match = muxed.where(
-          (s) => s.videoQuality.height == h);
+          (s) => s.videoResolution.height == h);
       if (match.isNotEmpty && seen.add(h)) {
         qualities.add(QualityOption(
           label: h >= 2160 ? '2160p (4K)' : '${h}p',
@@ -373,7 +374,7 @@ class PlayerController
     return PlaybackStreams(
       videoId: videoId,
       muxedUrl: best.url.toString(),
-      muxedHeight: best.videoQuality.height,
+      muxedHeight: best.videoResolution.height,
       qualities: qualities,
       audioOnlyUrl: bestAudio?.url.toString() ?? '',
     );
