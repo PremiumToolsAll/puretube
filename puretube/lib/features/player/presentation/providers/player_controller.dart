@@ -152,13 +152,9 @@ class PlayerController extends Notifier<PlayerUiState>
   void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
     switch (lifecycleState) {
       case AppLifecycleState.paused:
-        // Home button / app switcher while video is playing: shrink to PiP.
-        if (state.status == PlayerStatus.ready &&
-            !state.audioOnly &&
-            !state.isInPip &&
-            _handler.player.state.playing) {
-          unawaited(_pip.enterPip());
-        }
+        // Home button / app switcher: let audio continue in background.
+        // PiP only when user explicitly taps the PiP button — auto-PiP
+        // was interrupting background playback.
         break;
       case AppLifecycleState.detached:
         // PiP window dismissed with X, or process teardown: stop playback.
