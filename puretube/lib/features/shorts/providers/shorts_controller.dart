@@ -1,10 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/services/youtube_service.dart';
-import '../../player/domain/entities/models.dart';
+import '../../../core/di/providers.dart';
+import '../../player/domain/entities/playback_models.dart';
 
 class ShortsState {
-  final List<VideoItem> shorts;
+  final List<VideoDetails> shorts;
   final int currentIndex;
   final bool loading;
   final String? error;
@@ -17,22 +17,20 @@ class ShortsState {
   });
 
   ShortsState copyWith({
-    List<VideoItem>? shorts,
+    List<VideoDetails>? shorts,
     int? currentIndex,
     bool? loading,
     String? error,
   }) =>
       ShortsState(
         shorts: shorts ?? this.shorts,
-        currentIndex:
-            currentIndex ?? this.currentIndex,
+        currentIndex: currentIndex ?? this.currentIndex,
         loading: loading ?? this.loading,
         error: error,
       );
 }
 
-class ShortsController
-    extends Notifier<ShortsState> {
+class ShortsController extends Notifier<ShortsState> {
   @override
   ShortsState build() {
     Future.microtask(_load);
@@ -41,22 +39,18 @@ class ShortsController
 
   Future<void> _load() async {
     try {
-      // Shorts via search (InnerTube has no dedicated shorts feed).
-      final videos = await YoutubeService
-          .instance
-          .search('#shorts', limit: 30);
+      // Shorts via search (no dedicated shorts feed in the extractor).
+      final videos = await ref
+          .read(extractorProvider)
+          .searchVideos('#shorts', limit: 30);
       final shorts = videos
           .where((v) =>
               v.duration != null &&
               v.duration!.inSeconds <= 90)
-          .map(VideoItem.fromVideo)
           .toList();
       // Fallback: use all if filter is too aggressive.
-      final list = shorts.isNotEmpty
-          ? shorts
-          : videos
-              .map(VideoItem.fromVideo)
-              .toList();
+      final list =
+          shorts.isNotEmpty ? shorts : videos;
       state = state.copyWith(
         shorts: list,
         loading: false,
@@ -71,19 +65,16 @@ class ShortsController
 
   void setIndex(int i) {
     if (i < 0 || i >= state.shorts.length) return;
-    state =
-        state.copyWith(currentIndex: i);
-    // Pre-load trigger: nothing extra needed —
-    // ShortsPlayerWidget pre-caches neighbors.
+    state = state.copyWith(currentIndex: i);
   }
 
   Future<void> retry() async {
-    state = state.copyWith(
-        loading: true, error: null);
+    state =
+        state.copyWith(loading: true, error: null);
     await _load();
   }
 }
 
-final shortsControllerProvider = NotifierProvider<
-    ShortsController,
-    ShortsState>(ShortsController.new);
+final shortsControllerProvider =
+    NotifierProvider<ShortsController, ShortsState>(
+        ShortsController.new);
