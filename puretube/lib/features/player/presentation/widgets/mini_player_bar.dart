@@ -142,28 +142,52 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
                         stream: player.stream.playing,
                         builder: (context, snap) {
                           final playing = snap.data ?? false;
-                          return PressIconButton(
-                            tooltip: playing ? 'Pause' : 'Play',
-                            icon: AnimatedSwitcher(
-                              duration: const Duration(
-                                  milliseconds: 200),
-                              transitionBuilder:
-                                  (child, animation) =>
-                                      ScaleTransition(
-                                scale: animation,
-                                child: child,
+                          return Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              PressIconButton(
+                                tooltip: 'Rewind 10s',
+                                icon: const Icon(
+                                    Icons.replay_10_rounded,
+                                    size: 24,
+                                    color: Colors.white70),
+                                onPressed: () => notifier.seekBy(
+                                    const Duration(seconds: -10)),
                               ),
-                              child: Icon(
-                                playing
-                                    ? Icons.pause_rounded
-                                    : Icons.play_arrow_rounded,
-                                key: ValueKey(playing),
-                                color: _gold,
-                                size: 30,
+                              PressIconButton(
+                                tooltip:
+                                    playing ? 'Pause' : 'Play',
+                                icon: AnimatedSwitcher(
+                                  duration: const Duration(
+                                      milliseconds: 200),
+                                  transitionBuilder:
+                                      (child, animation) =>
+                                          ScaleTransition(
+                                    scale: animation,
+                                    child: child,
+                                  ),
+                                  child: Icon(
+                                    playing
+                                        ? Icons.pause_rounded
+                                        : Icons.play_arrow_rounded,
+                                    key: ValueKey(playing),
+                                    color: _gold,
+                                    size: 30,
+                                  ),
+                                ),
+                                onPressed:
+                                    notifier.togglePlayPause,
                               ),
-                            ),
-                            onPressed:
-                                notifier.togglePlayPause,
+                              PressIconButton(
+                                tooltip: 'Forward 10s',
+                                icon: const Icon(
+                                    Icons.forward_10_rounded,
+                                    size: 24,
+                                    color: Colors.white70),
+                                onPressed: () => notifier.seekBy(
+                                    const Duration(seconds: 10)),
+                              ),
+                            ],
                           );
                         },
                       ),
