@@ -137,6 +137,17 @@ class PlayerController extends Notifier<PlayerUiState>
         _handler.player.stream.position.listen(_maybeSkipSponsor);
     _errorSub = _handler.player.stream.error.listen(_onPlayerError);
 
+    // Wire notification skip buttons to the Up Next queue.
+    _handler.onSkipToNext = () async {
+      final related = state.relatedVideos;
+      if (related.isNotEmpty) {
+        await loadVideo(related.first.id);
+      }
+    };
+    _handler.onSkipToPrevious = () async {
+      await seekTo(Duration.zero);
+    };
+
     ref.onDispose(() {
       binding.removeObserver(this);
       _pipSub?.cancel();
