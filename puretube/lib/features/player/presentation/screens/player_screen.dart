@@ -129,6 +129,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   // audio (music) mode state
   bool _liked = false;
+  bool _disliked = false;
   bool _shuffle = false;
   int _repeatMode = 0; // 0=off, 1=all, 2=one
 
@@ -2132,7 +2133,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
   /// Icon-above-label action row under the video, matching the
-  /// reference design: Add To | Background | Popup | Download.
+  /// reference design: Like | Dislike | Add To | Background | Popup | Download.
   Widget _buildActionRow(
       PlayerUiState uiState, PlayerController notifier) {
     Widget item({
@@ -2142,69 +2143,107 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       bool active = false,
     }) {
       final color = active ? _accent : Colors.white70;
-      return Expanded(
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, color: color, size: 26),
-                const SizedBox(height: 4),
-                Text(label,
-                    style: TextStyle(color: color, fontSize: 12)),
-              ],
-            ),
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: 16, vertical: 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: color, size: 26),
+              const SizedBox(height: 4),
+              Text(label,
+                  style: TextStyle(color: color, fontSize: 12)),
+            ],
           ),
         ),
       );
     }
 
     final video = uiState.video;
-    return Row(
-      children: [
-        item(
-          icon: Icons.playlist_add,
-          label: 'Add To',
-          onTap: () {
-            if (video != null) {
-              showSaveToPlaylistSheet(context, video);
-            }
-          },
-        ),
-        item(
-          icon: Icons.headphones,
-          label: 'Background',
-          active: uiState.audioOnly,
-          onTap: notifier.toggleAudioOnly,
-        ),
-        item(
-          icon: Icons.picture_in_picture_alt,
-          label: 'Popup',
-          onTap: () {
-            if (uiState.pipSupported) {
-              notifier.enterPip();
-            } else {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          item(
+            icon: _liked
+                ? Icons.thumb_up
+                : Icons.thumb_up_outlined,
+            label: video?.likeCount != null
+                ? formatCount(video!.likeCount)
+                : 'Like',
+            active: _liked,
+            onTap: () {
+              setState(() {
+                _liked = !_liked;
+                if (_liked) _disliked = false;
+              });
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                      'Picture-in-picture is not supported on this device.'),
-                  duration: Duration(seconds: 2),
+                SnackBar(
+                  content: Text(_liked
+                      ? 'Added to Liked'
+                      : 'Removed from Liked'),
+                  duration: const Duration(seconds: 1),
                 ),
               );
-            }
-          },
-        ),
-        item(
-          icon: Icons.download_outlined,
-          label: 'Download',
-          onTap: () {
-            if (video != null) _showDownloadSheet(video);
-          },
-        ),
-      ],
+            },
+          ),
+          item(
+            icon: _disliked
+                ? Icons.thumb_down
+                : Icons.thumb_down_outlined,
+            label: 'Dislike',
+            active: _disliked,
+            onTap: () {
+              setState(() {
+                _disliked = !_disliked;
+                if (_disliked) _liked = false;
+              });
+            },
+          ),
+          item(
+            icon: Icons.playlist_add,
+            label: 'Add To',
+            onTap: () {
+              if (video != null) {
+                showSaveToPlaylistSheet(context, video);
+              }
+            },
+          ),
+          item(
+            icon: Icons.headphones,
+            label: 'Background',
+            active: uiState.audioOnly,
+            onTap: notifier.toggleAudioOnly,
+          ),
+          item(
+            icon: Icons.picture_in_picture_alt,
+            label: 'Popup',
+            onTap: () {
+              if (uiState.pipSupported) {
+                notifier.enterPip();
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                        'Picture-in-picture is not supported on this device.'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+          ),
+          item(
+            icon: Icons.download_outlined,
+            label: 'Download',
+            onTap: () {
+              if (video != null) _showDownloadSheet(video);
+            },
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2797,11 +2836,6 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
     return ((local.dx - 12) / (width - 24)).clamp(0.0, 1.0);
   }
 
-  double _fracFromDx(double dx) {
-    final width = context.size?.width ?? 1;
-    return ((dx - 12) / (width - 24)).clamp(0.0, 1.0);
-  }
-
   /// Total duration, preferring the synchronous player state over the
   /// stream snapshot (which can lag or still hold zero during rebuilds).
   Duration _totalDuration(Duration streamDuration) {
@@ -2852,41 +2886,91 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
                 // Listener (raw pointer events) instead of GestureDetector:
                 // bypasses the gesture arena so horizontal drags on the
                 // seekbar can't be stolen by the video-area scrub/volume
-                // recognizers behind it.
-                return Listener(
-                  behavior: HitTestBehavior.opaque,
-                  onPointerDown: (e) {
-                    setState(() {
-                      _dragging = true;
-                      _dragFrac = _fracFromGlobal(e.position);
-                    });
+                // recognizers behind it. Works in both portrait and
+                // landscape: _fracFromGlobal uses the live RenderBox size.
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Drag tooltip: exact time above the thumb while dragging.
+                    final dragTime = _clock(Duration(
+                        milliseconds:
+                            (_dragFrac * duration.inMilliseconds)
+                                .round()));
+                    // Tooltip x position, clamped so it stays on-screen.
+                    final tipX =
+                        (12 + _dragFrac * (constraints.maxWidth - 24))
+                            .clamp(28.0, constraints.maxWidth - 28);
+                    return Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Listener(
+                          behavior: HitTestBehavior.opaque,
+                          onPointerDown: (e) {
+                            setState(() {
+                              _dragging = true;
+                              _dragFrac =
+                                  _fracFromGlobal(e.position);
+                            });
+                          },
+                          onPointerMove: (e) {
+                            if (!_dragging) return;
+                            setState(() => _dragFrac =
+                                _fracFromGlobal(e.position));
+                          },
+                          onPointerUp: (_) async {
+                            final f = _dragFrac;
+                            setState(() => _dragging = false);
+                            await _seekToFrac(f, duration);
+                          },
+                          onPointerCancel: (_) =>
+                              setState(() => _dragging = false),
+                          child: Container(
+                            key: _barKey,
+                            height: 36,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12),
+                            color: Colors.transparent,
+                            child: CustomPaint(
+                              painter: _SeekBarPainter(
+                                playedFrac: frac,
+                                bufferedFrac: bufferedFrac,
+                                activeColor: widget.activeColor,
+                                dragging: _dragging,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (_dragging)
+                          Positioned(
+                            left: tipX - 28,
+                            top: -34,
+                            child: Container(
+                              width: 56,
+                              padding:
+                                  const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.black87,
+                                borderRadius:
+                                    BorderRadius.circular(6),
+                                border: Border.all(
+                                    color: widget.activeColor
+                                        .withOpacity(0.5)),
+                              ),
+                              child: Text(
+                                dragTime,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight:
+                                        FontWeight.w600),
+                              ),
+                            ),
+                          ),
+                      ],
+                    );
                   },
-                  onPointerMove: (e) {
-                    if (!_dragging) return;
-                    setState(() =>
-                        _dragFrac = _fracFromGlobal(e.position));
-                  },
-                  onPointerUp: (_) async {
-                    final f = _dragFrac;
-                    setState(() => _dragging = false);
-                    await _seekToFrac(f, duration);
-                  },
-                  onPointerCancel: (_) =>
-                      setState(() => _dragging = false),
-                  child: Container(
-                    key: _barKey,
-                    height: 36,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12),
-                    color: Colors.transparent,
-                    child: CustomPaint(
-                      painter: _SeekBarPainter(
-                        playedFrac: frac,
-                        bufferedFrac: bufferedFrac,
-                        activeColor: widget.activeColor,
-                      ),
-                    ),
-                  ),
                 );
               },
             );
@@ -2901,11 +2985,13 @@ class _SeekBarPainter extends CustomPainter {
   final double playedFrac;
   final double bufferedFrac;
   final Color activeColor;
+  final bool dragging;
 
   _SeekBarPainter(
       {required this.playedFrac,
       required this.bufferedFrac,
-      this.activeColor = Colors.amber});
+      this.activeColor = Colors.amber,
+      this.dragging = false});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -2928,11 +3014,13 @@ class _SeekBarPainter extends CustomPainter {
       ..strokeWidth = 4;
     canvas.drawLine(
         Offset(0, y), Offset(w * playedFrac, y), played);
-    canvas.drawCircle(Offset(w * playedFrac, y), 7,
+    // Thumb grows while dragging (7 -> 11).
+    final radius = dragging ? 11.0 : 7.0;
+    canvas.drawCircle(Offset(w * playedFrac, y), radius,
         Paint()..color = activeColor);
     canvas.drawCircle(
         Offset(w * playedFrac, y),
-        7,
+        radius,
         Paint()
           ..color = Colors.white
           ..style = PaintingStyle.stroke
@@ -2943,7 +3031,8 @@ class _SeekBarPainter extends CustomPainter {
   bool shouldRepaint(covariant _SeekBarPainter old) =>
       old.playedFrac != playedFrac ||
       old.bufferedFrac != bufferedFrac ||
-      old.activeColor != activeColor;
+      old.activeColor != activeColor ||
+      old.dragging != dragging;
 }
 
 /// Seek bar for the audio (music) mode: gold track with time labels.
