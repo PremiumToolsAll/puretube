@@ -70,7 +70,7 @@ class PopupPlayerService {
       await SystemAlertWindow.showSystemWindow(
         height: 220,
         width: 320,
-        gravity: SystemAlertWindowGravity.center,
+        gravity: SystemWindowGravity.CENTER,
       );
       _showing = true;
       _videoId = videoId;
