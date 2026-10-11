@@ -41,6 +41,19 @@ class SearchController extends Notifier<SearchState> {
     return const SearchState();
   }
 
+  /// Get search suggestions for autocomplete.
+  Future<List<String>> getSuggestions(String query) async {
+    final q = query.trim();
+    if (q.isEmpty) return [];
+    try {
+      return await ref
+          .read(extractorProvider)
+          .getSearchSuggestions(q);
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<void> loadTrending() async {
     state = state.copyWith(status: SearchStatus.loading, query: '');
     try {
