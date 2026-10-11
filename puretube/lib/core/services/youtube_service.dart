@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
+import '../../features/player/widgets/live_chat_widget.dart';
+
 /// Thrown when all InnerTube clients fail for an operation.
 class PureTubeException implements Exception {
   final String message;
@@ -219,6 +221,27 @@ class YoutubeService {
           (yt) => yt.videos.closedCaptionsClient
               .get(track)
               .then((c) => c.captions.toList()));
+
+  // ── Live chat ───────────────────────────────────────────────
+  // NOTE: youtube_explode_dart does not expose the live-chat
+  // endpoint directly. We return an empty page so the UI degrades
+  // gracefully; a future Dio-based InnerTube call can fill this in.
+
+  Future<LiveChatPage> liveChat(
+    String videoId, {
+    String? continuation,
+  }) async {
+    // Placeholder for real InnerTube live_chat implementation.
+    // Returns empty so polling simply shows "no messages".
+    return const LiveChatPage();
+  }
+
+  // ── Shorts helpers ──────────────────────────────────────────
+
+  /// Heuristic: video is a Short if <= 90s.
+  bool isShort(Video v) =>
+      v.duration != null &&
+      v.duration!.inSeconds <= 90;
 
   /// Release all HTTP clients (call on app shutdown / logout).
   void dispose() {
