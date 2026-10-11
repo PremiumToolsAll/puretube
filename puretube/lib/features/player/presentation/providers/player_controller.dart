@@ -321,26 +321,45 @@ class PlayerController extends Notifier<PlayerUiState>
   /// Switches to a different muxed quality, preserving the current
   /// position and play state (via handler.switchStream).
   Future<void> setQuality(MuxedQuality quality) async {
-    if (state.status != PlayerStatus.ready ||
-        state.videoId == null) {
+    final videoId = state.videoId;
+    if (state.status != PlayerStatus.ready || videoId == null) {
       return;
     }
     if (state.audioOnly) return; // quality applies to video mode only
     if (state.currentQuality?.height == quality.height) return;
+    var target = quality;
+    // DASH stream URLs are signed with an expiry timestamp. The quality
+    // list is fetched once when the video loads, so by the time the user
+    // picks a 1080p+ DASH quality the URL may have expired ("Failed to
+    // open ..."). Refresh the manifest at selection time for fresh URLs.
+    if (quality.isDash) {
+      try {
+        final fresh = await _extractor.getQualityOptions(videoId);
+        final match =
+            fresh.where((q) => q.height == quality.height && q.isDash);
+        if (match.isNotEmpty) {
+          target = match.first;
+          // Keep the quality menu in sync with the fresh URLs.
+          state = state.copyWith(availableQualities: fresh);
+        }
+      } catch (_) {
+        // Fall back to the cached URL below.
+      }
+    }
     try {
-      await _handler.switchStream(quality.url,
-          audioUrl: quality.audioUrl);
+      await _handler.switchStream(target.url,
+          audioUrl: target.audioUrl);
       // Keep the cached streams record in sync so expiry recovery
       // and audio<->video toggling reuse the chosen quality.
       final s = state.streams;
       state = state.copyWith(
-        currentQuality: quality,
+        currentQuality: target,
         streams: s == null
             ? null
             : PlaybackStreams(
                 videoId: s.videoId,
-                muxedUrl: quality.url,
-                muxedHeight: quality.height,
+                muxedUrl: target.url,
+                muxedHeight: target.height,
                 audioOnlyUrl: s.audioOnlyUrl,
                 audioBitrate: s.audioBitrate,
                 fetchedAt: s.fetchedAt,
