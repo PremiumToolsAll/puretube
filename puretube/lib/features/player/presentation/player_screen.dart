@@ -17,6 +17,7 @@ import 'widgets/comments_section.dart';
 import 'widgets/player_controls.dart';
 import 'widgets/quality_speed_sheets.dart';
 import 'widgets/sleep_timer_sheet.dart';
+import 'widgets/subtitle_widgets.dart';
 import 'widgets/video_info_section.dart';
 
 /// PureTube player — full-featured video screen.
@@ -301,6 +302,12 @@ class _PlayerScreenState
               _error(ui),
             if (ready)
               _gestureLayer(player, ui, notifier),
+            if (ready &&
+                ui.activeSubtitle != null)
+              SubtitleOverlay(
+                player: player,
+                notifier: notifier,
+              ),
             if (ui.sleepTimer.active)
               Positioned(
                 top: 8,
