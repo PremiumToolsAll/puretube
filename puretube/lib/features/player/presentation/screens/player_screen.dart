@@ -362,6 +362,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 title: Text('Video quality',
                     style:
                         TextStyle(fontWeight: FontWeight.bold))),
+            ListTile(
+              title: const Text('Auto'),
+              subtitle: const Text('Best quality for your connection',
+                  style: TextStyle(
+                      color: Colors.grey, fontSize: 12)),
+              trailing: uiState.currentQualityHeight == 0
+                  ? const Icon(Icons.check, color: _accent)
+                  : null,
+              onTap: () {
+                // Auto = highest available quality.
+                if (streams.qualities.isNotEmpty) {
+                  notifier.setQuality(streams.qualities.first);
+                }
+                Navigator.pop(ctx);
+              },
+            ),
             for (final q in streams.qualities)
               ListTile(
                 title: Text(q.label),
