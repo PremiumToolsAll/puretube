@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/format.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/format.dart';
 import '../providers/player_controller.dart';
 import 'subtitle_widgets.dart';
 import 'seek_bar.dart';
