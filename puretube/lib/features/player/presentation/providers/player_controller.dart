@@ -105,6 +105,10 @@ class PlayerController extends Notifier<PlayerUiState>
   bool _skipInProgress = false;
   int _recoveryAttempts = 0;
 
+  /// Play queue for next/previous navigation.
+  List<String> _queue = [];
+  int _queueIndex = -1;
+
   @override
   PlayerUiState build() {
     final binding = WidgetsBinding.instance;
@@ -125,6 +129,10 @@ class PlayerController extends Notifier<PlayerUiState>
       _errorSub?.cancel();
       _cancelSleepTimer();
     });
+
+    // Wire notification next/previous to queue navigation.
+    _handler.onSkipNext = playNext;
+    _handler.onSkipPrevious = playPrevious;
 
     return const PlayerUiState();
   }
@@ -152,6 +160,40 @@ class PlayerController extends Notifier<PlayerUiState>
 
   // ---------------- loading ----------------
 
+  /// Set the play queue (e.g. from search results) for next/previous.
+  void setQueue(List<String> videoIds, {int startIndex = 0}) {
+    _queue = videoIds;
+    _queueIndex = startIndex.clamp(0, videoIds.length - 1);
+  }
+
+  /// Play next video in queue, or a related video if queue is empty.
+  Future<void> playNext() async {
+    if (_queue.isNotEmpty && _queueIndex < _queue.length - 1) {
+      _queueIndex++;
+      await loadVideo(_queue[_queueIndex]);
+      return;
+    }
+    // Fallback: play first related video.
+    final related = state.relatedVideos;
+    if (related.isNotEmpty) {
+      await loadVideo(related.first.id);
+    }
+  }
+
+  /// Play previous video in queue.
+  Future<void> playPrevious() async {
+    if (_queue.isNotEmpty && _queueIndex > 0) {
+      _queueIndex--;
+      await loadVideo(_queue[_queueIndex]);
+    }
+  }
+
+  bool get hasNext =>
+      (_queue.isNotEmpty && _queueIndex < _queue.length - 1) ||
+      state.relatedVideos.isNotEmpty;
+
+  bool get hasPrevious => _queue.isNotEmpty && _queueIndex > 0;
+
   Future<void> loadVideo(String videoId) async {
     final previousSpeed = state.speed;
     final previousSkip = state.skipSponsors;
@@ -165,7 +207,6 @@ class PlayerController extends Notifier<PlayerUiState>
       speed: previousSpeed,
       skipSponsors: previousSkip,
     );
-
     try {
       // Fetch details, streams, and sponsor segments in parallel.
       final results = await Future.wait([
@@ -199,7 +240,7 @@ class PlayerController extends Notifier<PlayerUiState>
       );
 
       // Load related videos in background (non-blocking).
-      _extractor.getRelatedVideos(videoId).then((related) {
+      _extractor.getRelatedVideos(video).then((related) {
         if (state.videoId == videoId) {
           state = state.copyWith(relatedVideos: related);
         }
