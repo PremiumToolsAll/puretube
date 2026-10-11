@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../domain/entities/models.dart';
 import '../providers/player_controller.dart';
 
