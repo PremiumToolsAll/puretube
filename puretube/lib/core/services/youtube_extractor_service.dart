@@ -118,6 +118,27 @@ class YoutubeExtractorService {
         }
       }
 
+      // Video-only streams (1080p/1440p/2160p/4K) with paired audio.
+      // These need separate audio track via mpv's audio-file option.
+      final bestAudioUrl = bestAudio.url.toString();
+      final videoOnly = [...manifest.videoOnly]
+        ..sort((a, b) => b.videoResolution.height
+            .compareTo(a.videoResolution.height));
+      for (final v in videoOnly) {
+        final h = v.videoResolution.height;
+        // Only add qualities higher than max muxed (1080p+).
+        if (h > 720 && seenHeights.add(h)) {
+          qualities.add(QualityOption(
+            label: h >= 2160 ? '4K' : '${h}p',
+            height: h,
+            url: v.url.toString(),
+            audioUrl: bestAudioUrl,
+          ));
+        }
+      }
+      // Sort all qualities by height, best first.
+      qualities.sort((a, b) => b.height.compareTo(a.height));
+
       return PlaybackStreams(
         videoId: videoId,
         muxedUrl: bestMuxed.url.toString(),
