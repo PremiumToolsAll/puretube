@@ -27,6 +27,7 @@ class PlayerUiState {
   final List<SponsorSegment> sponsorSegments;
   final bool skipSponsors;
   final bool pipSupported;
+  final List<VideoDetails> relatedVideos;
 
   const PlayerUiState({
     this.status = PlayerStatus.idle,
@@ -41,6 +42,7 @@ class PlayerUiState {
     this.sponsorSegments = const [],
     this.skipSponsors = true,
     this.pipSupported = false,
+    this.relatedVideos = const [],
   });
 
   PlayerUiState copyWith({
@@ -56,6 +58,7 @@ class PlayerUiState {
     List<SponsorSegment>? sponsorSegments,
     bool? skipSponsors,
     bool? pipSupported,
+    List<VideoDetails>? relatedVideos,
   }) {
     return PlayerUiState(
       status: status ?? this.status,
@@ -70,6 +73,7 @@ class PlayerUiState {
       sponsorSegments: sponsorSegments ?? this.sponsorSegments,
       skipSponsors: skipSponsors ?? this.skipSponsors,
       pipSupported: pipSupported ?? this.pipSupported,
+      relatedVideos: relatedVideos ?? this.relatedVideos,
     );
   }
 }
@@ -181,6 +185,13 @@ class PlayerController extends Notifier<PlayerUiState>
         sponsorSegments: segments,
         pipSupported: await _pip.isPipSupported,
       );
+
+      // Load related videos in background (non-blocking).
+      _extractor.getRelatedVideos(videoId).then((related) {
+        if (state.videoId == videoId) {
+          state = state.copyWith(relatedVideos: related);
+        }
+      });
     } on PureTubeException catch (e) {
       state = state.copyWith(
           status: PlayerStatus.error, errorMessage: e.message);
