@@ -24,6 +24,16 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
         _player.stream.completed.listen((_) => _broadcastState());
     // Fatal player errors are handled by PlayerController, which also
     // listens to player.stream.error for expiry recovery.
+    //
+    // YouTube's DASH (video-only) URLs are picky about the client: mpv's
+    // default user-agent gets "Failed to open" on some itags. Spoof the
+    // same Chrome UA that youtube_explode_dart uses so mpv is treated
+    // like a regular browser.
+    final platform = _player.platform;
+    if (platform is NativePlayer) {
+      unawaited(platform.setProperty('user-agent',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'));
+    }
   }
 
   final Player _player = Player(
