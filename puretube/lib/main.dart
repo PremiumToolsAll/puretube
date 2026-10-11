@@ -51,11 +51,16 @@ Future<void> main() async {
       config: const AudioServiceConfig(
         androidNotificationChannelId: 'com.puretube.channel.audio',
         androidNotificationChannelName: 'PureTube playback',
-        androidNotificationOngoing: true,
         androidShowNotificationBadge: false,
-        androidStopForegroundOnPause: true,
+        // Keep the service in foreground while paused so the notification
+        // (and its controls) stays alive and responsive.
+        androidStopForegroundOnPause: false,
+        androidNotificationClickStartsActivity: true,
+        // Rewind/fast-forward buttons seek ±10s via handler.rewind/fastForward.
+        fastForwardInterval: Duration(seconds: 10),
+        rewindInterval: Duration(seconds: 10),
       ),
-    ) as PureTubeAudioHandler;
+    );
   } catch (e) {
     debugPrint('AudioService init failed, using fallback handler: $e');
     audioHandler = PureTubeAudioHandler();
