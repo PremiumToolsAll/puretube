@@ -51,7 +51,7 @@ Future<void> main() async {
       config: const AudioServiceConfig(
         androidNotificationChannelId: 'com.puretube.channel.audio',
         androidNotificationChannelName: 'PureTube playback',
-        androidNotificationOngoing: true,
+        androidNotificationOngoing: false,
         androidShowNotificationBadge: false,
         androidStopForegroundOnPause: false,
       ),
