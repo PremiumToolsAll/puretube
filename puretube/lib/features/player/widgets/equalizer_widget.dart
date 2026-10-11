@@ -65,8 +65,11 @@ class _EqualizerWidgetState
           .map((b) =>
               'c${_bands.indexOf(b)} f=${_freqFor(_bands.indexOf(b))} w=1 g=$b')
           .join('|');
-      await widget.player.setProperty(
-          'af', 'anequalizer=$gains');
+      final platform = widget.player.platform;
+      if (platform is NativePlayer) {
+        await platform.setProperty(
+            'af', 'anequalizer=$gains');
+      }
     } catch (_) {
       // Equalizer not supported on this build — UI still works.
     }
