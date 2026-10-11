@@ -11,6 +11,19 @@ import '../../features/player/domain/entities/playback_models.dart';
 /// YouTube breaks the extractor (and it will, periodically), the fix
 /// lands in one file: bump youtube_explode_dart and adjust here.
 
+/// Converts technical extractor errors to user-friendly Bengali messages.
+String _friendlyError(Object e) {
+  final msg = e.toString();
+  if (msg.contains('RequestLimitExceededException') ||
+      msg.contains('rate limiting')) {
+    return 'YouTube সাময়িকভাবে block করেছে (অনেক request)। ১-২ ঘণ্টা পরে আবার চেষ্টা করো, অথবা WiFi/mobile data বদলে দেখো।';
+  }
+  if (msg.contains('FormatException')) {
+    return 'YouTube data পড়তে সমস্যা হয়েছে। Retry চাপো।';
+  }
+  return msg;
+}
+
 /// Height in pixels for a [VideoQuality] (youtube_explode_dart 2.5.3 made it a plain enum).
 extension VideoQualityHeight on VideoQuality {
   int get height => switch (this) {
@@ -58,7 +71,7 @@ class YoutubeExtractorService {
     } on PureTubeException {
       rethrow;
     } catch (e) {
-      throw ExtractorException('Could not load video details: $e');
+      throw ExtractorException('Could not load video details: ${_friendlyError(e)}');
     }
   }
 
@@ -176,7 +189,7 @@ class YoutubeExtractorService {
     } on PureTubeException {
       rethrow;
     } catch (e) {
-      throw ExtractorException('Search failed: $e');
+      throw ExtractorException('Search failed: ${_friendlyError(e)}');
     }
   }
 
