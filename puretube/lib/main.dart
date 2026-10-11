@@ -51,11 +51,14 @@ Future<void> main() async {
       config: const AudioServiceConfig(
         androidNotificationChannelId: 'com.puretube.channel.audio',
         androidNotificationChannelName: 'PureTube playback',
+        androidNotificationChannelDescription:
+            'Playback controls for PureTube',
         androidShowNotificationBadge: false,
         // Keep the service in foreground while paused so the notification
         // (and its controls) stays alive and responsive.
         androidStopForegroundOnPause: false,
         androidNotificationClickStartsActivity: true,
+        androidNotificationOngoing: true,
         // Rewind/fast-forward buttons seek ±10s via handler.rewind/fastForward.
         fastForwardInterval: Duration(seconds: 10),
         rewindInterval: Duration(seconds: 10),
