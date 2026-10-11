@@ -1,7 +1,7 @@
 import 'package:isar/isar.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../../../search/data/search_history.dart';
+import '../../search/data/search_history.dart';
 import 'library_models.dart';
 
 /// Library database — history, playlists, subscriptions, saved.
