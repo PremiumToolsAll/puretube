@@ -1,85 +1,72 @@
-import 'dart:io';
-
-import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:permission_handler/permission_handler.dart';
 
-import 'app.dart';
-import 'core/database/hive_setup.dart';
-import 'core/di/providers.dart';
-import 'features/player/data/services/audio_player_handler.dart';
+import 'core/services/audio_player_service.dart';
+import 'core/services/deep_link_service.dart';
+import 'core/theme/app_theme.dart';
+import 'core/utils/permission_utils.dart';
+import 'features/downloads/data/download_service.dart';
+import 'features/home/presentation/providers/search_provider.dart';
+import 'features/home/presentation/home_screen.dart';
+import 'features/player/presentation/player_screen.dart';
 
-/// Tracks whether media_kit native libs loaded OK.
-/// If false, the player shows a message instead of crashing.
-bool mediaKitReady = false;
+final _navKey = GlobalKey<NavigatorState>();
 
-Future<void> main() async {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Catch-all: never leave the user staring at a white screen.
-  FlutterError.onError = (details) {
-    FlutterError.presentError(details);
-  };
+  // media_kit native libs.
+  MediaKit.ensureInitialized();
 
-  // media_kit native libs can fail on some devices/ABIs — don't let it
-  // kill the whole app; the home feed works fine without it.
-  try {
-    MediaKit.ensureInitialized();
-    mediaKitReady = true;
-  } catch (e) {
-    debugPrint('MediaKit init failed (non-fatal): $e');
-    mediaKitReady = false;
-  }
+  // Foreground audio service (MediaSession).
+  final audioHandler = await initAudioService();
 
-  try {
-    await initHive();
-  } catch (e) {
-    debugPrint('Hive init failed (non-fatal): $e');
-  }
+  // Background download engine (resumes interrupted queue).
+  await DownloadService.instance.init();
 
-  await _ensureNotificationPermission();
-
-  // AudioService is nice-to-have for background playback; the app must
-  // still open if it fails (e.g. manifest/service edge cases).
-  // Fallback: plain handler without the foreground service.
-  late final PureTubeAudioHandler audioHandler;
-  try {
-    audioHandler = await AudioService.init(
-      builder: () => PureTubeAudioHandler(),
-      config: const AudioServiceConfig(
-        androidNotificationChannelId: 'com.puretube.channel.audio',
-        androidNotificationChannelName: 'PureTube playback',
-        androidNotificationOngoing: false,
-        androidShowNotificationBadge: false,
-        androidStopForegroundOnPause: false,
-      ),
-    ) as PureTubeAudioHandler;
-  } catch (e) {
-    debugPrint('AudioService init failed, using fallback handler: $e');
-    audioHandler = PureTubeAudioHandler();
-  }
+  // Notification permission (Android 13+).
+  await PermissionUtils.ensureNotifications();
 
   runApp(
     ProviderScope(
       overrides: [
-        audioHandlerProvider.overrideWithValue(audioHandler),
+        audioHandlerProvider
+            .overrideWithValue(audioHandler),
       ],
       child: const PureTubeApp(),
     ),
   );
+
+  // Deep links (after first frame so Navigator exists).
+  WidgetsBinding.instance
+      .addPostFrameCallback((_) {
+    DeepLinkService.instance.init(
+      onVideo: (videoId) {
+        final ctx = _navKey.currentContext;
+        if (ctx != null) {
+          Navigator.of(ctx).push(
+            MaterialPageRoute(
+                builder: (_) => PlayerScreen(
+                    videoId: videoId)),
+          );
+        }
+      },
+    );
+  });
 }
 
-/// Android 13+ needs a runtime grant before the playback notification
-/// (and its controls) can appear. Audio itself works regardless.
-Future<void> _ensureNotificationPermission() async {
-  if (!Platform.isAndroid) return;
-  try {
-    if (await Permission.notification.isDenied) {
-      await Permission.notification.request();
-    }
-  } catch (_) {
-    // Best effort; never block startup.
+class PureTubeApp extends StatelessWidget {
+  const PureTubeApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'PureTube',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.dark,
+      navigatorKey: _navKey,
+      home: const HomeScreen(),
+    );
   }
 }
