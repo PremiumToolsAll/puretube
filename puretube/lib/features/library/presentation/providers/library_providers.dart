@@ -232,6 +232,7 @@ class DownloadsController
         duration: null,
         thumbnailUrl: record.thumbnailUrl,
         viewCount: null,
+        likeCount: null,
         uploadDate: null,
         description: '',
       ),
