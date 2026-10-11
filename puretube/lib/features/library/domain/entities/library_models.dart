@@ -184,6 +184,7 @@ class DownloadRecord {
   final int? totalBytes;
   final DownloadStatus status;
   final double progress;
+  final double speedBps;
   final String? error;
   final DateTime createdAt;
 
@@ -199,6 +200,7 @@ class DownloadRecord {
     this.totalBytes,
     required this.status,
     this.progress = 0,
+    this.speedBps = 0,
     this.error,
     required this.createdAt,
   });
@@ -206,6 +208,7 @@ class DownloadRecord {
   DownloadRecord copyWith({
     DownloadStatus? status,
     double? progress,
+    double? speedBps,
     String? error,
     int? totalBytes,
   }) =>
@@ -221,6 +224,7 @@ class DownloadRecord {
         totalBytes: totalBytes ?? this.totalBytes,
         status: status ?? this.status,
         progress: progress ?? this.progress,
+        speedBps: speedBps ?? this.speedBps,
         error: error,
         createdAt: createdAt,
       );
