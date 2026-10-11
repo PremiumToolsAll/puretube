@@ -65,13 +65,14 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
       {String? audioUrl, Duration? resumeAt}) async {
     final pos = resumeAt ?? _player.state.position;
     final wasPlaying = _player.state.playing;
-    await _player.open(Media(streamUrl, start: pos), play: wasPlaying);
-    // setProperty is defined on NativePlayer (not Player) in media_kit —
-    // guard with `is` so this is a no-op on web.
+    // mpv's 'audio-file' must be set BEFORE opening the media, otherwise
+    // the external audio track is not attached. Guard with `is` so this
+    // is a no-op on web (setProperty is defined on NativePlayer).
     final platform = _player.platform;
     if (platform is NativePlayer) {
       await platform.setProperty('audio-file', audioUrl ?? 'no');
     }
+    await _player.open(Media(streamUrl, start: pos), play: wasPlaying);
   }
 
   @override
