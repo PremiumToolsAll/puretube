@@ -978,7 +978,73 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 style: const TextStyle(
                     color: Colors.grey, fontSize: 13)),
           ],
+          if (uiState.relatedVideos.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            const Text('Up next',
+                style: TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            ...uiState.relatedVideos.map((v) => _buildRelatedTile(
+                context, v, notifier)),
+          ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildRelatedTile(BuildContext context, VideoDetails v,
+      PlayerController notifier) {
+    return InkWell(
+      onTap: () => notifier.loadVideo(v.id),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                v.thumbnailUrl,
+                width: 140,
+                height: 80,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  width: 140,
+                  height: 80,
+                  color: Colors.grey[900],
+                  child: const Icon(Icons.broken_image,
+                      color: Colors.grey),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(v.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${v.author} • ${formatCount(v.viewCount)} views',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: Colors.grey, fontSize: 12),
+                  ),
+                  if (v.duration != null)
+                    Text(formatDuration(v.duration),
+                        style: const TextStyle(
+                            color: Colors.grey, fontSize: 12)),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
