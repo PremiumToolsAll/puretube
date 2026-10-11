@@ -365,11 +365,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             for (final q in streams.qualities)
               ListTile(
                 title: Text(q.label),
-                subtitle: q.isVideoOnly
-                    ? const Text('High quality (video+audio)',
-                        style: TextStyle(
-                            color: Colors.grey, fontSize: 12))
-                    : null,
                 trailing:
                     q.height == uiState.currentQualityHeight
                         ? const Icon(Icons.check, color: _accent)
