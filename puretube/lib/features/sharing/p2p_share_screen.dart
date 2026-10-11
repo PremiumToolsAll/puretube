@@ -163,14 +163,14 @@ class _P2pShareScreenState
                 (endpointId, payload) async {
               if (payload.type ==
                   PayloadType.FILE) {
-                final file =
-                    payload.file;
-                if (file != null &&
+                final filePath =
+                    payload.uri;
+                if (filePath != null &&
                     mounted) {
                   setState(() => _status =
-                      'Received: ${file.filePath}');
+                      'Received: $filePath');
                   await Share.shareXFiles(
-                      [XFile(file.filePath!)],
+                      [XFile(filePath)],
                       text:
                           'Received via PureTube P2P');
                 }
