@@ -1,25 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/l10n/app_localizations.dart';
 import 'core/theme/app_theme.dart';
 import 'features/home/presentation/screens/home_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
+import 'features/settings/presentation/screens/settings_screen.dart';
 
-class PureTubeApp extends StatefulWidget {
+class PureTubeApp extends ConsumerStatefulWidget {
   const PureTubeApp({super.key});
 
   @override
-  State<PureTubeApp> createState() => _PureTubeAppState();
+  ConsumerState<PureTubeApp> createState() => _PureTubeAppState();
 }
 
-class _PureTubeAppState extends State<PureTubeApp> {
+class _PureTubeAppState extends ConsumerState<PureTubeApp> {
   bool? _showOnboarding;
 
   @override
   void initState() {
     super.initState();
     _checkOnboarding();
+    loadSavedLocale(ref);
   }
 
   Future<void> _checkOnboarding() async {
@@ -38,6 +41,7 @@ class _PureTubeAppState extends State<PureTubeApp> {
       title: 'PureTube',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
+      locale: ref.watch(localeProvider),
       localizationsDelegates:
           AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
