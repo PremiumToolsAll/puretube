@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../../core/theme/app_theme.dart';
-import '../library/data/library_database.dart';
-import '../search/data/app_database.dart';
-import './data/settings_service.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../library/data/library_database.dart';
+import '../../search/data/app_database.dart';
+import '../data/settings_service.dart';
 
 /// Comprehensive settings screen.
 class SettingsScreen extends StatefulWidget {
