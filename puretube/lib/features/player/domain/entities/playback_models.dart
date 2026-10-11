@@ -70,11 +70,34 @@ class DownloadOption {
   final bool audioOnly;
   final int? sizeBytes;
 
+  /// Video codec string (e.g. "avc1.640028", "vp9") for video options.
+  final String? videoCodec;
+
+  /// Audio codec string (e.g. "opus", "mp4a.40.2") for audio options.
+  final String? audioCodec;
+
+  /// Video height in px (0 for audio-only options).
+  final int height;
+
+  /// Audio bitrate in kbps (0 for video options).
+  final int bitrateKbps;
+
+  /// True for video-only DASH streams (no audio track).
+  final bool videoOnly;
+
+  /// True for muxed streams (video+audio in one file).
+  bool get isMuxed => !audioOnly && !videoOnly;
+
   const DownloadOption({
     required this.label,
     required this.url,
     required this.audioOnly,
     this.sizeBytes,
+    this.videoCodec,
+    this.audioCodec,
+    this.height = 0,
+    this.bitrateKbps = 0,
+    this.videoOnly = false,
   });
 }
 
