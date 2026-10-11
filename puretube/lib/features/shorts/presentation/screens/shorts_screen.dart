@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/theme/app_theme.dart';
 import '../../providers/shorts_controller.dart';
 import '../widgets/shorts_player_widget.dart';
 
@@ -16,6 +15,7 @@ class ShortsScreen extends ConsumerStatefulWidget {
 
 class _ShortsScreenState
     extends ConsumerState<ShortsScreen> {
+  static const _accent = Color(0xFF6200EA);
   final _pageCtrl = PageController();
 
   @override
@@ -28,27 +28,26 @@ class _ShortsScreenState
   Widget build(BuildContext context) {
     final state =
         ref.watch(shortsControllerProvider);
-    final notifier = ref
-        .read(shortsControllerProvider.notifier);
+    final notifier =
+        ref.read(shortsControllerProvider.notifier);
 
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
         child: state.loading
             ? const Center(
-                child:
-                    CircularProgressIndicator(
-                        color:
-                            AppTheme.primary))
+                child: CircularProgressIndicator(
+                    color: _accent))
             : state.error != null
                 ? Center(
                     child: Column(
                       mainAxisSize:
                           MainAxisSize.min,
                       children: [
-                        Text('Could not load shorts',
-                            style:
-                                AppTheme.body),
+                        const Text(
+                            'Could not load shorts',
+                            style: TextStyle(
+                                color: Colors.grey)),
                         const SizedBox(
                             height: 12),
                         ElevatedButton(
@@ -57,8 +56,7 @@ class _ShortsScreenState
                           style: ElevatedButton
                               .styleFrom(
                                   backgroundColor:
-                                      AppTheme
-                                          .primary),
+                                      _accent),
                           child: const Text(
                               'Retry'),
                         ),
