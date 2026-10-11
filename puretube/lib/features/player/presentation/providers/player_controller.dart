@@ -28,6 +28,7 @@ class PlayerUiState {
   final bool skipSponsors;
   final bool pipSupported;
   final List<VideoDetails> relatedVideos;
+  final int currentQualityHeight;
 
   const PlayerUiState({
     this.status = PlayerStatus.idle,
@@ -43,6 +44,7 @@ class PlayerUiState {
     this.skipSponsors = true,
     this.pipSupported = false,
     this.relatedVideos = const [],
+    this.currentQualityHeight = 0,
   });
 
   PlayerUiState copyWith({
@@ -59,6 +61,7 @@ class PlayerUiState {
     bool? skipSponsors,
     bool? pipSupported,
     List<VideoDetails>? relatedVideos,
+    int? currentQualityHeight,
   }) {
     return PlayerUiState(
       status: status ?? this.status,
@@ -74,6 +77,8 @@ class PlayerUiState {
       skipSponsors: skipSponsors ?? this.skipSponsors,
       pipSupported: pipSupported ?? this.pipSupported,
       relatedVideos: relatedVideos ?? this.relatedVideos,
+      currentQualityHeight:
+          currentQualityHeight ?? this.currentQualityHeight,
     );
   }
 }
@@ -162,9 +167,15 @@ class PlayerController extends Notifier<PlayerUiState>
     );
 
     try {
-      final video = await _extractor.getVideoDetails(videoId);
-      final streams = await _extractor.getPlaybackStreams(videoId);
-      final segments = await _sponsorBlock.getSegments(videoId);
+      // Fetch details, streams, and sponsor segments in parallel.
+      final results = await Future.wait([
+        _extractor.getVideoDetails(videoId),
+        _extractor.getPlaybackStreams(videoId),
+        _sponsorBlock.getSegments(videoId),
+      ]);
+      final video = results[0] as VideoDetails;
+      final streams = results[1] as PlaybackStreams;
+      final segments = results[2] as List<SponsorSegment>;
 
       await _handler.loadMedia(
         mediaItem: MediaItem(
@@ -184,6 +195,7 @@ class PlayerController extends Notifier<PlayerUiState>
         streams: streams,
         sponsorSegments: segments,
         pipSupported: await _pip.isPipSupported,
+        currentQualityHeight: streams.muxedHeight,
       );
 
       // Load related videos in background (non-blocking).
@@ -268,6 +280,42 @@ class PlayerController extends Notifier<PlayerUiState>
           goingAudioOnly ? streams.audioOnlyUrl : streams.muxedUrl;
       await _handler.switchStream(url);
       state = state.copyWith(audioOnly: goingAudioOnly);
+    } on PureTubeException catch (e) {
+      state = state.copyWith(errorMessage: e.message);
+    }
+  }
+
+  /// Switch to a different muxed quality, preserving position.
+  Future<void> setQuality(QualityOption quality) async {
+    if (state.status != PlayerStatus.ready ||
+        state.videoId == null ||
+        state.audioOnly) {
+      return;
+    }
+    if (quality.height == state.currentQualityHeight) return;
+    try {
+      final position = _handler.player.state.position;
+      await _handler.switchStream(quality.url);
+      await _handler.seek(position);
+      state = state.copyWith(
+        currentQualityHeight: quality.height,
+        streams: state.streams,
+      );
+      // Update the stored muxed URL so expiry recovery uses new quality.
+      final s = state.streams;
+      if (s != null) {
+        state = state.copyWith(
+          streams: PlaybackStreams(
+            videoId: s.videoId,
+            muxedUrl: quality.url,
+            muxedHeight: quality.height,
+            qualities: s.qualities,
+            audioOnlyUrl: s.audioOnlyUrl,
+            audioBitrate: s.audioBitrate,
+            fetchedAt: s.fetchedAt,
+          ),
+        );
+      }
     } on PureTubeException catch (e) {
       state = state.copyWith(errorMessage: e.message);
     }
