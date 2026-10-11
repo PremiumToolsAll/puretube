@@ -1,12 +1,13 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart'
+    hide SearchController;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../downloads/presentation/downloads_screen.dart';
-import '../library/presentation/library_screen.dart';
+import '../../downloads/presentation/downloads_screen.dart';
+import '../../library/presentation/library_screen.dart';
 import '../../player/domain/entities/models.dart';
-import '../search/presentation/search_screen.dart';
-import '../settings/presentation/settings_screen.dart';
+import '../../search/presentation/search_screen.dart';
+import '../../settings/presentation/settings_screen.dart';
 import '../../shorts/presentation/screens/shorts_screen.dart';
 import './providers/search_provider.dart';
 import './widgets/shimmer_loading.dart';
