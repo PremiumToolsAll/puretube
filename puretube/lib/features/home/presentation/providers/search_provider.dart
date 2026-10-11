@@ -1,9 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
-import '../../../core/services/audio_player_service.dart';
-import '../../../core/services/youtube_service.dart';
-import '../../player/domain/entities/models.dart';
+import '../../../../core/services/audio_player_service.dart';
+import '../../../../core/services/youtube_service.dart';
+import '../../../player/domain/entities/models.dart';
 
 /// Singleton audio handler (initialized in main).
 final audioHandlerProvider =
