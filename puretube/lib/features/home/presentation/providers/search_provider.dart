@@ -1,95 +1,100 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
-import '../../../../core/di/providers.dart';
-import '../../../../core/error/exceptions.dart';
-import '../../../player/domain/entities/playback_models.dart';
+import '../../../core/services/audio_player_service.dart';
+import '../../../core/services/youtube_service.dart';
+import '../../player/domain/entities/models.dart';
+
+/// Singleton audio handler (initialized in main).
+final audioHandlerProvider =
+    Provider<PureTubeAudioHandler>((_) {
+  throw UnimplementedError(
+      'audioHandlerProvider must be overridden in main()');
+});
+
+final youtubeServiceProvider =
+    Provider<YoutubeService>((_) => YoutubeService.instance);
 
 enum SearchStatus { idle, loading, done, error }
 
 class SearchState {
   final SearchStatus status;
   final String query;
-  final List<VideoDetails> results;
-  final String? errorMessage;
+  final List<VideoItem> results;
+  final String? error;
 
   const SearchState({
     this.status = SearchStatus.idle,
     this.query = '',
     this.results = const [],
-    this.errorMessage,
+    this.error,
   });
 
   SearchState copyWith({
     SearchStatus? status,
     String? query,
-    List<VideoDetails>? results,
-    String? errorMessage,
+    List<VideoItem>? results,
+    String? error,
   }) =>
       SearchState(
         status: status ?? this.status,
         query: query ?? this.query,
         results: results ?? this.results,
-        errorMessage: errorMessage,
+        error: error,
       );
 }
 
 class SearchController extends Notifier<SearchState> {
   @override
   SearchState build() {
-    // Auto-load trending on startup.
-    Future.microtask(() => loadTrending());
+    Future.microtask(_loadTrending);
     return const SearchState();
   }
 
-  /// Get search suggestions for autocomplete.
-  Future<List<String>> getSuggestions(String query) async {
-    final q = query.trim();
-    if (q.isEmpty) return [];
+  YoutubeService get _yt =>
+      ref.read(youtubeServiceProvider);
+
+  Future<void> _loadTrending() async {
+    state = state.copyWith(status: SearchStatus.loading);
     try {
-      return await ref
-          .read(extractorProvider)
-          .getSearchSuggestions(q);
-    } catch (_) {
-      return [];
+      final videos = await _yt.trending(limit: 30);
+      state = state.copyWith(
+        status: SearchStatus.done,
+        results:
+            videos.map(VideoItem.fromVideo).toList(),
+      );
+    } catch (e) {
+      state = state.copyWith(
+        status: SearchStatus.error,
+        error: e.toString(),
+      );
     }
   }
 
-  Future<void> loadTrending() async {
-    state = state.copyWith(status: SearchStatus.loading, query: '');
-    try {
-      final results =
-          await ref.read(extractorProvider).getTrendingVideos();
-      state = state.copyWith(
-          status: SearchStatus.done, results: results);
-    } on PureTubeException catch (e) {
-      state = state.copyWith(
-          status: SearchStatus.error, errorMessage: e.message);
-    } catch (e) {
-      state = state.copyWith(
-          status: SearchStatus.error,
-          errorMessage: 'Failed to load: $e');
-    }
-  }
+  Future<void> retry() => _loadTrending();
 
   Future<void> search(String query) async {
     final q = query.trim();
     if (q.isEmpty) return;
-    state =
-        state.copyWith(status: SearchStatus.loading, query: q);
+    state = state.copyWith(
+        status: SearchStatus.loading, query: q);
     try {
-      final results =
-          await ref.read(extractorProvider).searchVideos(q);
+      final videos = await _yt.search(q, limit: 30);
       state = state.copyWith(
-          status: SearchStatus.done, results: results);
-    } on PureTubeException catch (e) {
-      state = state.copyWith(
-          status: SearchStatus.error, errorMessage: e.message);
+        status: SearchStatus.done,
+        results:
+            videos.map(VideoItem.fromVideo).toList(),
+      );
     } catch (e) {
       state = state.copyWith(
-          status: SearchStatus.error,
-          errorMessage: 'Search failed: $e');
+        status: SearchStatus.error,
+        error: e.toString(),
+      );
     }
   }
+
+  Future<List<String>> suggestions(String query) =>
+      _yt.searchSuggestions(query);
 
   void clear() => state = const SearchState();
 }
