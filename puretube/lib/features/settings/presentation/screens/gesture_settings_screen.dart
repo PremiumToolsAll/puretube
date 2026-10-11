@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/services/gesture_mapper.dart';
-import '../../../core/theme/app_theme.dart';
+import '../../../../core/services/gesture_mapper.dart';
+import '../../../../core/theme/app_theme.dart';
 
 /// Remap player gestures.
 class GestureSettingsScreen
