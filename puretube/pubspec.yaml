@@ -1,5 +1,5 @@
-name: pure_tube
-description: PureTube - an ad-free YouTube client.
+name: puretube
+description: A premium, ad-free YouTube client.
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -11,48 +11,86 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # State management
-  flutter_riverpod: ^2.4.9
+  # ── State management ──────────────────────────────────────────
+  flutter_riverpod: ^2.5.1
+  riverpod: ^2.5.1
 
-  # Video playback (mpv-powered: custom controls, PiP-friendly, background-capable)
-  media_kit: ^1.1.10
-  media_kit_video: ^1.2.0
-  media_kit_libs_video: ^1.0.0
-
-  # YouTube stream extraction (no API key, no official client)
+  # ── YouTube extraction (InnerTube, no external APIs) ─────────
   youtube_explode_dart: ^2.5.3
 
-  # Background audio + lockscreen / notification controls
-  audio_service: ^0.18.9
+  # ── Video/Audio playback ─────────────────────────────────────
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+  media_kit_libs_video: ^1.0.5
 
-  # Local database: history, bookmarks, playlists, downloads
-  # (hive_ce = maintained community fork; original hive/isar are discontinued)
-  hive_ce: ^2.0.0
-  hive_ce_flutter: ^1.0.0
+  # ── Background audio / MediaSession ──────────────────────────
+  audio_service: ^0.18.15
+  audio_session: ^0.1.21
 
-  # Downloads
-  dio: ^5.4.0
+  # ── Local database ───────────────────────────────────────────
+  isar: ^3.1.0+1
+  isar_flutter_libs: ^3.1.0+1
+  path_provider: ^2.1.4
 
-  # Networking & utilities
-  http: ^1.2.0
-  connectivity_plus: ^6.0.0
-  path_provider: ^2.1.2
-  cached_network_image: ^3.3.0
-  permission_handler: ^11.0.0
-  screen_brightness: ^2.0.0
+  # ── SponsorBlock ─────────────────────────────────────────────
+  http: ^1.2.2
+  dio: ^5.7.0
 
-  # Share & links
+  # ── Background downloads ─────────────────────────────────────
+  workmanager: ^0.9.0
+  flutter_downloader: ^1.11.8
+
+  # ── Popup player (overlay) ───────────────────────────────────
+  system_alert_window: ^2.0.0
+
+  # ── Utilities ────────────────────────────────────────────────
+  cached_network_image: ^3.4.1
   share_plus: ^10.1.4
-  url_launcher: ^6.2.4
-
-  # UI polish
-  google_fonts: ^6.1.0
+  url_launcher: ^6.3.1
+  permission_handler: ^11.3.1
+  connectivity_plus: ^6.1.0
+  intl: ^0.19.0
+  rxdart: ^0.28.0
+  wakelock_plus: ^1.2.8
+  screen_brightness: ^2.1.0
+  google_fonts: ^6.2.1
   shimmer: ^3.0.0
+  volume_controller: ^2.2.1
+  shared_preferences: ^2.3.2
+  file_picker: ^8.1.2
+  open_file: ^3.3.2
+  app_links: ^6.3.0
+  path: ^1.9.0
+  uuid: ^4.5.1
+  flutter_local_notifications: ^18.0.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  isar_generator: ^3.1.0+1
+  build_runner: ^2.4.13
+  flutter_launcher_icons: ^0.14.3
+  flutter_native_splash: ^2.4.1
+
+# ── App icon (purple #6200EA + white play) ──────────────────
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/icon.png"
+  adaptive_icon_background: "#6200EA"
+  adaptive_icon_foreground: "assets/icon/icon_fg.png"
+  min_sdk_android: 24
+
+# ── Splash screen ──────────────────────────────────────────
+flutter_native_splash:
+  color: "#6200EA"
+  image: "assets/icon/icon_fg.png"
+  android: true
+  ios: true
+  android_12:
+    color: "#6200EA"
+    image: "assets/icon/icon_fg.png"
 
 flutter:
   uses-material-design: true
