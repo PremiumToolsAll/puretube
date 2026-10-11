@@ -52,12 +52,20 @@ class PlayerScreen extends ConsumerStatefulWidget {
 class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   static const _accent = Color(0xFF6200EA);
 
+  /// Spotify-style gold/tan accent used by the audio (music) mode.
+  static const _gold = Color(0xFFD4A574);
+
   VideoController? _videoController;
   bool _showControls = true;
   Timer? _hideTimer;
 
   // fullscreen (landscape)
   bool _isFullscreen = false;
+
+  // audio (music) mode state
+  bool _liked = false;
+  bool _shuffle = false;
+  int _repeatMode = 0; // 0=off, 1=all, 2=one
 
   // double-tap
   Offset? _doubleTapPos;
@@ -840,84 +848,194 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       error = e.toString();
     }
     if (!mounted) return;
+    final allOptions = options;
+    final fetchError = error;
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       builder: (ctx) {
-        if (error != null || options == null) {
+        if (fetchError != null || allOptions == null) {
           return SafeArea(
             child: ListTile(
               leading: const Icon(Icons.error_outline,
                   color: Colors.red),
               title:
                   const Text('Could not list qualities.'),
-              subtitle: Text(error ?? '',
+              subtitle: Text(fetchError ?? '',
                   style:
                       const TextStyle(color: Colors.grey)),
             ),
           );
         }
+        final videoOpts =
+            allOptions.where((o) => !o.audioOnly).toList();
+        final audioOpts =
+            allOptions.where((o) => o.audioOnly).toList();
+        // Default: best muxed video (has audio), else best video-only;
+        // best audio track.
+        DownloadOption? selVideo = videoOpts.isEmpty
+            ? null
+            : videoOpts.firstWhere(
+                (o) => o.isMuxed,
+                orElse: () => videoOpts.first,
+              );
+        DownloadOption? selAudio =
+            audioOpts.isEmpty ? null : audioOpts.first;
         String size(int? b) => b == null
             ? 'Size unknown'
-            : '${(b / (1 << 20)).toStringAsFixed(1)} MB';
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const ListTile(
-                  title: Text('Download',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold))),
-              for (final o in options)
-                ListTile(
-                  leading: Icon(o.audioOnly
-                      ? Icons.audio_file
-                      : Icons.video_file),
-                  title: Text(o.label),
-                  subtitle: Text(size(o.sizeBytes)),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    notifier.startDownload(o, video);
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(SnackBar(
-                      content:
-                          const Text('Download started'),
-                      duration:
-                          const Duration(seconds: 3),
-                      action: SnackBarAction(
-                        label: 'View',
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  const DownloadsScreen(),
-                            ),
-                          );
-                        },
-                      ),
-                    ));
-                  },
-                ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(
-                    Icons.download_done,
-                    color: Colors.white70),
-                title: const Text('View downloads'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          const DownloadsScreen(),
-                    ),
-                  );
-                },
+            : b >= (1 << 30)
+                ? '${(b / (1 << 30)).toStringAsFixed(1)} GB'
+                : '${(b / (1 << 20)).toStringAsFixed(1)} MB';
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) => SafeArea(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 16,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
               ),
-            ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment:
+                    CrossAxisAlignment.stretch,
+                children: [
+                  const Text('Download',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18)),
+                  const SizedBox(height: 4),
+                  Text(video.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: Colors.grey, fontSize: 13)),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<DownloadOption?>(
+                    initialValue: selVideo,
+                    dropdownColor: const Color(0xFF212121),
+                    decoration: const InputDecoration(
+                      labelText: 'Video',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.ondemand_video),
+                    ),
+                    items: [
+                      const DropdownMenuItem<DownloadOption?>(
+                        value: null,
+                        child: Text('No video'),
+                      ),
+                      for (final o in videoOpts)
+                        DropdownMenuItem<DownloadOption?>(
+                          value: o,
+                          child: Text(
+                              '${o.label} (${size(o.sizeBytes)})${o.videoOnly ? ' · no audio' : ''}'),
+                        ),
+                    ],
+                    onChanged: (v) =>
+                        setSheetState(() => selVideo = v),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<DownloadOption?>(
+                    initialValue: selAudio,
+                    dropdownColor: const Color(0xFF212121),
+                    decoration: const InputDecoration(
+                      labelText: 'Audio',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.music_note),
+                    ),
+                    items: [
+                      const DropdownMenuItem<DownloadOption?>(
+                        value: null,
+                        child: Text('No audio'),
+                      ),
+                      for (final o in audioOpts)
+                        DropdownMenuItem<DownloadOption?>(
+                          value: o,
+                          child: Text(
+                              '${o.label} (${size(o.sizeBytes)})'),
+                        ),
+                    ],
+                    onChanged: (v) =>
+                        setSheetState(() => selAudio = v),
+                  ),
+                  if (selVideo != null && selVideo!.videoOnly)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Video-only has no audio track (merging not supported yet).',
+                        style: TextStyle(
+                            color: Colors.orange,
+                            fontSize: 12),
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed:
+                        (selVideo == null && selAudio == null)
+                            ? null
+                            : () {
+                                final v = selVideo;
+                                final a = selAudio;
+                                Navigator.pop(ctx);
+                                if (v != null && v.isMuxed) {
+                                  // Muxed already contains audio.
+                                  notifier.startDownload(v, video);
+                                  _showDownloadStartedSnack(
+                                      'Download started (${v.label})');
+                                } else if (v != null) {
+                                  notifier.startDownload(v, video);
+                                  _showDownloadStartedSnack(
+                                      'Video-only download started (${v.label})');
+                                } else if (a != null) {
+                                  notifier.startDownload(a, video);
+                                  _showDownloadStartedSnack(
+                                      'Audio download started (${a.label})');
+                                }
+                              },
+                    icon: const Icon(Icons.download),
+                    label: const Text('Download'),
+                  ),
+                  const Divider(height: 24),
+                  ListTile(
+                    leading: const Icon(
+                        Icons.download_done,
+                        color: Colors.white70),
+                    title: const Text('View downloads'),
+                    contentPadding: EdgeInsets.zero,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              const DownloadsScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
           ),
         );
       },
     );
+  }
+
+  void _showDownloadStartedSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      duration: const Duration(seconds: 3),
+      action: SnackBarAction(
+        label: 'View',
+        onPressed: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => const DownloadsScreen(),
+            ),
+          );
+        },
+      ),
+    ));
   }
 
   // ---------------- build ----------------
@@ -958,6 +1076,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       );
     }
 
+    // Audio (music) mode: Spotify-style player with the gold theme.
+    // Playback is owned by PureTubeAudioHandler (audio_service), so it
+    // keeps playing in the background even if this screen is popped.
+    if (uiState.audioOnly && uiState.video != null) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+            child:
+                _buildAudioMode(uiState, player, notifier)),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -966,6 +1096,350 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           children: [
             _buildVideoArea(uiState, player),
             Expanded(child: _buildMeta(uiState, notifier)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------------- Audio (music) mode ----------------
+  //
+  // Spotify-style player shown when audio-only is on. Playback is owned by
+  // PureTubeAudioHandler (audio_service foreground service), so it keeps
+  // playing even if the user pops this screen or turns the display off.
+
+  Widget _buildAudioMode(
+      PlayerUiState uiState, Player player, PlayerController notifier) {
+    final video = uiState.video!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Header: back | PLAYING FROM / Queue | more
+        Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: Row(
+            children: [
+              IconButton(
+                tooltip: 'Back',
+                icon: const Icon(Icons.keyboard_arrow_down,
+                    color: Colors.white, size: 30),
+                // Audio keeps playing in the background.
+                onPressed: () => Navigator.pop(context),
+              ),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Text('PLAYING FROM',
+                        style: TextStyle(
+                            color: Colors.grey,
+                            fontSize: 10,
+                            letterSpacing: 1.6)),
+                    SizedBox(height: 2),
+                    Text('Queue',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15)),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'More',
+                icon: const Icon(Icons.more_vert,
+                    color: Colors.white),
+                onPressed: _showMoreSheet,
+              ),
+            ],
+          ),
+        ),
+        // Album art
+        Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: 36, vertical: 10),
+          child: AspectRatio(
+            aspectRatio: 1,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: CachedNetworkImage(
+                imageUrl: video.thumbnailUrl,
+                fit: BoxFit.cover,
+                errorWidget: (_, __, ___) => Container(
+                  color: const Color(0xFF1A1A1A),
+                  child: const Icon(Icons.music_note,
+                      size: 80, color: Colors.white24),
+                ),
+              ),
+            ),
+          ),
+        ),
+        // Title + download + like
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 10, 8, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: _MarqueeText(
+                  text: video.title,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Download',
+                icon: const Icon(Icons.download_outlined,
+                    color: Colors.white70),
+                onPressed: () => _showDownloadSheet(video),
+              ),
+              IconButton(
+                tooltip: _liked ? 'Liked' : 'Like',
+                icon: Icon(
+                    _liked
+                        ? Icons.favorite
+                        : Icons.favorite_border,
+                    color:
+                        _liked ? _gold : Colors.white70),
+                onPressed: () {
+                  setState(() => _liked = !_liked);
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(
+                    content: Text(_liked
+                        ? 'Added to Liked'
+                        : 'Removed from Liked'),
+                    duration: const Duration(seconds: 1),
+                  ));
+                },
+              ),
+            ],
+          ),
+        ),
+        // Artist
+        Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 24),
+          child: Text(video.author,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: Colors.grey, fontSize: 14)),
+        ),
+        // Seekbar + times
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+          child: _AudioSeekBar(player: player),
+        ),
+        // Main controls: shuffle | prev | BIG gold play | next | repeat
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+          child: Row(
+            mainAxisAlignment:
+                MainAxisAlignment.spaceEvenly,
+            children: [
+              IconButton(
+                tooltip: 'Shuffle',
+                icon: Icon(Icons.shuffle,
+                    color: _shuffle
+                        ? _gold
+                        : Colors.white70),
+                onPressed: () {
+                  setState(() => _shuffle = !_shuffle);
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(
+                    content: Text(_shuffle
+                        ? 'Shuffle on'
+                        : 'Shuffle off'),
+                    duration: const Duration(seconds: 1),
+                  ));
+                },
+              ),
+              IconButton(
+                tooltip: 'Previous',
+                iconSize: 42,
+                icon: const Icon(Icons.skip_previous,
+                    color: Colors.white),
+                onPressed: _playPrevious,
+              ),
+              StreamBuilder<bool>(
+                stream: player.stream.playing,
+                builder: (context, snap) {
+                  final playing = snap.data ?? false;
+                  return GestureDetector(
+                    onTap: notifier.togglePlayPause,
+                    child: Container(
+                      width: 76,
+                      height: 76,
+                      decoration: const BoxDecoration(
+                        color: _gold,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        playing
+                            ? Icons.pause
+                            : Icons.play_arrow,
+                        color: Colors.black,
+                        size: 42,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              IconButton(
+                tooltip: 'Next',
+                iconSize: 42,
+                icon: const Icon(Icons.skip_next,
+                    color: Colors.white),
+                onPressed: _playNext,
+              ),
+              IconButton(
+                tooltip: 'Repeat',
+                icon: Icon(
+                    _repeatMode == 2
+                        ? Icons.repeat_one
+                        : Icons.repeat,
+                    color: _repeatMode == 0
+                        ? Colors.white70
+                        : _gold),
+                onPressed: _cycleRepeatMode,
+              ),
+            ],
+          ),
+        ),
+        const Spacer(),
+        // Bottom tabs: QUEUE | LYRICS | TIMER
+        Padding(
+          padding: const EdgeInsets.only(bottom: 18),
+          child: Row(
+            mainAxisAlignment:
+                MainAxisAlignment.spaceEvenly,
+            children: [
+              _audioTab(
+                  Icons.queue_music, 'QUEUE', _showQueueSheet),
+              _audioTab(Icons.lyrics_outlined, 'LYRICS',
+                  () {
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(const SnackBar(
+                  content:
+                      Text('Lyrics not available'),
+                  duration: Duration(seconds: 1),
+                ));
+              }),
+              _audioTab(Icons.timer_outlined, 'TIMER',
+                  _showSleepSheet),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _audioTab(
+      IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.grey, size: 26),
+            const SizedBox(height: 4),
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.grey,
+                    fontSize: 10,
+                    letterSpacing: 1.2)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _cycleRepeatMode() {
+    final player = ref.read(mediaKitPlayerProvider);
+    setState(() => _repeatMode = (_repeatMode + 1) % 3);
+    // Real behavior via media_kit playlist modes.
+    player.setPlaylistMode(_repeatMode == 2
+        ? PlaylistMode.single
+        : _repeatMode == 1
+            ? PlaylistMode.loop
+            : PlaylistMode.none);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(_repeatMode == 2
+          ? 'Repeat one'
+          : _repeatMode == 1
+              ? 'Repeat all'
+              : 'Repeat off'),
+      duration: const Duration(seconds: 1),
+    ));
+  }
+
+  void _showQueueSheet() {
+    final videos =
+        ref.read(playerControllerProvider).relatedVideos;
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text('Queue',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold)),
+            ),
+            Flexible(
+              child: videos.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text('Queue is empty',
+                          style:
+                              TextStyle(color: Colors.grey)),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: videos.length,
+                      itemBuilder: (c, i) {
+                        final v = videos[i];
+                        return ListTile(
+                          leading: ClipRRect(
+                            borderRadius:
+                                BorderRadius.circular(6),
+                            child: CachedNetworkImage(
+                              imageUrl: v.thumbnailUrl,
+                              width: 72,
+                              height: 48,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          title: Text(v.title,
+                              maxLines: 2,
+                              overflow:
+                                  TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 13)),
+                          subtitle: Text(v.author,
+                              style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 11)),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            Navigator.of(context)
+                                .pushReplacement(
+                              MaterialPageRoute(
+                                builder: (_) => PlayerScreen(
+                                    videoId: v.id),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+            ),
           ],
         ),
       ),
@@ -2040,7 +2514,11 @@ class _TimeLabel extends StatelessWidget {
 /// Custom seek bar: buffered track + played track + knob, tap & drag to seek.
 class _PlayerSeekBar extends ConsumerStatefulWidget {
   final Player player;
-  const _PlayerSeekBar({required this.player});
+
+  /// Color of the played track and knob. Defaults to amber.
+  final Color activeColor;
+  const _PlayerSeekBar(
+      {required this.player, this.activeColor = Colors.amber});
 
   @override
   ConsumerState<_PlayerSeekBar> createState() =>
@@ -2130,6 +2608,7 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
                       painter: _SeekBarPainter(
                         playedFrac: frac,
                         bufferedFrac: bufferedFrac,
+                        activeColor: widget.activeColor,
                       ),
                     ),
                   ),
@@ -2146,10 +2625,12 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
 class _SeekBarPainter extends CustomPainter {
   final double playedFrac;
   final double bufferedFrac;
-  static const _track = Colors.amber;
+  final Color activeColor;
 
   _SeekBarPainter(
-      {required this.playedFrac, required this.bufferedFrac});
+      {required this.playedFrac,
+      required this.bufferedFrac,
+      this.activeColor = Colors.amber});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -2167,13 +2648,13 @@ class _SeekBarPainter extends CustomPainter {
     canvas.drawLine(
         Offset(0, y), Offset(w * bufferedFrac, y), buf);
     final played = Paint()
-      ..color = _track
+      ..color = activeColor
       ..strokeCap = StrokeCap.round
       ..strokeWidth = 4;
     canvas.drawLine(
         Offset(0, y), Offset(w * playedFrac, y), played);
-    canvas.drawCircle(
-        Offset(w * playedFrac, y), 7, Paint()..color = _track);
+    canvas.drawCircle(Offset(w * playedFrac, y), 7,
+        Paint()..color = activeColor);
     canvas.drawCircle(
         Offset(w * playedFrac, y),
         7,
@@ -2186,5 +2667,131 @@ class _SeekBarPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _SeekBarPainter old) =>
       old.playedFrac != playedFrac ||
-      old.bufferedFrac != bufferedFrac;
+      old.bufferedFrac != bufferedFrac ||
+      old.activeColor != activeColor;
+}
+
+/// Seek bar for the audio (music) mode: gold track with time labels.
+class _AudioSeekBar extends StatelessWidget {
+  final Player player;
+  static const _gold = Color(0xFFD4A574);
+
+  const _AudioSeekBar({required this.player});
+
+  String _fmt(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<Duration>(
+      stream: player.stream.duration,
+      builder: (context, durSnap) {
+        final duration = durSnap.data ?? Duration.zero;
+        return StreamBuilder<Duration>(
+          stream: player.stream.position,
+          builder: (context, posSnap) {
+            final position = posSnap.data ?? Duration.zero;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _PlayerSeekBar(
+                    player: player, activeColor: _gold),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12),
+                  child: Row(
+                    mainAxisAlignment:
+                        MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(_fmt(position),
+                          style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 12)),
+                      Text(_fmt(duration),
+                          style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+/// Auto-scrolling title text (marquee) for long titles in audio mode.
+class _MarqueeText extends StatefulWidget {
+  final String text;
+  final TextStyle style;
+  const _MarqueeText({required this.text, required this.style});
+
+  @override
+  State<_MarqueeText> createState() => _MarqueeTextState();
+}
+
+class _MarqueeTextState extends State<_MarqueeText> {
+  final ScrollController _ctrl = ScrollController();
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _maybeScroll());
+  }
+
+  @override
+  void didUpdateWidget(covariant _MarqueeText old) {
+    super.didUpdateWidget(old);
+    if (old.text != widget.text) {
+      _timer?.cancel();
+      if (_ctrl.hasClients) _ctrl.jumpTo(0);
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _maybeScroll());
+    }
+  }
+
+  void _maybeScroll() {
+    if (!mounted || !_ctrl.hasClients) return;
+    final max = _ctrl.position.maxScrollExtent;
+    if (max <= 0) return;
+    // Pause, scroll to end, pause, scroll back — forever.
+    _timer =
+        Timer.periodic(const Duration(seconds: 4), (_) async {
+      if (!mounted || !_ctrl.hasClients) return;
+      final curMax = _ctrl.position.maxScrollExtent;
+      if (curMax <= 0) return;
+      final target =
+          _ctrl.offset >= curMax - 1 ? 0.0 : curMax;
+      await _ctrl.animateTo(target,
+          duration: Duration(
+              milliseconds:
+                  (curMax * 18).round().clamp(800, 6000)),
+          curve: Curves.easeInOut);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      controller: _ctrl,
+      scrollDirection: Axis.horizontal,
+      child: Text(widget.text, style: widget.style),
+    );
+  }
 }
