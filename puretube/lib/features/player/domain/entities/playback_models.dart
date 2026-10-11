@@ -75,6 +75,28 @@ class DownloadOption {
   });
 }
 
+/// A single muxed (audio+video) stream quality option, e.g. "MPEG-4 720p".
+class MuxedQuality {
+  final String label; // "MPEG-4 720p"
+  final int height; // 720
+  final String url;
+
+  const MuxedQuality({
+    required this.label,
+    required this.height,
+    required this.url,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      other is MuxedQuality &&
+      other.height == height &&
+      other.url == url;
+
+  @override
+  int get hashCode => Object.hash(height, url);
+}
+
 /// A subtitle/caption track available for a video.
 class CaptionTrack {
   final String languageCode; // "en", "bn", ...
