@@ -7,6 +7,7 @@ import '../library/presentation/library_screen.dart';
 import '../../player/domain/entities/models.dart';
 import '../search/presentation/search_screen.dart';
 import '../settings/presentation/settings_screen.dart';
+import '../../shorts/presentation/screens/shorts_screen.dart';
 import './providers/search_provider.dart';
 import './widgets/shimmer_loading.dart';
 import './widgets/video_card.dart';
@@ -70,6 +71,17 @@ class _HomeScreenState
               MaterialPageRoute(
                   builder: (_) =>
                       const DownloadsScreen()),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(
+                Icons.bolt_outlined),
+            tooltip: 'Shorts',
+            onPressed: () =>
+                Navigator.of(context).push(
+              MaterialPageRoute(
+                  builder: (_) =>
+                      const ShortsScreen()),
             ),
           ),
           IconButton(
