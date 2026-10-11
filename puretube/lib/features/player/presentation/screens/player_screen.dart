@@ -488,6 +488,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   },
                 ),
                 ListTile(
+                  leading: const Icon(Icons.speed),
+                  title: const Text('Playback speed'),
+                  subtitle: Text(
+                    '${ui.speed}x',
+                    style: const TextStyle(
+                        color: Colors.grey, fontSize: 12),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showSpeedSheet();
+                  },
+                ),
+                ListTile(
                   leading: const Icon(Icons.high_quality),
                   title: const Text('Quality'),
                   subtitle: Text(
@@ -930,13 +943,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               children: [
                 _TimeLabel(player: player, current: true),
                 const Spacer(),
-                TextButton(
-                  onPressed: _showSpeedSheet,
-                  child: Text('${uiState.speed}x',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold)),
-                ),
                 StreamBuilder<bool>(
                   stream: player.stream.playing,
                   builder: (context, snap) {
