@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/format.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/format.dart';
 import '../../domain/entities/models.dart';
 import '../providers/player_controller.dart';
 import '../../../downloads/presentation/download_dialog.dart';
