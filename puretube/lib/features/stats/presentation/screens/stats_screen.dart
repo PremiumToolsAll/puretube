@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:isar/isar.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../../core/theme/app_theme.dart';
-import '../library/data/library_models.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../library/data/library_models.dart';
 
 /// Watch stats dashboard.
 class StatsScreen extends StatefulWidget {
