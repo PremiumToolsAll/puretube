@@ -33,12 +33,14 @@ class DownloadService {
   /// Streams to disk with resume: an existing partial file continues via
   /// the `Range` header instead of restarting. Progress is 0..1 when the
   /// total size is known. Cancel keeps the partial file for resume.
+  /// onSpeed reports current download speed in Mbps (megabits/second).
   Future<void> startDownload({
     required String id,
     required String url,
     required String savePath,
     required int? totalBytesHint,
     required void Function(double progress) onProgress,
+    void Function(double mbps)? onSpeed,
   }) async {
     final file = File(savePath);
     var startByte = 0;
@@ -74,18 +76,33 @@ class DownloadService {
       final total = (remaining ?? totalBytesHint ?? 0) + startByte;
 
       final raf = await file.open(mode: FileMode.writeOnlyAppend);
+      // Speed tracking: bytes received in each 1-second window.
+      var windowBytes = 0;
+      var windowStart = DateTime.now();
       try {
         await for (final chunk in res.data!.stream) {
           await raf.writeFrom(chunk);
           received += chunk.length;
+          windowBytes += chunk.length;
           if (total > 0) {
             onProgress((received / total).clamp(0.0, 1.0));
+          }
+          final now = DateTime.now();
+          final elapsed =
+              now.difference(windowStart).inMilliseconds;
+          if (elapsed >= 1000 && onSpeed != null) {
+            // Mbps = (bytes * 8 bits) / ms / 1000
+            final mbps = windowBytes * 8 / elapsed / 1000;
+            onSpeed(mbps);
+            windowBytes = 0;
+            windowStart = now;
           }
         }
       } finally {
         await raf.close();
       }
       onProgress(1.0);
+      onSpeed?.call(0);
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
         throw const DownloadCanceled();
