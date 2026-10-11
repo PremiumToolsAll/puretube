@@ -1,110 +1,72 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// PureTube design system — AMOLED Black + Material 3.
+/// AMOLED Material 3 theme. google_fonts fetches Poppins on first launch
+/// then caches it. For a fully offline APK, bundle the font in assets
+/// and set fontFamily instead.
 class AppTheme {
-  // ── Colors ────────────────────────────────────────────────
-  static const Color primary = Color(0xFF6200EA);
-  static const Color primaryLight = Color(0xFF9D46FF);
-  static const Color accent = Color(0xFF00BCD4);
-  static const Color background = Color(0xFF000000);
-  static const Color surface = Color(0xFF121212);
-  static const Color card = Color(0xFF1A1A1A);
-  static const Color textPrimary = Color(0xFFFFFFFF);
-  static const Color textSecondary = Color(0xFFB0B0B0);
-  static const Color error = Color(0xFFCF6679);
-  static const Color success = Color(0xFF4CAF50);
-
-  static const LinearGradient premiumGradient =
-      LinearGradient(
-    colors: [primary, Color(0xFF2962FF)],
-    begin: Alignment.centerLeft,
-    end: Alignment.centerRight,
-  );
+  static const primary = Color(0xFF6200EA);
+  static const accent = Color(0xFF00BCD4);
 
   static ThemeData get dark {
-    final base = ThemeData.dark(useMaterial3: true);
-    final textTheme =
-        GoogleFonts.interTextTheme(base.textTheme);
-    return base.copyWith(
-      scaffoldBackgroundColor: background,
-      colorScheme: const ColorScheme.dark(
+    final scheme = ColorScheme.fromSeed(
+      seedColor: primary,
+      brightness: Brightness.dark,
+    );
+    final base = ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      scaffoldBackgroundColor: Colors.black,
+      colorScheme: scheme.copyWith(
         primary: primary,
         secondary: accent,
-        surface: surface,
-        background: background,
-        error: error,
+        surface: Colors.black,
+        surfaceContainerLowest: Colors.black,
+        surfaceContainerLow: const Color(0xFF0A0A0A),
+        surfaceContainer: const Color(0xFF121212),
+        surfaceContainerHigh: const Color(0xFF1E1E1E),
       ),
-      textTheme: textTheme,
-      appBarTheme: AppBarTheme(
-        backgroundColor: background,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.black,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
-        centerTitle: false,
-        titleTextStyle: GoogleFonts.inter(
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
-          color: textPrimary,
-        ),
       ),
-      chipTheme: base.chipTheme.copyWith(
-        backgroundColor: card,
-        selectedColor: primary,
-        labelStyle: GoogleFonts.inter(
-            color: textPrimary, fontSize: 14),
-      ),
-      bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(
-              top: Radius.circular(20)),
-        ),
-      ),
-      listTileTheme: const ListTileThemeData(
-        iconColor: textSecondary,
-        textColor: textPrimary,
-      ),
-      switchTheme: SwitchThemeData(
-        thumbColor:
-            WidgetStateProperty.resolveWith((s) =>
-                s.contains(WidgetState.selected)
-                    ? primary
-                    : Colors.grey),
-        trackColor:
-            WidgetStateProperty.resolveWith((s) =>
-                s.contains(WidgetState.selected)
-                    ? primary.withOpacity(0.4)
-                    : Colors.grey.shade800),
+      chipTheme: const ChipThemeData(
+        backgroundColor: Color(0xFF1A1A1A),
+        labelStyle: TextStyle(color: Colors.white70),
+        side: BorderSide.none,
       ),
       progressIndicatorTheme:
-          const ProgressIndicatorThemeData(
-              color: primary),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: card,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
-          borderSide: BorderSide.none,
-        ),
-        hintStyle: GoogleFonts.inter(
-            color: textSecondary.withOpacity(0.6)),
+          const ProgressIndicatorThemeData(color: primary),
+      sliderTheme: const SliderThemeData(
+        activeTrackColor: primary,
+        thumbColor: primary,
       ),
-      pageTransitionsTheme: const PageTransitionsTheme(
-        builders: {
-          TargetPlatform.android:
-              CupertinoPageTransitionsBuilder(),
-        },
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith(
+            (s) => s.contains(WidgetState.selected) ? primary : null),
+        trackColor: WidgetStateProperty.resolveWith(
+            (s) => s.contains(WidgetState.selected)
+                ? primary.withOpacity(0.5)
+                : null),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: Color(0xFF141414),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+      ),
+      dialogTheme: const DialogThemeData(
+        backgroundColor: Color(0xFF141414),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(16))),
+      ),
+    );
+    return base.copyWith(
+      textTheme: GoogleFonts.poppinsTextTheme(base.textTheme).apply(
+        bodyColor: Colors.white,
+        displayColor: Colors.white,
       ),
     );
   }
-
-  // ── Typography shortcuts ──────────────────────────────────
-  static TextStyle get title => GoogleFonts.inter(
-      fontSize: 20, fontWeight: FontWeight.bold);
-  static TextStyle get subtitle => GoogleFonts.inter(
-      fontSize: 16, fontWeight: FontWeight.w500);
-  static TextStyle get body => GoogleFonts.inter(
-      fontSize: 14, fontWeight: FontWeight.normal);
-  static TextStyle get caption => GoogleFonts.inter(
-      fontSize: 12, fontWeight: FontWeight.w300);
 }
