@@ -12,7 +12,8 @@ import '../../../core/services/audio_player_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/format.dart';
 import '../../home/presentation/widgets/video_card.dart';
-import '../providers/player_controller.dart';
+import '../../home/presentation/providers/search_provider.dart';
+import 'providers/player_controller.dart';
 import 'widgets/comments_section.dart';
 import 'widgets/player_controls.dart';
 import 'widgets/quality_speed_sheets.dart';
@@ -97,9 +98,6 @@ class _PlayerScreenState
     _rippleTimer?.cancel();
     _badgeTimer?.cancel();
     _badgeSub?.cancel();
-    try {
-      _videoController?.dispose();
-    } catch (_) {}
     try {
       SystemChrome.setPreferredOrientations(
           [DeviceOrientation.portraitUp]);
