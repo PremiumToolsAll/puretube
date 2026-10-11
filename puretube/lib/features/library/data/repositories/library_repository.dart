@@ -131,3 +131,30 @@ class DownloadRepository {
               DownloadRecord.fromJson(_asMap(e.value)),
       };
 }
+
+class SubscriptionRepository {
+  Box<Map> get _box =>
+      Hive.box<Map>(HiveBoxes.subscriptions);
+
+  bool isSubscribed(String channelId) =>
+      _box.containsKey(channelId);
+
+  Future<void> subscribe(
+      {required String channelId,
+      required String name,
+      int? subscriberCount}) async {
+    await _box.put(channelId, {
+      'channelId': channelId,
+      'name': name,
+      'subscriberCount': subscriberCount,
+      'subscribedAt': DateTime.now().toIso8601String(),
+    });
+  }
+
+  Future<void> unsubscribe(String channelId) =>
+      _box.delete(channelId);
+
+  List<Map<String, dynamic>> getAll() => _box.values
+      .map((e) => _asMap(e))
+      .toList();
+}
