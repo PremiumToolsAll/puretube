@@ -50,6 +50,19 @@ class YoutubeExtractorService {
   final YoutubeExplode _yt;
   final Connectivity _connectivity;
 
+  /// Short codec display name: "avc1.640028" -> "avc", "av01.0.08M.08"
+  /// -> "av1", "mp4a.40.2" -> "mp4a".
+  static String _shortCodec(String codec) {
+    final c = codec.toLowerCase();
+    if (c.startsWith('avc1') || c.startsWith('avc3')) return 'avc';
+    if (c.startsWith('vp9') || c.startsWith('vp09')) return 'vp9';
+    if (c.startsWith('av01')) return 'av1';
+    if (c.startsWith('mp4a')) return 'mp4a';
+    if (c.startsWith('opus')) return 'opus';
+    final dot = c.indexOf('.');
+    return dot > 0 ? c.substring(0, dot) : c;
+  }
+
   Future<void> _requireNetwork() async {
     final results = await _connectivity.checkConnectivity();
     if (results.isEmpty || results.contains(ConnectivityResult.none)) {
@@ -153,6 +166,9 @@ class YoutubeExtractorService {
           label: 'MPEG-4 ${h}p',
           height: h,
           url: m.url.toString(),
+          bitrateKbps: m.bitrate.bitsPerSecond / 1000,
+          fps: m.framerate.framesPerSecond.round(),
+          codec: _shortCodec(m.videoCodec),
         ));
       }
 
@@ -180,6 +196,9 @@ class YoutubeExtractorService {
             height: h,
             url: v.url.toString(),
             audioUrl: audioUrl,
+            bitrateKbps: v.bitrate.bitsPerSecond / 1000,
+            fps: v.framerate.framesPerSecond.round(),
+            codec: _shortCodec(v.videoCodec),
           ));
         }
       }
@@ -231,6 +250,8 @@ class YoutubeExtractorService {
           videoCodec: m.videoCodec,
           audioCodec: m.audioCodec,
           height: h,
+          bitrateKbps: (m.bitrate.bitsPerSecond / 1000).round(),
+          fps: m.framerate.framesPerSecond.round(),
         ));
       }
       for (final v in videoOnly) {
@@ -244,6 +265,8 @@ class YoutubeExtractorService {
           videoCodec: v.videoCodec,
           height: h,
           videoOnly: true,
+          bitrateKbps: (v.bitrate.bitsPerSecond / 1000).round(),
+          fps: v.framerate.framesPerSecond.round(),
         ));
       }
       final seenAudio = <int>{};
