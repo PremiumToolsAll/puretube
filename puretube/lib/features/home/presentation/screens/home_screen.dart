@@ -22,6 +22,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _searchController = TextEditingController();
+  final _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -32,6 +33,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ref.read(searchControllerProvider.notifier).loadTrending();
       }
     });
+    // Infinite scroll: load more when near the bottom.
+    _scrollController.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final max = _scrollController.position.maxScrollExtent;
+    final current = _scrollController.position.pixels;
+    // Trigger when within 400px of the bottom.
+    if (max - current < 400) {
+      ref.read(searchControllerProvider.notifier).loadMore();
+    }
   }
 
   static const _categories = [
@@ -48,6 +61,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -301,6 +315,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   style: TextStyle(color: Colors.grey)));
         }
         return GridView.builder(
+          controller: _scrollController,
           padding: const EdgeInsets.all(12),
           gridDelegate:
               const SliverGridDelegateWithFixedCrossAxisCount(
@@ -309,9 +324,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
           ),
-          itemCount: s.results.length,
-          itemBuilder: (ctx, i) =>
-              VideoCard(video: s.results[i]),
+          // Extra item at the end for the loading indicator.
+          itemCount:
+              s.results.length + (s.loadingMore ? 1 : 0),
+          itemBuilder: (ctx, i) {
+            if (i >= s.results.length) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: CircularProgressIndicator(
+                      color: Color(0xFF6200EA)),
+                ),
+              );
+            }
+            return VideoCard(video: s.results[i]);
+          },
         );
     }
   }
