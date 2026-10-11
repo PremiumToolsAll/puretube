@@ -104,47 +104,10 @@ class YoutubeExtractorService {
       final bestMuxed = muxedPick.first;
       final bestAudio = audio.first;
 
-      // All muxed qualities for the quality selector (dedupe by height).
-      final seenHeights = <int>{};
-      final qualities = <QualityOption>[];
-      for (final s in muxedPick) {
-        final h = s.videoQuality.height;
-        if (seenHeights.add(h)) {
-          qualities.add(QualityOption(
-            label: '${h}p',
-            height: h,
-            url: s.url.toString(),
-          ));
-        }
-      }
-
-      // Video-only streams for 1080p/2K/4K with paired audio.
-      try {
-        final bestAudioUrl = bestAudio.url.toString();
-        final videoOnly = [...manifest.videoOnly]
-          ..sort((a, b) => b.videoResolution.height
-              .compareTo(a.videoResolution.height));
-        for (final v in videoOnly) {
-          final h = v.videoResolution.height;
-          if (h > 720 && seenHeights.add(h)) {
-            qualities.add(QualityOption(
-              label: h >= 2160 ? '4K' : '${h}p',
-              height: h,
-              url: v.url.toString(),
-              audioUrl: bestAudioUrl,
-            ));
-          }
-        }
-      } catch (_) {
-        // Video-only not available; muxed qualities still work.
-      }
-      qualities.sort((a, b) => b.height.compareTo(a.height));
-
       return PlaybackStreams(
         videoId: videoId,
         muxedUrl: bestMuxed.url.toString(),
         muxedHeight: bestMuxed.videoQuality.height,
-        qualities: qualities,
         audioOnlyUrl: bestAudio.url.toString(),
         audioBitrate: bestAudio.bitrate.bitsPerSecond,
         fetchedAt: DateTime.now(),
@@ -185,28 +148,6 @@ class YoutubeExtractorService {
             sizeBytes: m.size.totalBytes,
           ),
       ];
-      // Video-only (1080p/2K/4K) for download — no audio.
-      try {
-        final videoOnly = [...manifest.videoOnly]
-          ..sort((a, b) => b.videoResolution.height
-              .compareTo(a.videoResolution.height));
-        final seenHeights = <int>{
-          for (final m in muxed) m.videoQuality.height
-        };
-        for (final v in videoOnly) {
-          final h = v.videoResolution.height;
-          if (h > 720 && seenHeights.add(h)) {
-            options.add(DownloadOption(
-              label: h >= 2160
-                  ? '4K (video only)'
-                  : '${h}p (video only)',
-              url: v.url.toString(),
-              audioOnly: false,
-              sizeBytes: v.size.totalBytes,
-            ));
-          }
-        }
-      } catch (_) {}
       if (audio.isNotEmpty) {
         final a = audio.first;
         options.add(DownloadOption(
@@ -249,147 +190,6 @@ class YoutubeExtractorService {
       rethrow;
     } catch (e) {
       throw ExtractorException('Search failed: ${_friendlyError(e)}');
-    }
-  }
-
-  /// Returns videos related to [video] for the "Up next" section.
-  /// Searches by author + title keywords since youtube_explode_dart 2.x
-  /// has no dedicated related-videos API.
-  Future<List<VideoDetails>> getRelatedVideos(VideoDetails video,
-      {int limit = 12}) async {
-    await _requireNetwork();
-    try {
-      // Search by author for related content.
-      final results = await _yt.search
-          .search(video.author)
-          .timeout(const Duration(seconds: 20));
-      final list = results
-          .whereType<Video>()
-          .where((v) => v.id.value != video.id)
-          .take(limit)
-          .map((v) {
-        try {
-          return VideoDetails.fromExplode(v);
-        } catch (_) {
-          return null;
-        }
-      }).whereType<VideoDetails>()
-          .toList();
-      return list;
-    } catch (e) {
-      return [];
-    }
-  }
-
-  /// Returns channel info.
-  Future<ChannelInfo?> getChannelInfo(String channelId) async {
-    await _requireNetwork();
-    try {
-      final channel = await _yt.channels
-          .get(channelId)
-          .timeout(const Duration(seconds: 15));
-      return ChannelInfo(
-        id: channel.id.value,
-        title: channel.title,
-        logoUrl: channel.logoUrl,
-        bannerUrl: channel.bannerUrl,
-        subscriberCount: channel.subscribersCount ?? 0,
-        description: '',
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Returns videos from a channel.
-  Future<List<VideoDetails>> getChannelVideos(String channelId,
-      {int limit = 20}) async {
-    await _requireNetwork();
-    try {
-      final videos = await _yt.channels
-          .getUploads(channelId)
-          .take(limit)
-          .toList()
-          .timeout(const Duration(seconds: 20));
-      return videos
-          .map((v) {
-            try {
-              return VideoDetails.fromExplode(v);
-            } catch (_) {
-              return null;
-            }
-          })
-          .whereType<VideoDetails>()
-          .toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  /// Returns comments for a video.
-  Future<List<CommentInfo>> getComments(String videoId,
-      {int limit = 30}) async {
-    await _requireNetwork();
-    try {
-      final video =
-          await _yt.videos.get(videoId).timeout(
-                const Duration(seconds: 15),
-              );
-      final comments =
-          await _yt.videos.commentsClient
-              .getComments(video)
-              .timeout(const Duration(seconds: 20));
-      if (comments == null) return [];
-      return comments
-          .take(limit)
-          .map((c) => CommentInfo(
-                author: c.author,
-                text: c.text,
-                likeCount: c.likeCount,
-                publishedTime: c.publishedTime,
-                authorAvatarUrl: '',
-                replyCount: c.replyCount,
-              ))
-          .toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  /// Returns search query suggestions for autocomplete.
-  Future<List<String>> getSearchSuggestions(String query) async {
-    await _requireNetwork();
-    try {
-      return await _yt.search
-          .getQuerySuggestions(query)
-          .timeout(const Duration(seconds: 10));
-    } catch (_) {
-      return [];
-    }
-  }
-
-  /// Returns trending/popular videos for the home feed.
-  /// Uses a generic popular search since youtube_explode_dart 2.x
-  /// has no dedicated trending API.
-  Future<List<VideoDetails>> getTrendingVideos({int limit = 25}) async {
-    await _requireNetwork();
-    try {
-      // "trending" search returns popular current videos.
-      final results = await _yt.search
-          .search('trending')
-          .timeout(const Duration(seconds: 25));
-      return results
-          .whereType<Video>()
-          .take(limit)
-          .map(VideoDetails.fromExplode)
-          .toList();
-    } on TimeoutException {
-      throw ExtractorException('Trending timed out. Retry.');
-    } on PureTubeException {
-      rethrow;
-    } catch (e) {
-      throw ExtractorException(
-          'Could not load trending: ${_friendlyError(e)}');
     }
   }
 
