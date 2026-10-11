@@ -75,26 +75,34 @@ class DownloadOption {
   });
 }
 
-/// A single muxed (audio+video) stream quality option, e.g. "MPEG-4 720p".
+/// A single stream quality option. Muxed = audio+video in one URL
+/// (up to ~1080p). DASH = video-only stream that needs a separate
+/// audio track attached (audioUrl != null), e.g. 1440p/2160p.
 class MuxedQuality {
-  final String label; // "MPEG-4 720p"
+  final String label; // "MPEG-4 720p" or "1440p (1.5K) · DASH"
   final int height; // 720
   final String url;
+  final String? audioUrl; // set for DASH video-only streams
 
   const MuxedQuality({
     required this.label,
     required this.height,
     required this.url,
+    this.audioUrl,
   });
+
+  /// True when this is a video-only DASH stream needing external audio.
+  bool get isDash => audioUrl != null;
 
   @override
   bool operator ==(Object other) =>
       other is MuxedQuality &&
       other.height == height &&
-      other.url == url;
+      other.url == url &&
+      other.audioUrl == audioUrl;
 
   @override
-  int get hashCode => Object.hash(height, url);
+  int get hashCode => Object.hash(height, url, audioUrl);
 }
 
 /// A subtitle/caption track available for a video.
