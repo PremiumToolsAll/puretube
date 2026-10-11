@@ -530,11 +530,17 @@ class PlayerController extends Notifier<PlayerUiState>
           await _extractor.getPlaybackStreams(state.videoId!);
       if (state.status != PlayerStatus.ready) return;
       // Preserve the user's chosen quality across recovery when possible.
+      // Exception: DASH (video-only) qualities are fragile — if the player
+      // errored while on DASH ("Failed to open ...googlevideo.com..."),
+      // retrying the same DASH URL just fails again. Fall back to the
+      // reliable muxed stream instead so the video keeps playing.
       var muxedUrl = fresh.muxedUrl;
       var muxedHeight = fresh.muxedHeight;
       MuxedQuality? preservedQuality;
       final wantedHeight = state.currentQuality?.height;
+      final wantedIsDash = state.currentQuality?.isDash ?? false;
       if (!state.audioOnly &&
+          !wantedIsDash &&
           wantedHeight != null &&
           wantedHeight != fresh.muxedHeight) {
         try {
