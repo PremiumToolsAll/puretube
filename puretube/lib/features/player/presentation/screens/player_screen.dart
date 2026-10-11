@@ -488,6 +488,21 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   },
                 ),
                 ListTile(
+                  leading: const Icon(Icons.high_quality),
+                  title: const Text('Quality'),
+                  subtitle: Text(
+                    ui.currentQualityHeight > 0
+                        ? '${ui.currentQualityHeight}p'
+                        : 'Auto',
+                    style: const TextStyle(
+                        color: Colors.grey, fontSize: 12),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showQualitySheet();
+                  },
+                ),
+                ListTile(
                   leading:
                       const Icon(Icons.download_outlined),
                   title: const Text('Download'),
