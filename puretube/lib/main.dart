@@ -11,24 +11,55 @@ import 'core/database/hive_setup.dart';
 import 'core/di/providers.dart';
 import 'features/player/data/services/audio_player_handler.dart';
 
+/// Tracks whether media_kit native libs loaded OK.
+/// If false, the player shows a message instead of crashing.
+bool mediaKitReady = false;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
-  await initHive();
+
+  // Catch-all: never leave the user staring at a white screen.
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+  };
+
+  // media_kit native libs can fail on some devices/ABIs — don't let it
+  // kill the whole app; the home feed works fine without it.
+  try {
+    MediaKit.ensureInitialized();
+    mediaKitReady = true;
+  } catch (e) {
+    debugPrint('MediaKit init failed (non-fatal): $e');
+    mediaKitReady = false;
+  }
+
+  try {
+    await initHive();
+  } catch (e) {
+    debugPrint('Hive init failed (non-fatal): $e');
+  }
+
   await _ensureNotificationPermission();
 
-  // The handler (and its media_kit Player) is created once here and lives
-  // for the whole process, so audio keeps playing with the UI gone.
-  final audioHandler = await AudioService.init(
-    builder: () => PureTubeAudioHandler(),
-    config: const AudioServiceConfig(
-      androidNotificationChannelId: 'com.puretube.channel.audio',
-      androidNotificationChannelName: 'PureTube playback',
-      androidNotificationOngoing: true,
-      androidShowNotificationBadge: false,
-      androidStopForegroundOnPause: true,
-    ),
-  ) as PureTubeAudioHandler;
+  // AudioService is nice-to-have for background playback; the app must
+  // still open if it fails (e.g. manifest/service edge cases).
+  // Fallback: plain handler without the foreground service.
+  late final PureTubeAudioHandler audioHandler;
+  try {
+    audioHandler = await AudioService.init(
+      builder: () => PureTubeAudioHandler(),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'com.puretube.channel.audio',
+        androidNotificationChannelName: 'PureTube playback',
+        androidNotificationOngoing: true,
+        androidShowNotificationBadge: false,
+        androidStopForegroundOnPause: true,
+      ),
+    ) as PureTubeAudioHandler;
+  } catch (e) {
+    debugPrint('AudioService init failed, using fallback handler: $e');
+    audioHandler = PureTubeAudioHandler();
+  }
 
   runApp(
     ProviderScope(
