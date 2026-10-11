@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:media_kit/media_kit.dart';
 
 import '../../../../core/di/providers.dart';
 import '../../../../core/error/exceptions.dart';
@@ -27,6 +28,8 @@ class PlayerUiState {
   final List<SponsorSegment> sponsorSegments;
   final bool skipSponsors;
   final bool pipSupported;
+  final List<CaptionTrack> subtitleTracks;
+  final CaptionTrack? activeSubtitle;
 
   const PlayerUiState({
     this.status = PlayerStatus.idle,
@@ -41,6 +44,8 @@ class PlayerUiState {
     this.sponsorSegments = const [],
     this.skipSponsors = true,
     this.pipSupported = false,
+    this.subtitleTracks = const [],
+    this.activeSubtitle,
   });
 
   PlayerUiState copyWith({
@@ -56,6 +61,9 @@ class PlayerUiState {
     List<SponsorSegment>? sponsorSegments,
     bool? skipSponsors,
     bool? pipSupported,
+    List<CaptionTrack>? subtitleTracks,
+    CaptionTrack? activeSubtitle,
+    bool clearSubtitle = false,
   }) {
     return PlayerUiState(
       status: status ?? this.status,
@@ -70,6 +78,9 @@ class PlayerUiState {
       sponsorSegments: sponsorSegments ?? this.sponsorSegments,
       skipSponsors: skipSponsors ?? this.skipSponsors,
       pipSupported: pipSupported ?? this.pipSupported,
+      subtitleTracks: subtitleTracks ?? this.subtitleTracks,
+      activeSubtitle:
+          clearSubtitle ? null : activeSubtitle ?? this.activeSubtitle,
     );
   }
 }
@@ -181,6 +192,8 @@ class PlayerController extends Notifier<PlayerUiState>
         sponsorSegments: segments,
         pipSupported: await _pip.isPipSupported,
       );
+      // Load captions in the background; UI updates when ready.
+      unawaited(loadSubtitles());
     } on PureTubeException catch (e) {
       state = state.copyWith(
           status: PlayerStatus.error, errorMessage: e.message);
@@ -308,6 +321,35 @@ class PlayerController extends Notifier<PlayerUiState>
 
   void toggleSkipSponsors(bool value) {
     state = state.copyWith(skipSponsors: value);
+  }
+
+  // ---------------- Subtitles / CC ----------------
+
+  /// Loads available caption tracks (fire-and-forget; empty on failure).
+  Future<void> loadSubtitles() async {
+    final id = state.videoId;
+    if (id == null) return;
+    try {
+      final tracks = await _extractor.getCaptionTracks(id);
+      if (state.videoId != id) return; // video changed meanwhile
+      state = state.copyWith(subtitleTracks: tracks);
+    } catch (_) {}
+  }
+
+  /// Selects a caption track (null = off). Applies via media_kit.
+  Future<void> selectSubtitle(CaptionTrack? track) async {
+    try {
+      if (track == null) {
+        await _handler.player
+            .setSubtitleTrack(SubtitleTrack.no());
+        state = state.copyWith(clearSubtitle: true);
+      } else {
+        await _handler.player.setSubtitleTrack(
+            SubtitleTrack.uri(track.url,
+                title: track.language));
+        state = state.copyWith(activeSubtitle: track);
+      }
+    } catch (_) {}
   }
 
   void _maybeSkipSponsor(Duration position) {
