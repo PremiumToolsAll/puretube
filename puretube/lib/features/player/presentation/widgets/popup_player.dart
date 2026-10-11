@@ -5,6 +5,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../../core/di/providers.dart';
+import '../../../../core/widgets/press_scale.dart';
 import '../providers/player_controller.dart';
 import '../screens/player_screen.dart';
 import 'subtitle_sheet.dart';
@@ -306,7 +307,8 @@ class _PopupPlayerWindowState
   }
 }
 
-/// Round translucent icon button used across the popup window.
+/// Round translucent icon button used across the popup window,
+/// with a 200ms ease-in-out press-scale effect.
 class _PopupIconButton extends StatelessWidget {
   final IconData icon;
   final String tooltip;
@@ -324,15 +326,10 @@ class _PopupIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
+    return PressIconButton(
       tooltip: tooltip,
-      splashRadius: 24,
-      icon: Icon(icon, color: color, size: size),
-      style: IconButton.styleFrom(
-        shadowColor: Colors.black,
-        elevation: 0,
-      ),
       onPressed: onPressed,
+      icon: Icon(icon, color: color, size: size),
     );
   }
 }
