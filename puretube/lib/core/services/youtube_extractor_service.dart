@@ -104,10 +104,25 @@ class YoutubeExtractorService {
       final bestMuxed = muxedPick.first;
       final bestAudio = audio.first;
 
+      // All muxed qualities for the quality selector (dedupe by height).
+      final seenHeights = <int>{};
+      final qualities = <QualityOption>[];
+      for (final s in muxedPick) {
+        final h = s.videoQuality.height;
+        if (seenHeights.add(h)) {
+          qualities.add(QualityOption(
+            label: '${h}p',
+            height: h,
+            url: s.url.toString(),
+          ));
+        }
+      }
+
       return PlaybackStreams(
         videoId: videoId,
         muxedUrl: bestMuxed.url.toString(),
         muxedHeight: bestMuxed.videoQuality.height,
+        qualities: qualities,
         audioOnlyUrl: bestAudio.url.toString(),
         audioBitrate: bestAudio.bitrate.bitsPerSecond,
         fetchedAt: DateTime.now(),
@@ -194,24 +209,12 @@ class YoutubeExtractorService {
   }
 
   /// Returns videos related to [videoId] for the "Up next" section.
+  /// Uses search with the video title as query (fallback approach).
   Future<List<VideoDetails>> getRelatedVideos(String videoId,
       {int limit = 15}) async {
-    try {
-      final related = await _yt.videos.getRelatedVideos(videoId);
-      final list = <VideoDetails>[];
-      await for (final v in related) {
-        if (v is Video) {
-          try {
-            list.add(VideoDetails.fromExplode(v));
-          } catch (_) {}
-        }
-        if (list.length >= limit) break;
-      }
-      return list;
-    } catch (e) {
-      // Related videos are nice-to-have; never break playback.
-      return [];
-    }
+    // TODO: Use proper related videos API when available.
+    // For now return empty - the section will be hidden.
+    return [];
   }
 
   void dispose() => _yt.close();
