@@ -44,7 +44,7 @@ dependencies:
   screen_brightness: ^2.0.0
 
   # Share & links
-  share_plus: ^7.2.1
+  share_plus: ^10.1.4
   url_launcher: ^6.2.4
 
   # UI polish
