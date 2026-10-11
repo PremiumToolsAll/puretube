@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/format.dart';
-import '../../player/presentation/player_screen.dart';
-import '../data/library_database.dart';
-import '../data/library_models.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/format.dart';
+import '../../../player/presentation/player_screen.dart';
+import '../../data/library_database.dart';
+import '../../data/library_models.dart';
 
 /// Tab 2: Playlists.
 class PlaylistsTab extends StatefulWidget {
@@ -346,7 +346,7 @@ class _PlaylistsTabState
                                       .textSecondary)),
                     )
                   : ReorderableListView.builder(
-                      controller: ctrl,
+                      scrollController: ctrl,
                       itemCount:
                           p.videoIds.length,
                       onReorder:
