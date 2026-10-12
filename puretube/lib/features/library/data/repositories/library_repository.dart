@@ -36,6 +36,13 @@ class HistoryRepository {
 
   Future<void> remove(String videoId) => _box.delete(videoId);
   Future<void> clear() => _box.clear();
+
+  /// Returns saved resume position in seconds, or 0 if never watched.
+  int getPosition(String videoId) {
+    final raw = _box.get(videoId);
+    if (raw == null) return 0;
+    return HistoryEntry.fromJson(_asMap(raw)).positionSecs;
+  }
 }
 
 class BookmarkRepository {
