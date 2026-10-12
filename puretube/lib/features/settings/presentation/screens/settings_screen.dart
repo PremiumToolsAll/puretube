@@ -93,7 +93,7 @@ Future<void> saveSkipSponsors(bool value) async {
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
-  static const _accent = Color(0xFF6200EA);
+  static const _accent = Color(0xFF10B981);
 
   String _localeLabel(Locale? locale) {
     if (locale == null) return 'System default';
@@ -113,7 +113,7 @@ class SettingsScreen extends ConsumerWidget {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A1A),
+          backgroundColor: const Color(0xFF0E1512),
           title: const Text('Language',
               style: TextStyle(color: Colors.white)),
           content: Column(
@@ -164,7 +164,7 @@ class SettingsScreen extends ConsumerWidget {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A1A),
+          backgroundColor: const Color(0xFF0E1512),
           title: const Text('Double-tap to seek',
               style: TextStyle(color: Colors.white)),
           content: Column(
@@ -209,7 +209,7 @@ class SettingsScreen extends ConsumerWidget {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
+        backgroundColor: const Color(0xFF0E1512),
         title: const Text('Clear watch history?',
             style: TextStyle(color: Colors.white)),
         content: const Text(
@@ -289,7 +289,7 @@ class SettingsScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
+        backgroundColor: const Color(0xFF0E1512),
         title: const Text('PureTube',
             style: TextStyle(
                 color: _accent, fontWeight: FontWeight.bold)),
@@ -334,7 +334,7 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () =>
                 _showLanguageDialog(context, ref, locale),
           ),
-          const Divider(color: Color(0xFF1A1A1A)),
+          const Divider(color: Color(0xFF0E1512)),
           Consumer(
             builder: (context, ref, _) {
               final secs = ref.watch(doubleTapSecondsProvider);
@@ -352,7 +352,7 @@ class SettingsScreen extends ConsumerWidget {
               );
             },
           ),
-          const Divider(color: Color(0xFF1A1A1A)),
+          const Divider(color: Color(0xFF0E1512)),
           Consumer(
             builder: (context, ref, _) {
               final skip = ref.watch(skipSponsorsProvider);
@@ -378,7 +378,7 @@ class SettingsScreen extends ConsumerWidget {
               );
             },
           ),
-          const Divider(color: Color(0xFF1A1A1A)),
+          const Divider(color: Color(0xFF0E1512)),
           ListTile(
             leading:
                 const Icon(Icons.history, color: Colors.white70),
@@ -399,7 +399,7 @@ class SettingsScreen extends ConsumerWidget {
               onTap: () => _clearCache(context),
             ),
           ),
-          const Divider(color: Color(0xFF1A1A1A)),
+          const Divider(color: Color(0xFF0E1512)),
           ListTile(
             leading:
                 const Icon(Icons.info_outline, color: Colors.white70),
@@ -409,7 +409,7 @@ class SettingsScreen extends ConsumerWidget {
                 style: TextStyle(color: Colors.grey)),
             onTap: () => _showAbout(context),
           ),
-          const Divider(color: Color(0xFF1A1A1A)),
+          const Divider(color: Color(0xFF0E1512)),
           // Background playback diagnostic.
           ListTile(
             leading: Icon(
