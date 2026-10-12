@@ -2976,13 +2976,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           ),
           const SizedBox(width: 8),
           chip(
-            icon: Icons.headphones,
-            label: 'Background',
-            active: uiState.audioOnly,
-            onTap: notifier.toggleAudioOnly,
-          ),
-          const SizedBox(width: 8),
-          chip(
             icon: Icons.picture_in_picture_alt,
             label: 'Popup',
             onTap: () {
