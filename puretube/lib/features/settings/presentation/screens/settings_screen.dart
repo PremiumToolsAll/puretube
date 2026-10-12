@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -94,6 +95,16 @@ class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
   static const _accent = Color(0xFF10B981);
+  static const _accentLight = Color(0xFF34D399);
+  static const _bg = Color(0xFF0A0F0C);
+  static const _card = Color(0xFF0E1512);
+
+  /// Real app version from pubspec (via package_info_plus), fetched once.
+  static final Future<PackageInfo> _packageInfoFuture =
+      PackageInfo.fromPlatform();
+
+  String _versionText(PackageInfo info) =>
+      'v${info.version} (${info.buildNumber})';
 
   String _localeLabel(Locale? locale) {
     if (locale == null) return 'System default';
@@ -285,18 +296,25 @@ class SettingsScreen extends ConsumerWidget {
     }
   }
 
-  void _showAbout(BuildContext context) {
+  void _showAbout(BuildContext context) async {
+    PackageInfo? info;
+    try {
+      info = await _packageInfoFuture;
+    } catch (_) {}
+    if (!context.mounted) return;
+    final versionLine =
+        info != null ? 'PureTube ${_versionText(info)}' : 'PureTube';
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF0E1512),
+        backgroundColor: _card,
         title: const Text('PureTube',
             style: TextStyle(
                 color: _accent, fontWeight: FontWeight.bold)),
-        content: const Text(
-          'PureTube v1.0.0\n\nA lightweight YouTube client.\nStreams load directly from YouTube — '
+        content: Text(
+          '$versionLine\n\nA lightweight YouTube client.\nStreams load directly from YouTube — '
           'no middleman servers.',
-          style: TextStyle(color: Colors.grey),
+          style: const TextStyle(color: Colors.grey),
         ),
         actions: [
           TextButton(
@@ -309,124 +327,265 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
+  /// Small uppercase section header for a premium grouped look.
+  Widget _sectionHeader(String title) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 6),
+        child: Text(
+          title.toUpperCase(),
+          style: const TextStyle(
+            color: _accentLight,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.4,
+          ),
+        ),
+      );
+
+  /// WILLOW card used for grouped rows.
+  Widget _settingsCard({required List<Widget> children}) {
+    final separated = <Widget>[];
+    for (var i = 0; i < children.length; i++) {
+      separated.add(children[i]);
+      if (i < children.length - 1) {
+        separated.add(const Divider(
+            color: Color(0xFF1B2A22), height: 1, indent: 56));
+      }
+    }
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: _card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+            color: _accent.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+          mainAxisSize: MainAxisSize.min, children: separated),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final locale = ref.watch(localeProvider);
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: _bg,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: _bg,
         title: const Text('Settings',
-            style: TextStyle(color: Colors.white)),
+            style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600)),
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: ListView(
+        padding: const EdgeInsets.only(bottom: 24),
         children: [
-          ListTile(
-            leading:
-                const Icon(Icons.language, color: Colors.white70),
-            title: const Text('Language',
-                style: TextStyle(color: Colors.white)),
-            subtitle: Text(_localeLabel(locale),
-                style: const TextStyle(color: Colors.grey)),
-            trailing: const Icon(Icons.chevron_right,
-                color: Colors.grey),
-            onTap: () =>
-                _showLanguageDialog(context, ref, locale),
-          ),
-          const Divider(color: Color(0xFF0E1512)),
-          Consumer(
-            builder: (context, ref, _) {
-              final secs = ref.watch(doubleTapSecondsProvider);
-              return ListTile(
-                leading: const Icon(Icons.touch_app_outlined,
-                    color: Colors.white70),
-                title: const Text('Double-tap to seek',
-                    style: TextStyle(color: Colors.white)),
-                subtitle: Text('$secs seconds',
-                    style: const TextStyle(color: Colors.grey)),
-                trailing: const Icon(Icons.chevron_right,
-                    color: Colors.grey),
-                onTap: () =>
-                    _showDoubleTapDialog(context, ref, secs),
+          // Premium app header card with real version.
+          FutureBuilder<PackageInfo>(
+            future: _packageInfoFuture,
+            builder: (context, snap) {
+              final versionText = snap.hasData
+                  ? _versionText(snap.data!)
+                  : '…';
+              return Container(
+                margin:
+                    const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _card,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                      color: _accent.withValues(alpha: 0.25)),
+                  boxShadow: [
+                    BoxShadow(
+                      color:
+                          _accent.withValues(alpha: 0.08),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [_accent, _accentLight],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius:
+                            BorderRadius.circular(14),
+                        boxShadow: [
+                          BoxShadow(
+                            color: _accent.withValues(
+                                alpha: 0.35),
+                            blurRadius: 12,
+                          ),
+                        ],
+                      ),
+                      child: const Icon(Icons.play_arrow,
+                          color: Colors.white, size: 32),
+                    ),
+                    const SizedBox(width: 14),
+                    Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        const Text('PureTube',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 19,
+                                fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 2),
+                        Text(versionText,
+                            style: const TextStyle(
+                                color: _accentLight,
+                                fontSize: 13)),
+                      ],
+                    ),
+                  ],
+                ),
               );
             },
           ),
-          const Divider(color: Color(0xFF0E1512)),
-          Consumer(
-            builder: (context, ref, _) {
-              final skip = ref.watch(skipSponsorsProvider);
-              return SwitchListTile(
-                secondary: const Icon(Icons.block_outlined,
-                    color: Colors.white70),
-                title: const Text('Skip sponsors',
-                    style: TextStyle(color: Colors.white)),
-                subtitle: const Text('Auto-skip sponsored segments',
-                    style: TextStyle(color: Colors.grey)),
-                value: skip,
-                activeColor: _accent,
-                onChanged: (v) async {
-                  ref.read(skipSponsorsProvider.notifier).state = v;
-                  await saveSkipSponsors(v);
-                  // Sync with the player controller if it's alive.
-                  try {
-                    ref
-                        .read(playerControllerProvider.notifier)
-                        .toggleSkipSponsors(v);
-                  } catch (_) {}
-                },
-              );
-            },
-          ),
-          const Divider(color: Color(0xFF0E1512)),
-          ListTile(
-            leading:
-                const Icon(Icons.history, color: Colors.white70),
-            title: const Text('Clear watch history',
-                style: TextStyle(color: Colors.white)),
-            onTap: () => _confirmClearHistory(context, ref),
-          ),
-          FutureBuilder<String>(
-            future: _cacheSize(),
-            builder: (context, snap) => ListTile(
-              leading: const Icon(Icons.cleaning_services_outlined,
-                  color: Colors.white70),
-              title: const Text('Clear cache',
+          _sectionHeader('General'),
+          _settingsCard(children: [
+            ListTile(
+              leading: const Icon(Icons.language,
+                  color: _accentLight),
+              title: const Text('Language',
                   style: TextStyle(color: Colors.white)),
-              subtitle: Text('Cached images & temp files'
-                  '${snap.hasData ? ' (${snap.data})' : ''}',
-                  style: const TextStyle(color: Colors.grey)),
-              onTap: () => _clearCache(context),
+              subtitle: Text(_localeLabel(locale),
+                  style:
+                      const TextStyle(color: Colors.grey)),
+              trailing: const Icon(Icons.chevron_right,
+                  color: Colors.grey),
+              onTap: () =>
+                  _showLanguageDialog(context, ref, locale),
             ),
-          ),
-          const Divider(color: Color(0xFF0E1512)),
-          ListTile(
-            leading:
-                const Icon(Icons.info_outline, color: Colors.white70),
-            title: const Text('About',
-                style: TextStyle(color: Colors.white)),
-            subtitle: const Text('PureTube v1.0.0',
-                style: TextStyle(color: Colors.grey)),
-            onTap: () => _showAbout(context),
-          ),
-          const Divider(color: Color(0xFF0E1512)),
-          // Background playback diagnostic.
-          ListTile(
-            leading: Icon(
-                audioServiceReady
-                    ? Icons.check_circle
-                    : Icons.error,
-                color: audioServiceReady
-                    ? Colors.green
-                    : Colors.red),
-            title: const Text('Background service',
-                style: TextStyle(color: Colors.white)),
-            subtitle: Text(
-                audioServiceReady
-                    ? 'Running — notifications should work'
-                    : 'NOT running — background will fail',
-                style: const TextStyle(color: Colors.grey)),
-          ),
+            Consumer(
+              builder: (context, ref, _) {
+                final secs =
+                    ref.watch(doubleTapSecondsProvider);
+                return ListTile(
+                  leading: const Icon(
+                      Icons.touch_app_outlined,
+                      color: _accentLight),
+                  title: const Text('Double-tap to seek',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: Text('$secs seconds',
+                      style:
+                          const TextStyle(color: Colors.grey)),
+                  trailing: const Icon(Icons.chevron_right,
+                      color: Colors.grey),
+                  onTap: () =>
+                      _showDoubleTapDialog(context, ref, secs),
+                );
+              },
+            ),
+            Consumer(
+              builder: (context, ref, _) {
+                final skip = ref.watch(skipSponsorsProvider);
+                return SwitchListTile(
+                  secondary: const Icon(Icons.block_outlined,
+                      color: _accentLight),
+                  title: const Text('Skip sponsors',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: const Text(
+                      'Auto-skip sponsored segments',
+                      style: TextStyle(color: Colors.grey)),
+                  value: skip,
+                  activeThumbColor: _accent,
+                  activeTrackColor:
+                      _accent.withValues(alpha: 0.35),
+                  onChanged: (v) async {
+                    ref
+                        .read(skipSponsorsProvider.notifier)
+                        .state = v;
+                    await saveSkipSponsors(v);
+                    // Sync with the player controller if it's alive.
+                    try {
+                      ref
+                          .read(playerControllerProvider
+                              .notifier)
+                          .toggleSkipSponsors(v);
+                    } catch (_) {}
+                  },
+                );
+              },
+            ),
+          ]),
+          _sectionHeader('Library'),
+          _settingsCard(children: [
+            ListTile(
+              leading: const Icon(Icons.history,
+                  color: _accentLight),
+              title: const Text('Clear watch history',
+                  style: TextStyle(color: Colors.white)),
+              onTap: () =>
+                  _confirmClearHistory(context, ref),
+            ),
+            FutureBuilder<String>(
+              future: _cacheSize(),
+              builder: (context, snap) => ListTile(
+                leading: const Icon(
+                    Icons.cleaning_services_outlined,
+                    color: _accentLight),
+                title: const Text('Clear cache',
+                    style: TextStyle(color: Colors.white)),
+                subtitle: Text('Cached images & temp files'
+                    '${snap.hasData ? ' (${snap.data})' : ''}',
+                    style:
+                        const TextStyle(color: Colors.grey)),
+                onTap: () => _clearCache(context),
+              ),
+            ),
+          ]),
+          _sectionHeader('About'),
+          _settingsCard(children: [
+            FutureBuilder<PackageInfo>(
+              future: _packageInfoFuture,
+              builder: (context, snap) => ListTile(
+                leading: const Icon(Icons.info_outline,
+                    color: _accentLight),
+                title: const Text('About',
+                    style: TextStyle(color: Colors.white)),
+                subtitle: Text(
+                    snap.hasData
+                        ? 'PureTube ${_versionText(snap.data!)}'
+                        : 'PureTube',
+                    style:
+                        const TextStyle(color: Colors.grey)),
+                onTap: () => _showAbout(context),
+              ),
+            ),
+          ]),
+          _sectionHeader('Diagnostics'),
+          _settingsCard(children: [
+            // Background playback diagnostic.
+            ListTile(
+              leading: Icon(
+                  audioServiceReady
+                      ? Icons.check_circle
+                      : Icons.error,
+                  color: audioServiceReady
+                      ? _accent
+                      : Colors.redAccent),
+              title: const Text('Background service',
+                  style: TextStyle(color: Colors.white)),
+              subtitle: Text(
+                  audioServiceReady
+                      ? 'Running — background playback and notification controls should work.'
+                      : 'NOT running — background audio may stop when you leave the app. '
+                          'Fix: enable Notifications, set Battery to "No restrictions", '
+                          'allow Autostart for PureTube, then restart the app.',
+                  style:
+                      const TextStyle(color: Colors.grey)),
+            ),
+          ]),
         ],
       ),
     );
