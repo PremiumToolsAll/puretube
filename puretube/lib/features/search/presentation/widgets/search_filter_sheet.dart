@@ -168,7 +168,7 @@ class _SearchFilterSheetState
                     onPick(on ? null : v),
                 selectedColor: _accent,
                 backgroundColor:
-                    const Color(0xFF0E1512),
+                    const Color(0xFF16211C),
                 labelStyle: const TextStyle(
                     color: Colors.white,
                     fontSize: 13),
