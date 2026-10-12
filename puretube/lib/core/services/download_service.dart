@@ -15,8 +15,9 @@ class DownloadService {
   final Dio _dio;
   final Map<String, CancelToken> _tokens = {};
 
-  Future<String> buildFilePath(
-      String videoId, String title, String label, bool audioOnly) async {
+  Future<String> buildFilePath(String videoId, String title,
+      String label, bool audioOnly,
+      {String? role}) async {
     final base = await getApplicationDocumentsDirectory();
     final dir = Directory('${base.path}/downloads');
     if (!await dir.exists()) await dir.create(recursive: true);
@@ -26,7 +27,8 @@ class DownloadService {
         safeTitle.length > 60 ? safeTitle.substring(0, 60) : safeTitle;
     final ext = audioOnly ? 'm4a' : 'mp4';
     final tag = label.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
-    return '${dir.path}/${videoId}_$tag'
+    final roleSuffix = role == null ? '' : '_$role';
+    return '${dir.path}/${videoId}_$tag$roleSuffix'
         '_${short.isEmpty ? 'video' : short}.$ext';
   }
 
@@ -57,12 +59,41 @@ class DownloadService {
         options: Options(
           responseType: ResponseType.stream,
           receiveTimeout: const Duration(minutes: 15),
+          // Let 4xx statuses surface here so we can translate them
+          // into actionable messages instead of a generic failure.
+          validateStatus: (s) => s != null && s < 500,
           headers: {
             'User-Agent': _ua,
+            'Accept': '*/*',
+            'Accept-Encoding': 'identity',
+            'Referer': 'https://www.youtube.com/',
             if (startByte > 0) 'Range': 'bytes=$startByte-',
           },
         ),
       );
+
+      final code = res.statusCode ?? 0;
+      if (code == 403 || code == 410) {
+        // Signed stream URL expired or revoked: the controller's retry()
+        // re-extracts fresh URLs, so tell the user exactly that.
+        throw const DownloadFailed(
+            'Link expired. Tap Resume to retry with a fresh link.');
+      }
+      if (code == 416) {
+        // Range not satisfiable: the local file is already complete
+        // (or longer than the remote). Treat as done, don't error out.
+        if (await file.exists() && await file.length() > 0) {
+          onProgress(1.0);
+          onSpeed?.call(0);
+          return;
+        }
+        await file.delete();
+        throw const DownloadFailed(
+            'Could not resume. Tap Resume to restart the download.');
+      }
+      if (code < 200 || code >= 300) {
+        throw DownloadFailed('Download failed (HTTP $code).');
+      }
 
       if (res.statusCode == 200 && startByte > 0) {
         // Server ignored Range: restart from scratch.
