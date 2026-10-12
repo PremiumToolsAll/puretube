@@ -239,7 +239,8 @@ class PlayerController extends Notifier<PlayerUiState>
       unawaited(loadQualities(initialHeight: streams.muxedHeight));
       // Up Next suggestions load in the background; the section below
       // the player and the Next button both read them from state.
-      unawaited(_loadRelated(videoId));
+      unawaited(_loadRelated(videoId,
+          titleHint: video.title, authorHint: video.author));
     } on PureTubeException catch (e) {
       state = state.copyWith(
           status: PlayerStatus.error, errorMessage: e.message);
@@ -353,9 +354,11 @@ class PlayerController extends Notifier<PlayerUiState>
   /// Loads Up Next suggestions in the background. The section below the
   /// player and the Next (⏭️) button both read them from state, so no
   /// extra API call is needed when the user taps Next.
-  Future<void> _loadRelated(String videoId) async {
+  Future<void> _loadRelated(String videoId,
+      {String? titleHint, String? authorHint}) async {
     try {
-      final videos = await _extractor.getRelatedVideos(videoId);
+      final videos = await _extractor.getRelatedVideos(videoId,
+          titleHint: titleHint, authorHint: authorHint);
       if (state.videoId != videoId) return;
       state = state.copyWith(
         relatedVideos: videos,
@@ -372,7 +375,9 @@ class PlayerController extends Notifier<PlayerUiState>
     final id = state.videoId;
     if (id == null) return;
     state = state.copyWith(relatedFailed: false);
-    await _loadRelated(id);
+    final v = state.video;
+    await _loadRelated(id,
+        titleHint: v?.title, authorHint: v?.author);
   }
 
   /// Switches to a different muxed quality, preserving the current
