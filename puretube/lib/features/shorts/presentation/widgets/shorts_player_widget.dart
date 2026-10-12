@@ -26,7 +26,7 @@ class ShortsPlayerWidget extends ConsumerStatefulWidget {
 
 class _ShortsPlayerWidgetState
     extends ConsumerState<ShortsPlayerWidget> {
-  static const _accent = Color(0xFF6200EA);
+  static const _accent = Color(0xFF10B981);
   Player? _player;
   VideoController? _videoController;
   bool _playing = true;
