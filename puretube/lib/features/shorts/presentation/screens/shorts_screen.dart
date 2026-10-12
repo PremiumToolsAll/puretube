@@ -15,7 +15,7 @@ class ShortsScreen extends ConsumerStatefulWidget {
 
 class _ShortsScreenState
     extends ConsumerState<ShortsScreen> {
-  static const _accent = Color(0xFF6200EA);
+  static const _accent = Color(0xFF10B981);
   final _pageCtrl = PageController();
 
   @override
