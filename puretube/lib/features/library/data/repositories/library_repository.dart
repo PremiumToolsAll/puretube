@@ -43,6 +43,35 @@ class HistoryRepository {
     if (raw == null) return 0;
     return HistoryEntry.fromJson(_asMap(raw)).positionSecs;
   }
+
+  /// Upserts the resume position, creating a history entry when the video
+  /// was never recorded (e.g. app backgrounded before metadata arrived).
+  Future<void> saveResumePosition({
+    required String videoId,
+    required int positionSecs,
+    String title = '',
+    String author = '',
+    String thumbnailUrl = '',
+    int? durationSecs,
+  }) async {
+    final raw = _box.get(videoId);
+    if (raw == null) {
+      await _box.put(
+        videoId,
+        HistoryEntry(
+          videoId: videoId,
+          title: title,
+          author: author,
+          thumbnailUrl: thumbnailUrl,
+          durationSecs: durationSecs,
+          positionSecs: positionSecs,
+          watchedAt: DateTime.now(),
+        ).toJson(),
+      );
+      return;
+    }
+    await updatePosition(videoId, positionSecs);
+  }
 }
 
 class BookmarkRepository {
