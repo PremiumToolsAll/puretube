@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import '../error/exceptions.dart';
@@ -468,27 +469,103 @@ class YoutubeExtractorService {
   /// Fetches "Up Next" suggestions for a video. youtube_explode_dart 3.x
   /// exposes no public related-videos API, so we search using the
   /// video's author + title and exclude the video itself.
-  /// Returns an empty list (never throws) on any failure.
+  ///
+  /// Uses a multi-strategy fallback so the section rarely comes back
+  /// empty:
+  ///   1. author + title (most relevant — e.g. same song/artist)
+  ///   2. title keywords (meaningful words only, stop-words removed)
+  ///   3. author only (more videos from the same channel)
+  ///   4. short title keywords (broader net)
+  ///
+  /// [titleHint]/[authorHint] let callers that already loaded the video
+  /// details skip the extra `videos.get` network call.
+  /// Returns an empty list (never throws) only if every strategy fails.
   Future<List<VideoDetails>> getRelatedVideos(String videoId,
-      {int limit = 12}) async {
+      {int limit = 12, String? titleHint, String? authorHint}) async {
     try {
       await _requireNetwork();
-      final video = await _yt.videos
-          .get(videoId)
-          .timeout(const Duration(seconds: 20));
-      final query = '${video.author} ${video.title}'.trim();
-      if (query.isEmpty) return [];
-      final results = await _yt.search
-          .search(query)
-          .timeout(const Duration(seconds: 20));
-      return results
-          .whereType<Video>()
-          .where((v) => v.id.value != videoId)
-          .take(limit)
-          .map(VideoDetails.fromExplode)
-          .toList();
-    } catch (_) {
+
+      String title = titleHint ?? '';
+      String author = authorHint ?? '';
+      if (title.isEmpty || author.isEmpty) {
+        try {
+          final video = await _yt.videos
+              .get(videoId)
+              .timeout(const Duration(seconds: 20));
+          if (title.isEmpty) title = video.title;
+          if (author.isEmpty) author = video.author;
+        } catch (e) {
+          debugPrint('getRelatedVideos: videos.get failed: $e');
+        }
+      }
+
+      final queries = <String>[];
+      final authorTitle = '$author $title'.trim();
+      if (authorTitle.isNotEmpty) queries.add(authorTitle);
+
+      final keywords = _titleKeywords(title);
+      if (keywords.isNotEmpty) {
+        queries.add(keywords.join(' '));
+      }
+      if (author.trim().isNotEmpty) {
+        queries.add(author.trim());
+      }
+      // Broadest net: first few keywords only.
+      if (keywords.length > 2) {
+        queries.add(keywords.take(3).join(' '));
+      }
+
+      final seen = <String>{videoId};
+      final collected = <VideoDetails>[];
+      for (final query in queries) {
+        if (collected.length >= limit) break;
+        try {
+          final results = await _yt.search
+              .search(query)
+              .timeout(const Duration(seconds: 20));
+          for (final v in results.whereType<Video>()) {
+            if (seen.add(v.id.value)) {
+              collected.add(VideoDetails.fromExplode(v));
+              if (collected.length >= limit) break;
+            }
+          }
+        } catch (e) {
+          debugPrint('getRelatedVideos: search "$query" failed: $e');
+        }
+      }
+      return collected;
+    } catch (e) {
+      debugPrint('getRelatedVideos: fatal failure for $videoId: $e');
       return [];
     }
+  }
+
+  /// Words that carry no signal for "more like this" searches.
+  static const _relatedStopWords = <String>{
+    'the', 'and', 'for', 'with', 'from', 'this', 'that', 'you',
+    'your', 'are', 'was', 'were', 'has', 'have', 'had', 'will',
+    'would', 'can', 'not', 'but', 'all', 'any', 'out', 'new',
+    'official', 'video', 'full', 'part', 'episode', 'ep', 'hd',
+    '4k', '8k', 'lyrics', 'lyric', 'audio', 'song', 'songs',
+    'music', 'movie', 'film', 'trailer', 'teaser', 'promo',
+    '2024', '2025', '2026', '2027',
+  };
+
+  /// Extracts the most meaningful search keywords from a video title:
+  /// drops punctuation, stop-words and tiny tokens, keeps order,
+  /// caps at 6 words so the query stays focused.
+  static List<String> _titleKeywords(String title) {
+    final words = title
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), ' ')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.length >= 3 && !_relatedStopWords.contains(w))
+        .toList();
+    // De-dupe while preserving order.
+    final unique = <String>[];
+    for (final w in words) {
+      if (!unique.contains(w)) unique.add(w);
+    }
+    return unique.take(6).toList();
   }
 }
