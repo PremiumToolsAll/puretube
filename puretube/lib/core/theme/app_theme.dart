@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// AMOLED Material 3 theme. google_fonts fetches Poppins on first launch
-/// then caches it. For a fully offline APK, bundle the font in assets
-/// and set fontFamily instead.
+/// WILLOW theme: dark green-black with emerald accents,
+/// matching the video player's vibe.
 class AppTheme {
-  static const primary = Color(0xFF6200EA);
-  static const accent = Color(0xFF00BCD4);
+  static const primary = Color(0xFF10B981);
+  static const accent = Color(0xFF34D399);
+  static const willowBg = Color(0xFF0A0F0C);
+  static const willowCard = Color(0xFF0E1512);
 
   static ThemeData get dark {
     final scheme = ColorScheme.fromSeed(
@@ -16,23 +17,23 @@ class AppTheme {
     final base = ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
-      scaffoldBackgroundColor: Colors.black,
+      scaffoldBackgroundColor: willowBg,
       colorScheme: scheme.copyWith(
         primary: primary,
         secondary: accent,
-        surface: Colors.black,
-        surfaceContainerLowest: Colors.black,
-        surfaceContainerLow: const Color(0xFF0A0A0A),
-        surfaceContainer: const Color(0xFF121212),
-        surfaceContainerHigh: const Color(0xFF1E1E1E),
+        surface: willowBg,
+        surfaceContainerLowest: willowBg,
+        surfaceContainerLow: const Color(0xFF0A0F0C),
+        surfaceContainer: willowCard,
+        surfaceContainerHigh: const Color(0xFF16211B),
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: Colors.black,
+        backgroundColor: willowBg,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
       ),
       chipTheme: const ChipThemeData(
-        backgroundColor: Color(0xFF1A1A1A),
+        backgroundColor: willowCard,
         labelStyle: TextStyle(color: Colors.white70),
         side: BorderSide.none,
       ),
@@ -51,13 +52,13 @@ class AppTheme {
                 : null),
       ),
       bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: Color(0xFF141414),
+        backgroundColor: Color(0xFF0E1512),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
         ),
       ),
       dialogTheme: const DialogThemeData(
-        backgroundColor: Color(0xFF141414),
+        backgroundColor: Color(0xFF0E1512),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.all(Radius.circular(16))),
       ),
