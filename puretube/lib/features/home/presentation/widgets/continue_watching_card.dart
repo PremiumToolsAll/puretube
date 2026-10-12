@@ -81,7 +81,7 @@ class ContinueWatchingCard extends ConsumerWidget {
             child: Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: const Color(0xFF0E1512),
+                color: const Color(0xFF16211C),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
                     color: const Color(0xFF10B981)
@@ -101,12 +101,12 @@ class ContinueWatchingCard extends ConsumerWidget {
                           placeholder: (_, __) => Container(
                             width: 128,
                             height: 72,
-                            color: const Color(0xFF0E1512),
+                            color: const Color(0xFF16211C),
                           ),
                           errorWidget: (_, __, ___) => Container(
                             width: 128,
                             height: 72,
-                            color: const Color(0xFF0E1512),
+                            color: const Color(0xFF16211C),
                             child: const Icon(
                                 Icons.broken_image,
                                 color: Colors.grey),
