@@ -1163,9 +1163,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           final notifier =
               ref.read(playerControllerProvider.notifier);
           return SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight:
+                    MediaQuery.of(ctx).size.height * 0.75,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                 SwitchListTile(
                   secondary: const Icon(Icons.headphones),
                   title: const Text('Audio only'),
@@ -1321,6 +1327,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   },
                 ),
               ],
+                ),
+              ),
             ),
           );
         },
