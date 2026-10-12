@@ -1875,12 +1875,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       ],
                     ),
                   ),
-                  PressIconButton(
-                    tooltip: 'Video mode',
-                    icon: const Icon(Icons.videocam,
-                        color: _gold),
-                    onPressed: notifier.toggleAudioOnly,
-                  ),
+                  _buildModeToggle(uiState),
                   PressIconButton(
                     tooltip: 'More',
                     icon: const Icon(Icons.more_vert,
@@ -2579,73 +2574,77 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
-  /// Premium pill-shaped audio/video mode toggle (WILLOW emerald styling).
-  /// Left segment = headphones (audio-only mode), right segment = play
-  /// (video mode). The active side gets an emerald highlight with a
-  /// smooth animated transition.
+  /// Switch-style audio/video mode toggle (like the Autoplay switch):
+  /// a track with headphone | video icons and a sliding emerald thumb
+  /// that animates to the active side. Tap anywhere to flip modes.
   Widget _buildModeToggle(PlayerUiState uiState) {
     final notifier = ref.read(playerControllerProvider.notifier);
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 4),
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.55),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-            color: Colors.white.withOpacity(0.12), width: 1),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _modeSegment(
-            icon: Icons.headphones,
-            tooltip: 'Audio mode',
-            selected: uiState.audioOnly,
-            onTap: () => notifier.setAudioOnly(true),
-          ),
-          _modeSegment(
-            icon: Icons.play_arrow,
-            tooltip: 'Video mode',
-            selected: !uiState.audioOnly,
-            onTap: () => notifier.setAudioOnly(false),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _modeSegment({
-    required IconData icon,
-    required String tooltip,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
+    final audioOnly = uiState.audioOnly;
     return Tooltip(
-      message: tooltip,
+      message: audioOnly ? 'Switch to video mode' : 'Switch to audio mode',
       child: GestureDetector(
-        onTap: onTap,
+        onTap: () => notifier.setAudioOnly(!audioOnly),
         behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          padding: const EdgeInsets.all(7),
+        child: Container(
+          width: 74,
+          height: 36,
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.all(3),
           decoration: BoxDecoration(
-            color: selected ? _emerald : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: selected
-                ? [
-                    BoxShadow(
-                      color: _emerald.withOpacity(0.45),
-                      blurRadius: 8,
-                      spreadRadius: 0,
-                    ),
-                  ]
-                : null,
+            color: Colors.black.withOpacity(0.55),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+                color: Colors.white.withOpacity(0.12), width: 1),
           ),
-          child: Icon(
-            icon,
-            size: 18,
-            color: selected ? Colors.black : Colors.white70,
+          child: Stack(
+            children: [
+              // Static icons on the track.
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: Icon(Icons.headphones,
+                        size: 15,
+                        color: Colors.white.withValues(alpha: 0.45)),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Icon(Icons.play_arrow,
+                        size: 15,
+                        color: Colors.white.withValues(alpha: 0.45)),
+                  ),
+                ],
+              ),
+              // Sliding thumb with the active icon.
+              AnimatedAlign(
+                alignment: audioOnly
+                    ? Alignment.centerLeft
+                    : Alignment.centerRight,
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeInOut,
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _emerald,
+                    boxShadow: [
+                      BoxShadow(
+                        color: _emerald.withValues(alpha: 0.45),
+                        blurRadius: 8,
+                        spreadRadius: 0,
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    audioOnly ? Icons.headphones : Icons.play_arrow,
+                    size: 16,
+                    color: Colors.black,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -2679,8 +2678,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 button: true,
                 label: playing ? 'Pause' : 'Play',
                 child: Container(
-                  width: 84,
-                  height: 84,
+                  width: 72,
+                  height: 72,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: _emerald.withValues(alpha: 0.92),
@@ -2693,21 +2692,34 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       BoxShadow(
                         color:
                             _emerald.withValues(alpha: 0.40),
-                        blurRadius: 28,
-                        spreadRadius: 4,
+                        blurRadius: 24,
+                        spreadRadius: 3,
                       ),
                     ],
                   ),
                   child: AnimatedSwitcher(
                     duration:
                         const Duration(milliseconds: 200),
+                    switchInCurve: Curves.easeInOut,
+                    switchOutCurve: Curves.easeInOut,
+                    transitionBuilder: (child, animation) {
+                      return FadeTransition(
+                        opacity: animation,
+                        child: ScaleTransition(
+                          scale: Tween<double>(
+                                  begin: 0.6, end: 1.0)
+                              .animate(animation),
+                          child: child,
+                        ),
+                      );
+                    },
                     child: Icon(
                       playing
                           ? Icons.pause
                           : Icons.play_arrow,
                       key: ValueKey<bool>(playing),
                       color: Colors.white,
-                      size: 44,
+                      size: 36,
                     ),
                   ),
                 ),
