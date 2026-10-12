@@ -272,24 +272,35 @@ class _ChannelRowState extends ConsumerState<_ChannelRow> {
       children: [
         GestureDetector(
           onTap: _openChannel,
-          child: CircleAvatar(
-            radius: 18,
-            backgroundColor: const Color(0xFF3F3F3F),
-            backgroundImage: _channel?.logoUrl != null
-                ? CachedNetworkImageProvider(
-                    _channel!.logoUrl)
-                : null,
-            child: _channel?.logoUrl == null
-                ? Text(
-                    video.author.isNotEmpty
-                        ? video.author[0].toUpperCase()
-                        : '?',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14),
-                  )
-                : null,
+          // WILLOW: circular avatar with an emerald ring.
+          child: Container(
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: _PlayerScreenState._emerald,
+                width: 2,
+              ),
+            ),
+            child: CircleAvatar(
+              radius: 18,
+              backgroundColor: const Color(0xFF3F3F3F),
+              backgroundImage: _channel?.logoUrl != null
+                  ? CachedNetworkImageProvider(
+                      _channel!.logoUrl)
+                  : null,
+              child: _channel?.logoUrl == null
+                  ? Text(
+                      video.author.isNotEmpty
+                          ? video.author[0].toUpperCase()
+                          : '?',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14),
+                    )
+                  : null,
+            ),
           ),
         ),
         const SizedBox(width: 10),
@@ -323,11 +334,18 @@ class _ChannelRowState extends ConsumerState<_ChannelRow> {
         ElevatedButton(
           onPressed: _toggleSubscribe,
           style: ElevatedButton.styleFrom(
+            // WILLOW: solid emerald pill; subscribed = dark pill, emerald text.
             backgroundColor: _subscribed
-                ? const Color(0xFF272727)
-                : Colors.white,
-            foregroundColor:
-                _subscribed ? Colors.white : Colors.black,
+                ? const Color(0xFF0E1512)
+                : _PlayerScreenState._emerald,
+            foregroundColor: _subscribed
+                ? _PlayerScreenState._emeraldLight
+                : const Color(0xFF0A0F0C),
+            side: _subscribed
+                ? BorderSide(
+                    color: _PlayerScreenState._emerald
+                        .withValues(alpha: 0.6))
+                : BorderSide.none,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
@@ -338,7 +356,8 @@ class _ChannelRowState extends ConsumerState<_ChannelRow> {
           ),
           child: Text(
             _subscribed ? 'Subscribed' : 'Subscribe',
-            style: const TextStyle(fontSize: 13),
+            style: const TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w600),
           ),
         ),
       ],
@@ -358,6 +377,14 @@ class PlayerScreen extends ConsumerStatefulWidget {
 
 class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   static const _accent = Color(0xFF6200EA);
+
+  /// WILLOW emerald theme for video mode: glowing controls, seekbar,
+  /// outlined chips, avatar rings and the autoplay toggle.
+  static const _emerald = Color(0xFF10B981);
+  static const _emeraldLight = Color(0xFF34D399);
+
+  /// Dark green-black scaffold background for video mode (WILLOW).
+  static const _willowBg = Color(0xFF0A0F0C);
 
   /// Spotify-style gold/tan accent used by the audio (music) mode.
   static const _gold = Color(0xFFD4A574);
@@ -1625,7 +1652,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           if (!didPop) _toggleFullscreen();
         },
         child: Scaffold(
-          backgroundColor: Colors.black,
+          backgroundColor: _willowBg,
           body: _buildVideoArea(uiState, player, fillScreen: true),
         ),
       );
@@ -1644,7 +1671,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
 
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: _willowBg,
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1698,44 +1725,49 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Header: back | PLAYING FROM / Queue | video mode | more
+            // SONORA-style header: chevron | centered brand column | menu.
+            // The video-mode toggle lives in the more sheet ("Audio only").
             Padding(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  const EdgeInsets.fromLTRB(8, 6, 8, 2),
               child: Row(
+                crossAxisAlignment:
+                    CrossAxisAlignment.center,
                 children: [
                   PressIconButton(
                     tooltip: 'Back',
                     icon: const Icon(Icons.keyboard_arrow_down,
-                        color: Colors.white, size: 30),
+                        color: Colors.white, size: 32),
                     // Audio keeps playing in the background.
                     onPressed: () => Navigator.pop(context),
                   ),
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('PLAYING FROM',
+                        Icon(Icons.graphic_eq,
+                            color: _gold, size: 18),
+                        const SizedBox(height: 4),
+                        const Text('PURE TUBE',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                letterSpacing: 6,
+                                fontWeight: FontWeight.w500)),
+                        const SizedBox(height: 6),
+                        const Text('PLAYING FROM',
                             style: TextStyle(
                                 color: Colors.grey,
                                 fontSize: 10,
                                 letterSpacing: 1.6)),
-                        SizedBox(height: 2),
-                        Text('Queue',
+                        const SizedBox(height: 2),
+                        const Text('Queue',
                             style: TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 15)),
                       ],
                     ),
-                  ),
-                  PressIconButton(
-                    tooltip: 'Video mode',
-                    icon: const Icon(Icons.videocam,
-                        color: Colors.white),
-                    onPressed: () => ref
-                        .read(playerControllerProvider.notifier)
-                        .toggleAudioOnly(),
                   ),
                   PressIconButton(
                     tooltip: 'More',
@@ -1746,26 +1778,31 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 ],
               ),
             ),
-            // Album art with premium drop shadow.
+            // SONORA: large album art, 24px rounded corners, strong shadow.
             Padding(
               padding:
-                  const EdgeInsets.fromLTRB(44, 14, 44, 0),
+                  const EdgeInsets.fromLTRB(40, 18, 40, 0),
               child: AspectRatio(
                 aspectRatio: 1,
                 child: Container(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(24),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.55),
-                        blurRadius: 36,
+                        color: Colors.black.withOpacity(0.65),
+                        blurRadius: 48,
+                        spreadRadius: 4,
+                        offset: const Offset(0, 18),
+                      ),
+                      BoxShadow(
+                        color: _gold.withOpacity(0.12),
+                        blurRadius: 60,
                         spreadRadius: 2,
-                        offset: const Offset(0, 14),
                       ),
                     ],
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(24),
                     child: CachedNetworkImage(
                       imageUrl: video.thumbnailUrl,
                       fit: BoxFit.cover,
@@ -1779,48 +1816,50 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 ),
               ),
             ),
-            // Title (20px bold, centered) + artist (14px grey).
+            // Title (28px w600, centered) + artist (grey).
             Padding(
               padding:
-                  const EdgeInsets.fromLTRB(36, 16, 36, 0),
+                  const EdgeInsets.fromLTRB(36, 20, 36, 0),
               child: Center(
                 child: _MarqueeText(
                   text: video.title,
                   style: const TextStyle(
                       color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 20),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 28,
+                      letterSpacing: 0.4),
                 ),
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(video.author,
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    color: Colors.grey, fontSize: 14)),
-            // Small action icons: download + like (centered).
+                style: TextStyle(
+                    color: Colors.grey.shade400,
+                    fontSize: 15)),
+            // SONORA: heart + download as circular outline buttons.
             Padding(
-              padding: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.only(top: 14),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  PressIconButton(
+                  _outlineCircleButton(
                     tooltip: 'Download',
-                    icon: const Icon(Icons.download_outlined,
-                        color: Colors.white70, size: 26),
+                    icon: Icons.download_outlined,
+                    iconColor: _gold,
                     onPressed: () => _showDownloadSheet(video),
                   ),
-                  const SizedBox(width: 28),
-                  PressIconButton(
+                  const SizedBox(width: 24),
+                  _outlineCircleButton(
                     tooltip: _liked ? 'Liked' : 'Like',
-                    icon: Icon(
-                        _liked
-                            ? Icons.favorite
-                            : Icons.favorite_border,
-                        color: _liked ? _gold : Colors.white70,
-                        size: 26),
+                    icon: _liked
+                        ? Icons.favorite
+                        : Icons.favorite_border,
+                    iconColor:
+                        _liked ? _gold : Colors.white70,
+                    filled: _liked,
                     onPressed: () {
                       setState(() => _liked = !_liked);
                       ScaffoldMessenger.of(context)
@@ -1879,31 +1918,41 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       final playing = snap.data ?? false;
                       return PressScale(
                         onTap: notifier.togglePlayPause,
-                        child: Container(
-                          width: 72,
-                          height: 72,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.white
-                                    .withOpacity(0.28),
-                                blurRadius: 28,
-                                spreadRadius: 1,
+                        child: Semantics(
+                          button: true,
+                          label: playing ? 'Pause' : 'Play',
+                          child: Container(
+                            width: 88,
+                            height: 88,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.white
+                                  .withValues(alpha: 0.06),
+                              border: Border.all(
+                                color: _gold.withValues(
+                                    alpha: 0.85),
+                                width: 2.5,
                               ),
-                            ],
-                          ),
-                          child: AnimatedSwitcher(
-                            duration: const Duration(
-                                milliseconds: 200),
-                            child: Icon(
-                              playing
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
-                              key: ValueKey<bool>(playing),
-                              color: Colors.black,
-                              size: 40,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: _gold.withValues(
+                                      alpha: 0.35),
+                                  blurRadius: 32,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
+                            child: AnimatedSwitcher(
+                              duration: const Duration(
+                                  milliseconds: 200),
+                              child: Icon(
+                                playing
+                                    ? Icons.pause
+                                    : Icons.play_arrow,
+                                key: ValueKey<bool>(playing),
+                                color: _gold,
+                                size: 44,
+                              ),
                             ),
                           ),
                         ),
@@ -1961,24 +2010,68 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
+  /// SONORA: circular outline button (transparent bg, 1px gold/white
+  /// border) used for the audio-mode like/download row.
+  Widget _outlineCircleButton({
+    required String tooltip,
+    required IconData icon,
+    required Color iconColor,
+    required VoidCallback onPressed,
+    bool filled = false,
+  }) {
+    return PressScale(
+      onTap: onPressed,
+      child: Semantics(
+        button: true,
+        label: tooltip,
+        child: Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: filled
+                ? _gold.withValues(alpha: 0.14)
+                : Colors.transparent,
+            border: Border.all(
+              color: _gold.withValues(alpha: 0.55),
+              width: 1,
+            ),
+          ),
+          child: Icon(icon, color: iconColor, size: 26),
+        ),
+      ),
+    );
+  }
+
+  /// SONORA: QUEUE / LYRICS / TIMER as pill outline buttons with
+  /// gold-tinted borders.
   Widget _audioTab(
       IconData icon, String label, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Column(
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: 22, vertical: 11),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          color: Colors.white.withValues(alpha: 0.04),
+          border: Border.all(
+            color: _gold.withValues(alpha: 0.45),
+          ),
+        ),
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: Colors.grey, size: 26),
-            const SizedBox(height: 4),
+            Icon(icon, color: _gold, size: 20),
+            const SizedBox(width: 8),
             Text(label,
-                style: const TextStyle(
-                    color: Colors.grey,
-                    fontSize: 10,
-                    letterSpacing: 1.2)),
+                style: TextStyle(
+                    color:
+                        Colors.white.withValues(alpha: 0.9),
+                    fontSize: 11,
+                    letterSpacing: 1.6,
+                    fontWeight: FontWeight.w600)),
           ],
         ),
       ),
@@ -2364,13 +2457,45 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   color: Colors.white),
             ),
             const SizedBox(width: 24),
-            PressIconButton(
-              tooltip: playing ? 'Pause' : 'Play',
-              iconSize: 64,
-              onPressed: notifier.togglePlayPause,
-              icon: Icon(
-                playing ? Icons.pause : Icons.play_arrow,
-                color: Colors.white,
+            // WILLOW-style glowing emerald transport button.
+            PressScale(
+              onTap: notifier.togglePlayPause,
+              child: Semantics(
+                button: true,
+                label: playing ? 'Pause' : 'Play',
+                child: Container(
+                  width: 84,
+                  height: 84,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _emerald.withValues(alpha: 0.92),
+                    border: Border.all(
+                      color:
+                          _emeraldLight.withValues(alpha: 0.55),
+                      width: 2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color:
+                            _emerald.withValues(alpha: 0.40),
+                        blurRadius: 28,
+                        spreadRadius: 4,
+                      ),
+                    ],
+                  ),
+                  child: AnimatedSwitcher(
+                    duration:
+                        const Duration(milliseconds: 200),
+                    child: Icon(
+                      playing
+                          ? Icons.pause
+                          : Icons.play_arrow,
+                      key: ValueKey<bool>(playing),
+                      color: Colors.white,
+                      size: 44,
+                    ),
+                  ),
+                ),
               ),
             ),
             const SizedBox(width: 24),
@@ -2411,9 +2536,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           padding: const EdgeInsets.fromLTRB(8, 0, 0, 6),
           child: Row(
             children: [
-              _TimeLabel(player: player, current: true),
-              Expanded(child: _PlayerSeekBar(player: player)),
-              _TimeLabel(player: player, current: false),
+              _TimeLabel(
+                  player: player,
+                  current: true,
+                  color: _emeraldLight),
+              Expanded(
+                  child: _PlayerSeekBar(
+                      player: player,
+                      activeColor: _emerald)),
+              _TimeLabel(
+                  player: player,
+                  current: false,
+                  color: _emeraldLight),
               PressIconButton(
                 tooltip: _isFullscreen
                     ? 'Exit fullscreen'
@@ -2447,8 +2581,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             borderRadius: BorderRadius.circular(4),
             child: Text(video.title,
                 style: const TextStyle(
-                    fontSize: 17, fontWeight: FontWeight.bold)),
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold)),
           ),
+          // WILLOW-style subtitle: quality • duration in emerald-grey.
+          if (uiState.currentQuality?.label != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                '${uiState.currentQuality!.label} • ${_clock(video.duration ?? Duration.zero)}',
+                style: TextStyle(
+                    color:
+                        _emeraldLight.withValues(alpha: 0.7),
+                    fontSize: 13),
+              ),
+            ),
           const SizedBox(height: 10),
           // YouTube original: channel row directly below the title.
           _ChannelRow(video: video),
@@ -2463,13 +2611,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF212121),
+                  color: const Color(0xFF0E1512),
                   borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _emerald.withValues(alpha: 0.25),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment:
                       CrossAxisAlignment.start,
                   children: [
+                    const Text('Description',
+                        style: TextStyle(
+                            color: _emeraldLight,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 6),
                     Text(
                       '${formatCount(video.viewCount)} views • ${timeAgo(video.uploadDate)}',
                       style: const TextStyle(
@@ -2522,7 +2679,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       required VoidCallback onTap,
       bool active = false,
     }) {
-      final color = active ? _accent : Colors.white;
+      // WILLOW: transparent pill with a 1px emerald outline.
+      final color = active ? _emerald : Colors.white;
       return InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
@@ -2531,9 +2689,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
             color: active
-                ? _accent.withValues(alpha: 0.18)
-                : const Color(0xFF272727),
+                ? _emerald.withValues(alpha: 0.15)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: active
+                  ? _emerald
+                  : _emerald.withValues(alpha: 0.6),
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -2577,11 +2740,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
-          // Like | Dislike segmented pill, like YouTube.
+          // Like | Dislike segmented pill, like YouTube —
+          // WILLOW: emerald outline style with a tinted divider.
           Container(
             decoration: BoxDecoration(
-              color: const Color(0xFF272727),
+              color: Colors.transparent,
               borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                  color: _emerald.withValues(alpha: 0.6)),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -2601,14 +2767,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                               ? Icons.thumb_up
                               : Icons.thumb_up_outlined,
                           color:
-                              _liked ? _accent : Colors.white,
+                              _liked ? _emerald : Colors.white,
                           size: 20,
                         ),
                         const SizedBox(width: 6),
                         Text(likeLabel,
                             style: TextStyle(
                                 color: _liked
-                                    ? _accent
+                                    ? _emerald
                                     : Colors.white,
                                 fontSize: 13)),
                       ],
@@ -2618,7 +2784,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 Container(
                     width: 1,
                     height: 20,
-                    color: Colors.white24),
+                    color:
+                        _emerald.withValues(alpha: 0.4)),
                 InkWell(
                   onTap: toggleDislike,
                   borderRadius: const BorderRadius.horizontal(
@@ -2631,7 +2798,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                           ? Icons.thumb_down
                           : Icons.thumb_down_outlined,
                       color:
-                          _disliked ? _accent : Colors.white,
+                          _disliked ? _emerald : Colors.white,
                       size: 20,
                     ),
                   ),
@@ -2702,11 +2869,52 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 /// "Up Next" suggestions below the player. Reads the already-loaded
 /// related videos from the player controller (same list the Next button
 /// plays from) — no extra fetch. Shimmer while loading, retry on error.
-class _UpNextSection extends ConsumerWidget {
+/// WILLOW-style "Autoplay" toggle in the header (visual toggle for now).
+class _UpNextSection extends ConsumerStatefulWidget {
   const _UpNextSection();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_UpNextSection> createState() =>
+      _UpNextSectionState();
+}
+
+class _UpNextSectionState
+    extends ConsumerState<_UpNextSection> {
+  bool _autoplay = true;
+
+  static const _emerald = _PlayerScreenState._emerald;
+
+  /// Header row: "Up Next" + Autoplay label with an emerald switch.
+  Widget _header() {
+    return Row(
+      children: [
+        const Expanded(
+          child: Text('Up Next',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.white)),
+        ),
+        const Text('Autoplay',
+            style: TextStyle(
+                color: Colors.white70, fontSize: 13)),
+        const SizedBox(width: 6),
+        Switch(
+          value: _autoplay,
+          activeThumbColor: Colors.white,
+          activeTrackColor: _emerald,
+          inactiveThumbColor: Colors.grey,
+          inactiveTrackColor: Colors.white24,
+          materialTapTargetSize:
+              MaterialTapTargetSize.shrinkWrap,
+          onChanged: (v) => setState(() => _autoplay = v),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final uiState = ref.watch(playerControllerProvider);
     final videos = uiState.relatedVideos;
     if (videos.isEmpty && !uiState.relatedFailed) {
@@ -2753,25 +2961,24 @@ class _UpNextSection extends ConsumerWidget {
       );
     }
     if (videos.isEmpty) {
-      return Row(
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Expanded(
-            child: Text('Up Next',
-                style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: Colors.white)),
-          ),
-          PressScale(
-            onTap: () => ref
-                .read(playerControllerProvider.notifier)
-                .retryRelated(),
-            child: const Padding(
-              padding:
-                  EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Text('Retry',
-                  style: TextStyle(color: Colors.white)),
-            ),
+          Row(
+            children: [
+              Expanded(child: _header()),
+              PressScale(
+                onTap: () => ref
+                    .read(playerControllerProvider.notifier)
+                    .retryRelated(),
+                child: const Padding(
+                  padding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Text('Retry',
+                      style: TextStyle(color: Colors.white)),
+                ),
+              ),
+            ],
           ),
         ],
       );
@@ -2779,11 +2986,7 @@ class _UpNextSection extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Up Next',
-            style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                color: Colors.white)),
+        _header(),
         const SizedBox(height: 8),
         for (final v in videos)
           InkWell(
@@ -3233,7 +3436,11 @@ String _clock(Duration d) {
 class _TimeLabel extends StatelessWidget {
   final Player player;
   final bool current;
-  const _TimeLabel({required this.player, required this.current});
+
+  /// Tint for the label; defaults to white (video fullscreen overlays).
+  final Color color;
+  const _TimeLabel(
+      {required this.player, required this.current, this.color = Colors.white});
 
   @override
   Widget build(BuildContext context) {
@@ -3253,8 +3460,7 @@ class _TimeLabel extends StatelessWidget {
             final position = posSnap.data ?? Duration.zero;
             return Text(
               _clock(current ? position : duration),
-              style: const TextStyle(
-                  color: Colors.white, fontSize: 13),
+              style: TextStyle(color: color, fontSize: 13),
             );
           },
         );
