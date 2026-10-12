@@ -2560,14 +2560,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       fontSize: 13)),
             ),
           ),
-          PressIconButton(
-            tooltip: 'Background audio',
-            onPressed: () => ref
-                .read(playerControllerProvider.notifier)
-                .toggleAudioOnly(),
-            icon: Icon(Icons.headphones,
-                color: uiState.audioOnly ? _accent : Colors.white),
-          ),
+          _buildModeToggle(uiState),
           PressIconButton(
             onPressed: _showMoreSheet,
             icon:
@@ -2582,6 +2575,79 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   color: Colors.white),
             ),
         ],
+      ),
+    );
+  }
+
+  /// Premium pill-shaped audio/video mode toggle (WILLOW emerald styling).
+  /// Left segment = headphones (audio-only mode), right segment = play
+  /// (video mode). The active side gets an emerald highlight with a
+  /// smooth animated transition.
+  Widget _buildModeToggle(PlayerUiState uiState) {
+    final notifier = ref.read(playerControllerProvider.notifier);
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.55),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+            color: Colors.white.withOpacity(0.12), width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _modeSegment(
+            icon: Icons.headphones,
+            tooltip: 'Audio mode',
+            selected: uiState.audioOnly,
+            onTap: () => notifier.setAudioOnly(true),
+          ),
+          _modeSegment(
+            icon: Icons.play_arrow,
+            tooltip: 'Video mode',
+            selected: !uiState.audioOnly,
+            onTap: () => notifier.setAudioOnly(false),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _modeSegment({
+    required IconData icon,
+    required String tooltip,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          padding: const EdgeInsets.all(7),
+          decoration: BoxDecoration(
+            color: selected ? _emerald : Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: _emerald.withOpacity(0.45),
+                      blurRadius: 8,
+                      spreadRadius: 0,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: selected ? Colors.black : Colors.white70,
+          ),
+        ),
       ),
     );
   }
