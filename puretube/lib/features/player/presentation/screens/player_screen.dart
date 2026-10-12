@@ -336,11 +336,11 @@ class _ChannelRowState extends ConsumerState<_ChannelRow> {
           style: ElevatedButton.styleFrom(
             // WILLOW: solid emerald pill; subscribed = dark pill, emerald text.
             backgroundColor: _subscribed
-                ? const Color(0xFF0E1512)
+                ? const Color(0xFF16211C)
                 : _PlayerScreenState._emerald,
             foregroundColor: _subscribed
                 ? _PlayerScreenState._emeraldLight
-                : const Color(0xFF0A0F0C),
+                : const Color(0xFF0C110E),
             side: _subscribed
                 ? BorderSide(
                     color: _PlayerScreenState._emerald
@@ -376,7 +376,7 @@ class PlayerScreen extends ConsumerStatefulWidget {
 }
 
 class _PlayerScreenState extends ConsumerState<PlayerScreen> {
-  static const _accent = Color(0xFF6200EA);
+  static const _accent = Color(0xFF10B981);
 
   /// WILLOW emerald theme for video mode: glowing controls, seekbar,
   /// outlined chips, avatar rings and the autoplay toggle.
@@ -384,7 +384,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   static const _emeraldLight = Color(0xFF34D399);
 
   /// Dark green-black scaffold background for video mode (WILLOW).
-  static const _willowBg = Color(0xFF0A0F0C);
+  static const _willowBg = Color(0xFF0C110E);
 
   /// Spotify-style gold/tan accent used by the audio (music) mode.
   static const _gold = Color(0xFFD4A574);
@@ -2826,7 +2826,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0E1512),
+                  color: const Color(0xFF16211C),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: _emerald.withValues(alpha: 0.25),
