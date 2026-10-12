@@ -25,7 +25,9 @@ import '../../../channel/presentation/screens/channel_screen.dart';
 import '../../domain/entities/playback_models.dart';
 import '../providers/player_controller.dart';
 import '../widgets/live_chat_widget.dart';
+import '../widgets/lyrics_sheet.dart';
 import '../widgets/popup_player.dart';
+import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/subtitle_sheet.dart';
 import '../../../../features/settings/presentation/screens/settings_screen.dart'
     show doubleTapSecondsProvider;
@@ -1148,37 +1150,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   void _showSleepSheet() {
-    final notifier = ref.read(playerControllerProvider.notifier);
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-                title: Text('Sleep timer',
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold))),
-            ListTile(
-              title: const Text('Off'),
-              onTap: () {
-                notifier.cancelSleepTimer();
-                Navigator.pop(ctx);
-              },
-            ),
-            for (final m in [5, 10, 15, 30, 45, 60])
-              ListTile(
-                title: Text('$m minutes'),
-                onTap: () {
-                  notifier
-                      .startSleepTimer(Duration(minutes: m));
-                  Navigator.pop(ctx);
-                },
-              ),
-          ],
-        ),
-      ),
-    );
+    SleepTimerSheet.show(context);
   }
 
   void _showMoreSheet() {
@@ -2097,14 +2069,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 children: [
                   _audioTab(
                       Icons.queue_music, 'QUEUE', _showQueueSheet),
-                  _audioTab(Icons.lyrics_outlined, 'LYRICS',
-                      () {
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(const SnackBar(
-                      content:
-                          Text('Lyrics not available'),
-                      duration: Duration(seconds: 1),
-                    ));
+                  _audioTab(Icons.lyrics_outlined, 'LYRICS', () {
+                    final video =
+                        ref.read(playerControllerProvider).video;
+                    if (video == null) return;
+                    LyricsSheet.show(
+                      context,
+                      videoTitle: video.title,
+                      channelName: video.author,
+                      thumbnailUrl: video.thumbnailUrl,
+                    );
                   }),
                   _audioTab(Icons.timer_outlined, 'TIMER',
                       _showSleepSheet),
