@@ -44,23 +44,39 @@ class _Gauge {
       this.kind = _GaugeKind.info});
 }
 
-/// iPhone-style slim vertical pill indicator.
+/// iPhone-style slim vertical pill indicator, premium edition.
 ///
-/// 48dp wide × 132dp tall. Dark translucent (#1C1C1E @ 90%) background,
-/// white fill rising from the bottom proportional to [value] (0..1),
-/// with the kind icon (headphones / sun) centered in dark grey.
-/// Fill height animates smoothly on value changes.
+/// 48dp wide × 132dp tall. Dark translucent (#1C1C1E @ 90%) background with
+/// a subtle gold border and soft drop shadow, white fill rising from the
+/// bottom proportional to [value] (0..1), with the kind icon (headphones /
+/// sun) centered in dark grey. Fill height animates smoothly on value
+/// changes.
+///
+/// The pill is tappable: tapping the upper half calls [onIncrease], the
+/// lower half calls [onDecrease] (iPhone-style nudging). The current
+/// percentage (0–100%) is shown below the pill in gold.
 class _IosPill extends StatelessWidget {
   final double value;
   final _GaugeKind kind;
+  final VoidCallback? onIncrease;
+  final VoidCallback? onDecrease;
 
-  const _IosPill({required this.value, required this.kind});
+  /// Key used to translate a tap position into upper/lower half.
+  final GlobalKey _pillKey = GlobalKey();
+
+  _IosPill({
+    required this.value,
+    required this.kind,
+    this.onIncrease,
+    this.onDecrease,
+  });
 
   @override
   Widget build(BuildContext context) {
     const width = 48.0;
     const height = 132.0;
     const radius = 14.0;
+    const gold = Color(0xFFD4A574);
     final clamped = value.clamp(0.0, 1.0);
     final icon = kind == _GaugeKind.volume
         ? Icons.headphones
@@ -68,41 +84,104 @@ class _IosPill extends StatelessWidget {
     // Muted state: show the muted icon variant.
     final showMuted =
         kind == _GaugeKind.volume && clamped <= 0.0;
+    final percent = (clamped * 100).round();
 
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: const Color(0x1C1C1E).withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(radius),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(radius),
-        child: Stack(
-          children: [
-            // White fill from the bottom.
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 120),
-                curve: Curves.easeOut,
-                height: height * clamped,
-                color: Colors.white,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: (details) {
+            final box = _pillKey.currentContext
+                ?.findRenderObject() as RenderBox?;
+            if (box == null) return;
+            final local = box.globalToLocal(details.globalPosition);
+            if (local.dy < box.size.height / 2) {
+              onIncrease?.call();
+            } else {
+              onDecrease?.call();
+            }
+          },
+          child: Container(
+            key: _pillKey,
+            width: width,
+            height: height,
+            decoration: BoxDecoration(
+              color: const Color(0x1C1C1E).withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(radius),
+              border: Border.all(
+                color: gold.withValues(alpha: 0.45),
+                width: 1,
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black54,
+                  blurRadius: 24,
+                  spreadRadius: 2,
+                  offset: Offset(0, 8),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(radius),
+              child: Stack(
+                children: [
+                  // White fill from the bottom.
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 120),
+                      curve: Curves.easeOut,
+                      height: height * clamped,
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [
+                            Colors.white,
+                            Color(0xFFF5E6C8)
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Centered icon in dark grey.
+                  Center(
+                    child: Icon(
+                      showMuted ? Icons.volume_off : icon,
+                      size: 26,
+                      color: const Color(0xFF3A3A3C),
+                    ),
+                  ),
+                ],
               ),
             ),
-            // Centered icon in dark grey.
-            Center(
-              child: Icon(
-                showMuted ? Icons.volume_off : icon,
-                size: 26,
-                color: const Color(0xFF3A3A3C),
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
+        const SizedBox(height: 8),
+        // Percentage readout in gold.
+        Container(
+          padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: gold.withValues(alpha: 0.35),
+            ),
+          ),
+          child: Text(
+            '$percent%',
+            style: const TextStyle(
+              color: gold,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -548,14 +627,43 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // ---------------- gauge overlay ----------------
 
   /// iPhone-style vertical pill indicator for volume/brightness.
-  /// Slim pill (48dp wide × 132dp tall), dark translucent background,
-  /// white fill rising from the bottom, icon centered in dark grey.
-  /// The scrub-preview ("info") kind keeps the old centered box style.
+  ///
+  /// The volume pill is anchored to the RIGHT edge of the screen and the
+  /// brightness pill to the LEFT edge (matching the swipe side, not the
+  /// center). Tapping the pill's upper / lower half nudges the value up /
+  /// down, iPhone-style. The scrub-preview ("info") kind keeps the old
+  /// centered box style.
   Widget _buildGauge() {
     final g = _gauge!;
-    if (g.kind == _GaugeKind.volume ||
-        g.kind == _GaugeKind.brightness) {
-      return Center(child: _IosPill(value: g.value, kind: g.kind));
+    if (g.kind == _GaugeKind.volume) {
+      final v = g.value * 100;
+      return Align(
+        alignment: Alignment.centerRight,
+        child: Padding(
+          padding: const EdgeInsets.only(right: 28),
+          child: _IosPill(
+            value: g.value,
+            kind: g.kind,
+            onIncrease: () => _setVolumeGauge(v + 5),
+            onDecrease: () => _setVolumeGauge(v - 5),
+          ),
+        ),
+      );
+    }
+    if (g.kind == _GaugeKind.brightness) {
+      final b = g.value;
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Padding(
+          padding: const EdgeInsets.only(left: 28),
+          child: _IosPill(
+            value: g.value,
+            kind: g.kind,
+            onIncrease: () => _setBrightnessGauge(b + 0.05),
+            onDecrease: () => _setBrightnessGauge(b - 0.05),
+          ),
+        ),
+      );
     }
     // Scrub preview keeps the compact box style.
     return Center(
