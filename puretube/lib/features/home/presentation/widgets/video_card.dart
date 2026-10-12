@@ -31,9 +31,9 @@ class VideoCard extends StatelessWidget {
                     imageUrl: video.thumbnailUrl,
                     fit: BoxFit.cover,
                     placeholder: (_, __) =>
-                        Container(color: const Color(0xFF1A1A1A)),
+                        Container(color: const Color(0xFF0E1512)),
                     errorWidget: (_, __, ___) => Container(
-                      color: const Color(0xFF1A1A1A),
+                      color: const Color(0xFF0E1512),
                       child: const Icon(Icons.broken_image,
                           color: Colors.grey),
                     ),
