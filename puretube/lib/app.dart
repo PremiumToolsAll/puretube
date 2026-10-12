@@ -60,7 +60,7 @@ class _PureTubeAppState extends ConsumerState<PureTubeApp> {
               backgroundColor: Colors.black,
               body: Center(
                   child: CircularProgressIndicator(
-                      color: Color(0xFF6200EA))),
+                      color: Color(0xFF10B981))),
             )
           : _showOnboarding!
               ? const OnboardingScreen()
