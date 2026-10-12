@@ -1770,6 +1770,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     ),
                   ),
                   PressIconButton(
+                    tooltip: 'Video mode',
+                    icon: const Icon(Icons.videocam,
+                        color: _gold),
+                    onPressed: notifier.toggleAudioOnly,
+                  ),
+                  PressIconButton(
                     tooltip: 'More',
                     icon: const Icon(Icons.more_vert,
                         color: Colors.white),
