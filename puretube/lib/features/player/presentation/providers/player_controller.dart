@@ -154,6 +154,15 @@ class PlayerController extends Notifier<PlayerUiState>
   DateTime? _lastVideoSavedAt;
   int _lastVideoSavedSecs = -1;
 
+  /// Playback history for Previous/Next navigation (Spotify/YouTube style).
+  /// [_history] holds video IDs in play order; [_historyIndex] points at
+  /// the currently playing entry. [_navigatingHistory] is true while a
+  /// history back/forward load is in flight, so loadVideo() doesn't
+  /// push a duplicate entry for the navigation itself.
+  final List<String> _history = [];
+  int _historyIndex = -1;
+  bool _navigatingHistory = false;
+
   @override
   PlayerUiState build() {
     final binding = WidgetsBinding.instance;
@@ -169,19 +178,16 @@ class PlayerController extends Notifier<PlayerUiState>
     });
     _errorSub = _handler.player.stream.error.listen(_onPlayerError);
 
-    // Wire notification skip buttons to the Up Next queue.
+    // Wire notification skip buttons to the playback history / Up Next.
     _handler.onSkipToNext = () async {
-      final related = state.relatedVideos;
-      if (related.isNotEmpty) {
-        await loadVideo(related.first.id);
-      }
+      await playNext();
     };
     // Sync saved sponsor-skip preference (default ON).
     unawaited(_loadSavedSkipSponsors());
     // Restore the persisted audio-only preference (default OFF).
     unawaited(_loadPlayerPrefs());
     _handler.onSkipToPrevious = () async {
-      await seekTo(Duration.zero);
+      await playPrevious();
     };
 
     ref.onDispose(() {
@@ -233,6 +239,10 @@ class PlayerController extends Notifier<PlayerUiState>
     _recoveryAttempts = 0;
     _cancelSleepTimer();
     await _handler.player.stop();
+
+    // Record in playback history (unless this load IS a history
+    // back/forward navigation — those just move the index).
+    _pushHistory(videoId);
 
     state = PlayerUiState(
       status: PlayerStatus.loading,
@@ -317,12 +327,69 @@ class PlayerController extends Notifier<PlayerUiState>
     _recoveryAttempts = 0;
     await _handler.stop();
     state = const PlayerUiState();
+    _history.clear();
+    _historyIndex = -1;
   }
 
   void clearError() {
     if (state.errorMessage != null) {
       state = state.copyWith(errorMessage: null);
     }
+  }
+
+  // ---------------- playback history (Previous / Next) ----------------
+
+  /// Pushes [videoId] onto the playback history, unless this load is
+  /// itself a history back/forward navigation. Going back then loading
+  /// a brand-new video truncates the forward entries (browser style).
+  void _pushHistory(String videoId) {
+    if (_navigatingHistory) return;
+    // Drop forward entries when branching off mid-history.
+    if (_historyIndex < _history.length - 1) {
+      _history.removeRange(_historyIndex + 1, _history.length);
+    }
+    // Avoid a duplicate when re-loading the same video (e.g. retry).
+    if (_history.isEmpty || _history.last != videoId) {
+      _history.add(videoId);
+    }
+    _historyIndex = _history.length - 1;
+  }
+
+  /// Previous button (Spotify/YouTube behavior): if the current
+  /// position is past 3 seconds, restart the video; otherwise load
+  /// the previously played video from history. Returns true when a
+  /// previous video was loaded, false when it just restarted (or
+  /// there is no previous video).
+  Future<bool> playPrevious() async {
+    final pos = _handler.player.state.position;
+    if (pos > const Duration(seconds: 3)) {
+      await _handler.seek(Duration.zero);
+      return false;
+    }
+    if (_historyIndex > 0 && state.status == PlayerStatus.ready) {
+      _historyIndex--;
+      _navigatingHistory = true;
+      try {
+        await loadVideo(_history[_historyIndex]);
+      } finally {
+        _navigatingHistory = false;
+      }
+      return true;
+    }
+    // No previous video: just restart.
+    await _handler.seek(Duration.zero);
+    return false;
+  }
+
+  /// Next button: loads the first Up Next video (fetching it first
+  /// when the list is empty), recording it in history via loadVideo.
+  /// Returns the loaded video id, or null when nothing was found.
+  Future<String?> playNext() async {
+    if (state.status != PlayerStatus.ready) return null;
+    final nextId = await ensureNextVideoId();
+    if (nextId == null) return null;
+    await loadVideo(nextId);
+    return nextId;
   }
 
   // ---------------- transport ----------------
