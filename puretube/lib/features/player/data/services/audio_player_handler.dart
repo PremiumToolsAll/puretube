@@ -8,33 +8,61 @@ import 'package:media_kit/media_kit.dart';
 /// Created once in main() via AudioService.init and shared by the whole app,
 /// so playback survives the UI being destroyed.
 class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
-  PureTubeAudioHandler() {
-    _playingSub = _player.stream.playing.listen((_) => _broadcastState());
-    _positionSub = _player.stream.position.listen((_) {
-      // Position ticks arrive several times per second; the media
-      // notification only needs ~1 update/sec. State changes
-      // (play/pause, buffering, duration, completion) always broadcast
-      // immediately. Flooding the platform channel with playbackState
-      // updates can destabilize or suppress the notification.
-      final now = DateTime.now();
-      if (_lastPositionBroadcast == null ||
-          now.difference(_lastPositionBroadcast!) >=
-              const Duration(milliseconds: 900)) {
-        _lastPositionBroadcast = now;
+  PureTubeAudioHandler() : _player = _createPlayer() {
+    _attachListeners();
+  }
+
+  /// Creates the media_kit Player defensively. If creation throws (e.g.
+  /// background isolate edge cases), AudioService.init would fail and the
+  /// app would lose background playback entirely. We let the exception
+  /// propagate here because a Player is essential — but the factory
+  /// isolates the failure point for clearer diagnostics.
+  static Player _createPlayer() {
+    return Player(
+      configuration: const PlayerConfiguration(title: 'PureTube'),
+    );
+  }
+
+  /// Sets up stream listeners and platform properties. Split from the
+  /// constructor body so each step can fail independently without
+  /// breaking AudioService.init.
+  void _attachListeners() {
+    try {
+      _playingSub = _player.stream.playing.listen((_) => _broadcastState());
+    } catch (_) {}
+    try {
+      _positionSub = _player.stream.position.listen((_) {
+        // Position ticks arrive several times per second; the media
+        // notification only needs ~1 update/sec. State changes
+        // (play/pause, buffering, duration, completion) always broadcast
+        // immediately. Flooding the platform channel with playbackState
+        // updates can destabilize or suppress the notification.
+        final now = DateTime.now();
+        if (_lastPositionBroadcast == null ||
+            now.difference(_lastPositionBroadcast!) >=
+                const Duration(milliseconds: 900)) {
+          _lastPositionBroadcast = now;
+          _broadcastState();
+        }
+      });
+    } catch (_) {}
+    try {
+      _bufferingSub =
+          _player.stream.buffering.listen((_) => _broadcastState());
+    } catch (_) {}
+    try {
+      _durationSub = _player.stream.duration.listen((duration) {
+        final item = mediaItem.value;
+        if (item != null && item.duration != duration) {
+          mediaItem.add(item.copyWith(duration: duration));
+        }
         _broadcastState();
-      }
-    });
-    _bufferingSub =
-        _player.stream.buffering.listen((_) => _broadcastState());
-    _durationSub = _player.stream.duration.listen((duration) {
-      final item = mediaItem.value;
-      if (item != null && item.duration != duration) {
-        mediaItem.add(item.copyWith(duration: duration));
-      }
-      _broadcastState();
-    });
-    _completedSub =
-        _player.stream.completed.listen((_) => _broadcastState());
+      });
+    } catch (_) {}
+    try {
+      _completedSub =
+          _player.stream.completed.listen((_) => _broadcastState());
+    } catch (_) {}
     // Fatal player errors are handled by PlayerController, which also
     // listens to player.stream.error for expiry recovery.
     //
@@ -42,16 +70,16 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
     // default user-agent gets "Failed to open" on some itags. Spoof the
     // same Chrome UA that youtube_explode_dart uses so mpv is treated
     // like a regular browser.
-    final platform = _player.platform;
-    if (platform is NativePlayer) {
-      unawaited(platform.setProperty('user-agent',
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'));
-    }
+    try {
+      final platform = _player.platform;
+      if (platform is NativePlayer) {
+        unawaited(platform.setProperty('user-agent',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'));
+      }
+    } catch (_) {}
   }
 
-  final Player _player = Player(
-    configuration: const PlayerConfiguration(title: 'PureTube'),
-  );
+  final Player _player;
 
   /// The single player the video UI attaches its VideoController to.
   Player get player => _player;
