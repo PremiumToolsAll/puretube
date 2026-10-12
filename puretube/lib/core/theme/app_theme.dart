@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 /// WILLOW theme: dark green-black with emerald accents,
-/// matching the video player's vibe.
+/// refined toward the Infinity QR palette (sage-tinted cards,
+/// warmer dark background, gold accents).
 class AppTheme {
   static const primary = Color(0xFF10B981);
   static const accent = Color(0xFF34D399);
-  static const willowBg = Color(0xFF0A0F0C);
-  static const willowCard = Color(0xFF0E1512);
+  static const willowBg = Color(0xFF0C110E);
+  static const willowCard = Color(0xFF16211C);
+  static const willowCardHigh = Color(0xFF1C2A23);
+  static const sage = Color(0xFF2D4A3E);
+  static const gold = Color(0xFFC9A55C);
 
   static ThemeData get dark {
     final scheme = ColorScheme.fromSeed(
@@ -23,9 +27,9 @@ class AppTheme {
         secondary: accent,
         surface: willowBg,
         surfaceContainerLowest: willowBg,
-        surfaceContainerLow: const Color(0xFF0A0F0C),
+        surfaceContainerLow: willowBg,
         surfaceContainer: willowCard,
-        surfaceContainerHigh: const Color(0xFF16211B),
+        surfaceContainerHigh: willowCardHigh,
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: willowBg,
@@ -52,13 +56,13 @@ class AppTheme {
                 : null),
       ),
       bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: Color(0xFF0E1512),
+        backgroundColor: willowCard,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
         ),
       ),
       dialogTheme: const DialogThemeData(
-        backgroundColor: Color(0xFF0E1512),
+        backgroundColor: willowCard,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.all(Radius.circular(16))),
       ),
