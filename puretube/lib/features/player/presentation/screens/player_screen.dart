@@ -587,16 +587,32 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _restartHideTimer();
   }
 
-  /// Next: load the first video from the already-loaded Up Next list
-  /// in-place (no route push — preserves fullscreen/rotation state).
-  void _playNext() {
+  /// Next: load the first video from the Up Next list in-place
+  /// (no route push — preserves fullscreen/rotation state).
+  /// If Up Next is empty, fetches it (with a last-resort search
+  /// fallback) while showing progress, so Next almost always
+  /// finds a video instead of just saying "not found".
+  Future<void> _playNext() async {
+    final notifier = ref.read(playerControllerProvider.notifier);
     final related =
         ref.read(playerControllerProvider).relatedVideos;
-    if (related.isEmpty) {
-      // Kick off a reload in the background in case it failed earlier.
-      unawaited(ref
-          .read(playerControllerProvider.notifier)
-          .retryRelated());
+    if (related.isNotEmpty) {
+      // Load in the same screen: keeps fullscreen, fit mode, controls.
+      notifier.loadVideo(related.first.id);
+      _restartHideTimer();
+      return;
+    }
+    // Up Next came back empty — fetch it now with progress shown.
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Finding next video…'),
+        duration: Duration(seconds: 10),
+      ),
+    );
+    final nextId = await notifier.ensureNextVideoId();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    if (nextId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('No next video found'),
@@ -605,10 +621,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       );
       return;
     }
-    // Load in the same screen: keeps fullscreen, fit mode, and controls.
-    ref
-        .read(playerControllerProvider.notifier)
-        .loadVideo(related.first.id);
+    notifier.loadVideo(nextId);
     _restartHideTimer();
   }
 
@@ -1561,6 +1574,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                                   notifier.startDownload(v, video);
                                   _showDownloadStartedSnack(
                                       'Download started (${v.label})');
+                                } else if (v != null && v.videoOnly) {
+                                  // DASH video-only: also fetch the chosen
+                                  // audio track so the video plays WITH
+                                  // audio (attached at playback, no
+                                  // FFmpeg merge needed).
+                                  notifier.startDownload(v, video,
+                                      audioOption: a);
+                                  _showDownloadStartedSnack(
+                                      a == null
+                                          ? 'Video-only download started (${v.label})'
+                                          : 'Download started (${v.label} + audio)');
                                 } else if (v != null) {
                                   notifier.startDownload(v, video);
                                   _showDownloadStartedSnack(
