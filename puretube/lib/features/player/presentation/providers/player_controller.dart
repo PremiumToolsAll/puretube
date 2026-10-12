@@ -107,6 +107,20 @@ class PlayerUiState {
   }
 }
 
+/// Outcome of _verifyDashLoad.
+enum _DashLoadOutcome {
+  /// mpv produced a duration — the stream is loading/playing.
+  loaded,
+
+  /// mpv reported an error ("Failed to open ...") — the URL is dead
+  /// (expired, 403'd, or revoked). A manifest refresh may fix it.
+  error,
+
+  /// No duration and no error within the timeout — the network is too
+  /// slow or the stream stalled. Retrying the same way won't help.
+  timeout,
+}
+
 /// Orchestrates everything about playback: extraction, the background
 /// audio handler, SponsorBlock skipping, sleep timer, speed, audio-only
 /// switching, stream-expiry recovery, and auto-PiP.
@@ -132,6 +146,11 @@ class PlayerController extends Notifier<PlayerUiState>
   /// Bumps on every setQuality call; lets in-flight verifications detect
   /// when the user has moved on to another quality/video.
   int _qualitySwitchToken = 0;
+
+  /// True while a DASH quality switch is being verified (or rolled back).
+  /// The global [_onPlayerError] recovery must stay out during this window —
+  /// the switch owns error handling until verification completes.
+  bool _dashVerifyInFlight = false;
 
   /// Last persisted audio-only preference (Hive). Applied on the next
   /// loadVideo so a fresh app start restores the user's last mode.
@@ -553,28 +572,16 @@ class PlayerController extends Notifier<PlayerUiState>
     final previous = state.currentQuality;
     final token = ++_qualitySwitchToken;
     var target = quality;
-    // DASH stream URLs are signed with an expiry timestamp. The quality
-    // list is fetched once when the video loads, so by the time the user
-    // picks a 1080p+ DASH quality the URL may have expired ("Failed to
-    // open ..."). Refresh the manifest at selection time for fresh URLs.
-    if (quality.isDash) {
-      try {
-        final fresh = await _extractor.getQualityOptions(videoId);
-        // Bail if the user moved on while the manifest was loading.
-        if (token != _qualitySwitchToken || state.videoId != videoId) {
-          return;
-        }
-        final match =
-            fresh.where((q) => q.height == quality.height && q.isDash);
-        if (match.isNotEmpty) {
-          target = match.first;
-          // Keep the quality menu in sync with the fresh URLs.
-          state = state.copyWith(availableQualities: fresh);
-        }
-      } catch (_) {
-        // Fall back to the cached URL below.
-      }
-    }
+    // NOTE: no manifest refresh before switching (an earlier version
+    // refreshed here for DASH). YouTube's android client limits stream
+    // URL reuse — the extractor itself warns it "often prevents
+    // downloading the same stream multiple times or more than one
+    // stream from the same manifest" — and every manifest fetch HEADs
+    // each URL, burning the budget mpv needs for real playback. DASH
+    // needs 2 URLs (video + audio), so a pre-switch refresh made DASH
+    // 403 while single-URL muxed survived. The cached URLs from
+    // loadQualities() are minutes old (signed URLs live ~6h). If they
+    // did expire, verification below fails and we refresh+retry once.
     try {
       await _handler.switchStream(target.url,
           audioUrl: target.audioUrl);
@@ -588,13 +595,47 @@ class PlayerController extends Notifier<PlayerUiState>
     }
     // Verify DASH actually loads; muxed streams are trusted.
     if (target.isDash) {
-      final dashOk = await _verifyDashLoad(target, token);
-      if (token != _qualitySwitchToken || state.videoId != videoId) {
-        return;
-      }
-      if (!dashOk) {
-        await _rollbackQuality(previous: previous, failed: target);
-        return;
+      _dashVerifyInFlight = true;
+      try {
+        var outcome = await _verifyDashLoad(target, token);
+        if (token != _qualitySwitchToken || state.videoId != videoId) {
+          return;
+        }
+        // Hard mpv error (e.g. 403 "Failed to open"): the cached URLs
+        // are likely dead/expired — refresh once and retry with fresh
+        // URLs (a new manifest = new URLs with a full use budget). A
+        // timeout means the network is just slow; retrying won't help.
+        if (outcome == _DashLoadOutcome.error) {
+          try {
+            final fresh = await _extractor.getQualityOptions(videoId);
+            // Bail if the user moved on while the manifest was loading.
+            if (token != _qualitySwitchToken || state.videoId != videoId) {
+              return;
+            }
+            final match = fresh
+                .where((q) => q.height == quality.height && q.isDash);
+            if (match.isNotEmpty) {
+              target = match.first;
+              // Keep the quality menu in sync with the fresh URLs.
+              state = state.copyWith(availableQualities: fresh);
+              await _handler.switchStream(target.url,
+                  audioUrl: target.audioUrl);
+              outcome = await _verifyDashLoad(target, token);
+              if (token != _qualitySwitchToken ||
+                  state.videoId != videoId) {
+                return;
+              }
+            }
+          } catch (_) {
+            // Refresh/retry failed; fall through to rollback.
+          }
+        }
+        if (outcome != _DashLoadOutcome.loaded) {
+          await _rollbackQuality(previous: previous, failed: target);
+          return;
+        }
+      } finally {
+        _dashVerifyInFlight = false;
       }
     }
     if (token != _qualitySwitchToken || state.videoId != videoId) {
@@ -620,12 +661,12 @@ class PlayerController extends Notifier<PlayerUiState>
   }
 
   /// Waits for a DASH stream to actually start producing a duration.
-  /// Returns true if the stream loaded, false on timeout/error.
   ///
   /// [token] must match [_qualitySwitchToken]; a mismatch means the user
   /// picked another quality (or video) meanwhile and the caller must
   /// treat the result as stale.
-  Future<bool> _verifyDashLoad(MuxedQuality target, int token) async {
+  Future<_DashLoadOutcome> _verifyDashLoad(
+      MuxedQuality target, int token) async {
     const timeout = Duration(seconds: 8);
     const pollInterval = Duration(milliseconds: 500);
     final deadline = DateTime.now().add(timeout);
@@ -637,13 +678,13 @@ class PlayerController extends Notifier<PlayerUiState>
         // Bail early if superseded or an error fired. (Do NOT compare
         // state.currentQuality here: it still holds the OLD quality
         // until verification succeeds.)
-        if (token != _qualitySwitchToken) return false;
-        if (hadError) return false;
+        if (token != _qualitySwitchToken) return _DashLoadOutcome.timeout;
+        if (hadError) return _DashLoadOutcome.error;
         final duration = _handler.player.state.duration;
-        if (duration > Duration.zero) return true;
+        if (duration > Duration.zero) return _DashLoadOutcome.loaded;
         await Future.delayed(pollInterval);
       }
-      return false;
+      return _DashLoadOutcome.timeout;
     } finally {
       await errorSub.cancel();
     }
@@ -912,6 +953,10 @@ class PlayerController extends Notifier<PlayerUiState>
       return;
     }
     if (error.trim().isEmpty) return;
+    // A DASH quality switch is mid-verification/rollback — it owns error
+    // handling until done. Recovering here would fight the switch and
+    // leave the player in an inconsistent state.
+    if (_dashVerifyInFlight) return;
 
     if (_recoveryAttempts >= 2) {
       state = state.copyWith(
