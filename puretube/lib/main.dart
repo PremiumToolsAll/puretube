@@ -50,25 +50,49 @@ Future<void> main() async {
   // Fallback: plain handler without the foreground service.
   late final PureTubeAudioHandler audioHandler;
   bool audioServiceOk = false;
-  try {
-    audioHandler = await AudioService.init(
-      builder: () => PureTubeAudioHandler(),
-      config: const AudioServiceConfig(
-        androidNotificationChannelId: 'com.puretube.channel.audio',
-        androidNotificationChannelName: 'PureTube playback',
-        androidShowNotificationBadge: false,
-        // Keep the service in foreground while paused so the notification
-        // (and its controls) stays alive and responsive.
-        androidStopForegroundOnPause: false,
-        androidNotificationClickStartsActivity: true,
-        // Rewind/fast-forward buttons seek ±10s via handler.rewind/fastForward.
-        fastForwardInterval: Duration(seconds: 10),
-        rewindInterval: Duration(seconds: 10),
-      ),
-    );
+
+  /// Attempts AudioService.init with retries. Transient failures (e.g.
+  /// service not yet ready, race conditions on some devices) can succeed
+  /// on a second attempt.
+  Future<PureTubeAudioHandler?> tryAudioServiceInit() async {
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        final handler = await AudioService.init(
+          builder: () => PureTubeAudioHandler(),
+          config: const AudioServiceConfig(
+            androidNotificationChannelId: 'com.puretube.channel.audio',
+            androidNotificationChannelName: 'PureTube playback',
+            androidShowNotificationBadge: false,
+            // Keep the service in foreground while paused so the notification
+            // (and its controls) stays alive and responsive.
+            androidStopForegroundOnPause: false,
+            androidNotificationClickStartsActivity: true,
+            // Rewind/fast-forward buttons seek ±10s via handler.rewind/fastForward.
+            fastForwardInterval: Duration(seconds: 10),
+            rewindInterval: Duration(seconds: 10),
+          ),
+        );
+        if (attempt > 1) {
+          debugPrint('AudioService init succeeded on attempt $attempt');
+        }
+        return handler;
+      } catch (e) {
+        debugPrint('AudioService init attempt $attempt failed: $e');
+        if (attempt < 3) {
+          // Brief pause before retry; the system may need a moment.
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
+    }
+    return null;
+  }
+
+  final serviceHandler = await tryAudioServiceInit();
+  if (serviceHandler != null) {
+    audioHandler = serviceHandler;
     audioServiceOk = true;
-  } catch (e) {
-    debugPrint('AudioService init failed, using fallback handler: $e');
+  } else {
+    debugPrint('AudioService init failed after retries, using fallback handler');
     audioHandler = PureTubeAudioHandler();
   }
   // Store for diagnostics UI.
