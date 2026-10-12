@@ -94,8 +94,29 @@ List<VideoDetails> _applyFilters(
 class SearchController extends Notifier<SearchState> {
   SearchSession? _session;
 
+  /// Rotating trending query variants so each feed refresh surfaces
+  /// genuinely different videos instead of the same list.
+  static const _feedQueries = [
+    'trending videos',
+    'popular videos 2026',
+    'viral videos now',
+    'top music videos',
+    'trending now worldwide',
+  ];
+  int _feedQueryIndex = 0;
+
   @override
   SearchState build() => const SearchState();
+
+  /// Pull-to-refresh / refresh button: reloads the home feed with a
+  /// rotated trending query and a shuffled order, so every refresh
+  /// shows new videos.
+  Future<void> refreshFeed() async {
+    _feedQueryIndex =
+        (_feedQueryIndex + 1) % _feedQueries.length;
+    await _loadTrendingWith(_feedQueries[_feedQueryIndex],
+        shuffle: true);
+  }
 
   Future<void> search(String query) async {
     final q = query.trim();
@@ -168,7 +189,13 @@ class SearchController extends Notifier<SearchState> {
   /// Loads the default home feed on app startup.
   /// Mixes trending results with personalized suggestions derived from
   /// watch history (Bug 3: smart suggestions).
-  Future<void> loadTrending() async {
+  Future<void> loadTrending() =>
+      _loadTrendingWith(_feedQueries[_feedQueryIndex]);
+
+  /// Shared feed loader. When [shuffle] is true (refresh path), the
+  /// mixed results are shuffled so every refresh shows new videos.
+  Future<void> _loadTrendingWith(String feedQuery,
+      {bool shuffle = false}) async {
     if (state.status == SearchStatus.loading) return;
     _session = null;
     state = state.copyWith(
@@ -179,7 +206,7 @@ class SearchController extends Notifier<SearchState> {
     try {
       final extractor = ref.read(extractorProvider);
       final session =
-          await extractor.startPagedSearch('trending videos', limit: 25);
+          await extractor.startPagedSearch(feedQuery, limit: 25);
       _session = session;
       var results = session.firstPage;
 
@@ -228,6 +255,10 @@ class SearchController extends Notifier<SearchState> {
           }
         }
       } catch (_) {}
+
+      if (shuffle) {
+        results = [...results]..shuffle();
+      }
 
       state = state.copyWith(
         status: SearchStatus.done,
