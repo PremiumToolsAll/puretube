@@ -94,16 +94,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             !ref.watch(popupVisibleProvider);
 
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xFF0A0F0C),
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: const Color(0xFF0A0F0C),
         title: const Text(
           'PureTube',
           style: TextStyle(
-              color: Color(0xFF6200EA),
+              color: Color(0xFF10B981),
               fontWeight: FontWeight.bold),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Refresh feed',
+            icon: const Icon(Icons.refresh),
+            onPressed: () => ref
+                .read(searchControllerProvider.notifier)
+                .refreshFeed(),
+          ),
           IconButton(
             tooltip: 'Shorts',
             icon: const Icon(
@@ -183,7 +190,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                       filled: true,
                       fillColor:
-                          const Color(0xFF121212),
+                          const Color(0xFF0E1512),
                       contentPadding:
                           const EdgeInsets.symmetric(
                               vertical: 0),
@@ -212,9 +219,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         backgroundColor:
                             hasFilters
                                 ? const Color(
-                                    0xFF6200EA)
+                                    0xFF10B981)
                                 : const Color(
-                                    0xFF121212),
+                                    0xFF0E1512),
                       ),
                       icon: const Icon(
                           Icons.tune,
@@ -238,8 +245,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               separatorBuilder: (_, __) =>
                   const SizedBox(width: 8),
               itemBuilder: (ctx, i) => ActionChip(
-                backgroundColor: const Color(0xFF1A1A1A),
-                side: BorderSide.none,
+                backgroundColor: const Color(0xFF0E1512),
+                side: const BorderSide(
+                    color: Color(0xFF10B981), width: 0.5),
                 label: Text(_categories[i],
                     style: const TextStyle(
                         color: Colors.white70)),
@@ -251,7 +259,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
           const SizedBox(height: 4),
-          Expanded(child: _buildResults(search)),
+          Expanded(
+            child: RefreshIndicator(
+              color: const Color(0xFF10B981),
+              backgroundColor: const Color(0xFF0E1512),
+              onRefresh: () => ref
+                  .read(searchControllerProvider.notifier)
+                  .refreshFeed(),
+              child: _buildResults(search),
+            ),
+          ),
         ],
       ),
       bottomNavigationBar:
@@ -281,8 +298,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           itemCount: 6,
           itemBuilder: (_, __) => Shimmer.fromColors(
-            baseColor: const Color(0xFF1A1A1A),
-            highlightColor: const Color(0xFF2E2E2E),
+            baseColor: const Color(0xFF0E1512),
+            highlightColor: const Color(0xFF1E2A22),
             child: Container(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -339,7 +356,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 child: Padding(
                   padding: EdgeInsets.all(16),
                   child: CircularProgressIndicator(
-                      color: Color(0xFF6200EA)),
+                      color: Color(0xFF10B981)),
                 ),
               );
             }
