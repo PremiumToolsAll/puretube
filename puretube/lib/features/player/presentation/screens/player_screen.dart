@@ -186,6 +186,166 @@ class _IosPill extends StatelessWidget {
   }
 }
 
+/// YouTube-original channel row shown directly below the video title:
+/// [avatar] [channel name + subscriber count] [Subscribe button].
+/// Tapping the avatar/name opens the channel page.
+class _ChannelRow extends ConsumerStatefulWidget {
+  final VideoDetails video;
+  const _ChannelRow({required this.video});
+
+  @override
+  ConsumerState<_ChannelRow> createState() => _ChannelRowState();
+}
+
+class _ChannelRowState extends ConsumerState<_ChannelRow> {
+  ChannelInfo? _channel;
+  bool _subscribed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribed = ref
+        .read(subscriptionRepositoryProvider)
+        .isSubscribed(widget.video.channelId);
+    _loadChannel();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ChannelRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.video.channelId != widget.video.channelId) {
+      _channel = null;
+      _subscribed = ref
+          .read(subscriptionRepositoryProvider)
+          .isSubscribed(widget.video.channelId);
+      _loadChannel();
+    }
+  }
+
+  Future<void> _loadChannel() async {
+    final id = widget.video.channelId;
+    if (id.isEmpty) return;
+    try {
+      final ch =
+          await ref.read(extractorProvider).getChannel(id);
+      if (!mounted) return;
+      setState(() {
+        _channel = ch;
+        _subscribed = ref
+            .read(subscriptionRepositoryProvider)
+            .isSubscribed(id);
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _toggleSubscribe() async {
+    final repo = ref.read(subscriptionRepositoryProvider);
+    final id = widget.video.channelId;
+    try {
+      if (_subscribed) {
+        await repo.unsubscribe(id);
+      } else {
+        await repo.subscribe(
+          channelId: id,
+          name: _channel?.title ?? widget.video.author,
+          subscriberCount: _channel?.subscriberCount,
+        );
+      }
+      if (mounted) setState(() => _subscribed = !_subscribed);
+    } catch (_) {}
+  }
+
+  void _openChannel() {
+    if (widget.video.channelId.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            ChannelScreen(channelId: widget.video.channelId),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final video = widget.video;
+    return Row(
+      children: [
+        GestureDetector(
+          onTap: _openChannel,
+          child: CircleAvatar(
+            radius: 18,
+            backgroundColor: const Color(0xFF3F3F3F),
+            backgroundImage: _channel?.logoUrl != null
+                ? CachedNetworkImageProvider(
+                    _channel!.logoUrl)
+                : null,
+            child: _channel?.logoUrl == null
+                ? Text(
+                    video.author.isNotEmpty
+                        ? video.author[0].toUpperCase()
+                        : '?',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14),
+                  )
+                : null,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: GestureDetector(
+            onTap: _openChannel,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _channel?.title ?? video.author,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  _channel?.subscriberCount != null
+                      ? '${formatCount(_channel!.subscriberCount)} subscribers'
+                      : 'Channel',
+                  style: const TextStyle(
+                      color: Colors.grey, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        ElevatedButton(
+          onPressed: _toggleSubscribe,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _subscribed
+                ? const Color(0xFF272727)
+                : Colors.white,
+            foregroundColor:
+                _subscribed ? Colors.white : Colors.black,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 14, vertical: 8),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          child: Text(
+            _subscribed ? 'Subscribed' : 'Subscribe',
+            style: const TextStyle(fontSize: 13),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class PlayerScreen extends ConsumerStatefulWidget {
   final String videoId;
   final Duration? initialPosition;
@@ -2231,34 +2391,43 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   /// current time | seekbar | total time | fullscreen.
   Widget _buildBottomControls(
       Player player, PlayerUiState uiState) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.bottomCenter,
-          end: Alignment.topCenter,
-          colors: [Colors.black87, Colors.transparent],
+    // Absorb taps on the control bar: without this, a tap on the seekbar
+    // also reaches the video-area GestureDetector behind it, whose onTap
+    // toggles (hides) the controls — hiding the bar mid-gesture and
+    // disposing the seekbar State. The empty onTap wins the arena over the
+    // behind detector; inner buttons still win over this wrapper.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: [Colors.black87, Colors.transparent],
+          ),
         ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 0, 0, 6),
-        child: Row(
-          children: [
-            _TimeLabel(player: player, current: true),
-            Expanded(child: _PlayerSeekBar(player: player)),
-            _TimeLabel(player: player, current: false),
-            PressIconButton(
-              tooltip: _isFullscreen
-                  ? 'Exit fullscreen'
-                  : 'Fullscreen',
-              onPressed: _toggleFullscreen,
-              icon: Icon(
-                _isFullscreen
-                    ? Icons.fullscreen_exit
-                    : Icons.fullscreen,
-                color: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 0, 0, 6),
+          child: Row(
+            children: [
+              _TimeLabel(player: player, current: true),
+              Expanded(child: _PlayerSeekBar(player: player)),
+              _TimeLabel(player: player, current: false),
+              PressIconButton(
+                tooltip: _isFullscreen
+                    ? 'Exit fullscreen'
+                    : 'Fullscreen',
+                onPressed: _toggleFullscreen,
+                icon: Icon(
+                  _isFullscreen
+                      ? Icons.fullscreen_exit
+                      : Icons.fullscreen,
+                  color: Colors.white,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -2280,27 +2449,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 style: const TextStyle(
                     fontSize: 17, fontWeight: FontWeight.bold)),
           ),
-          const SizedBox(height: 6),
-          InkWell(
-            onTap: () {
-              if (video.channelId.isNotEmpty) {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => ChannelScreen(
-                        channelId: video.channelId),
-                  ),
-                );
-              }
-            },
-            child: Text(
-              '${video.author}  •  ${formatCount(video.viewCount)} views  •  ${timeAgo(video.uploadDate)}',
-              style: const TextStyle(
-                  color: Colors.grey, fontSize: 13),
-            ),
-          ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
+          // YouTube original: channel row directly below the title.
+          _ChannelRow(video: video),
+          const SizedBox(height: 12),
           _buildActionRow(uiState, notifier),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           if (video.description.isNotEmpty) ...[
             InkWell(
               onTap: () => _DescriptionSheet.show(context, video),
@@ -2355,93 +2509,174 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       ),
     );
   }
-  /// Icon-above-label action row under the video, matching the
-  /// reference design: Like | Dislike | Add To | Background | Popup | Download.
+  /// YouTube-style action chips below the channel row:
+  /// Like|Dislike segmented pill, Share, Download, Save (Add To),
+  /// Background (audio mode), Popup (PiP). Horizontal scroll.
   Widget _buildActionRow(
       PlayerUiState uiState, PlayerController notifier) {
-    Widget item({
+    final video = uiState.video;
+
+    Widget chip({
       required IconData icon,
       required String label,
       required VoidCallback onTap,
       bool active = false,
     }) {
-      final color = active ? _accent : Colors.white70;
+      final color = active ? _accent : Colors.white;
       return InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
           padding: const EdgeInsets.symmetric(
-              horizontal: 16, vertical: 10),
-          child: Column(
+              horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: active
+                ? _accent.withValues(alpha: 0.18)
+                : const Color(0xFF272727),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: color, size: 26),
-              const SizedBox(height: 4),
+              Icon(icon, color: color, size: 20),
+              const SizedBox(width: 6),
               Text(label,
-                  style: TextStyle(color: color, fontSize: 12)),
+                  style: TextStyle(color: color, fontSize: 13)),
             ],
           ),
         ),
       );
     }
 
-    final video = uiState.video;
+    void toggleLike() {
+      setState(() {
+        _liked = !_liked;
+        if (_liked) _disliked = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              _liked ? 'Added to Liked' : 'Removed from Liked'),
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
+
+    void toggleDislike() {
+      setState(() {
+        _disliked = !_disliked;
+        if (_disliked) _liked = false;
+      });
+    }
+
+    final likeLabel = video?.likeCount != null
+        ? formatCount(video!.likeCount)
+        : 'Like';
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
-          item(
-            icon: _liked
-                ? Icons.thumb_up
-                : Icons.thumb_up_outlined,
-            label: video?.likeCount != null
-                ? formatCount(video!.likeCount)
-                : 'Like',
-            active: _liked,
-            onTap: () {
-              setState(() {
-                _liked = !_liked;
-                if (_liked) _disliked = false;
-              });
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(_liked
-                      ? 'Added to Liked'
-                      : 'Removed from Liked'),
-                  duration: const Duration(seconds: 1),
+          // Like | Dislike segmented pill, like YouTube.
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF272727),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                InkWell(
+                  onTap: toggleLike,
+                  borderRadius: const BorderRadius.horizontal(
+                      left: Radius.circular(20)),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _liked
+                              ? Icons.thumb_up
+                              : Icons.thumb_up_outlined,
+                          color:
+                              _liked ? _accent : Colors.white,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(likeLabel,
+                            style: TextStyle(
+                                color: _liked
+                                    ? _accent
+                                    : Colors.white,
+                                fontSize: 13)),
+                      ],
+                    ),
+                  ),
                 ),
-              );
-            },
+                Container(
+                    width: 1,
+                    height: 20,
+                    color: Colors.white24),
+                InkWell(
+                  onTap: toggleDislike,
+                  borderRadius: const BorderRadius.horizontal(
+                      right: Radius.circular(20)),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    child: Icon(
+                      _disliked
+                          ? Icons.thumb_down
+                          : Icons.thumb_down_outlined,
+                      color:
+                          _disliked ? _accent : Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-          item(
-            icon: _disliked
-                ? Icons.thumb_down
-                : Icons.thumb_down_outlined,
-            label: 'Dislike',
-            active: _disliked,
+          const SizedBox(width: 8),
+          chip(
+            icon: Icons.share_outlined,
+            label: 'Share',
             onTap: () {
-              setState(() {
-                _disliked = !_disliked;
-                if (_disliked) _liked = false;
-              });
+              if (video != null) {
+                Share.share(
+                    'https://www.youtube.com/watch?v=${video.id}');
+              }
             },
           ),
-          item(
+          const SizedBox(width: 8),
+          chip(
+            icon: Icons.download_outlined,
+            label: 'Download',
+            onTap: () {
+              if (video != null) _showDownloadSheet(video);
+            },
+          ),
+          const SizedBox(width: 8),
+          chip(
             icon: Icons.playlist_add,
-            label: 'Add To',
+            label: 'Save',
             onTap: () {
               if (video != null) {
                 showSaveToPlaylistSheet(context, video);
               }
             },
           ),
-          item(
+          const SizedBox(width: 8),
+          chip(
             icon: Icons.headphones,
             label: 'Background',
             active: uiState.audioOnly,
             onTap: notifier.toggleAudioOnly,
           ),
-          item(
+          const SizedBox(width: 8),
+          chip(
             icon: Icons.picture_in_picture_alt,
             label: 'Popup',
             onTap: () {
@@ -2456,13 +2691,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   ),
                 );
               }
-            },
-          ),
-          item(
-            icon: Icons.download_outlined,
-            label: 'Download',
-            onTap: () {
-              if (video != null) _showDownloadSheet(video);
             },
           ),
         ],
@@ -3009,12 +3237,18 @@ class _TimeLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // initialData from the synchronous player state: media_kit's streams
+    // are broadcast without replay, so a fresh subscription (e.g. after
+    // the fullscreen rebuild) would otherwise show 00:00 until the next
+    // mpv event.
     return StreamBuilder<Duration>(
       stream: player.stream.duration,
+      initialData: player.state.duration,
       builder: (context, durSnap) {
         final duration = durSnap.data ?? Duration.zero;
         return StreamBuilder<Duration>(
           stream: player.stream.position,
+          initialData: player.state.position,
           builder: (context, posSnap) {
             final position = posSnap.data ?? Duration.zero;
             return Text(
@@ -3083,16 +3317,23 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
 
   @override
   Widget build(BuildContext context) {
+    // initialData from the synchronous player state: media_kit's streams
+    // are broadcast without replay, so a fresh subscription (e.g. after
+    // the fullscreen rebuild, which recreates this whole subtree) would
+    // otherwise show an empty track and 00:00 until mpv emits again.
     return StreamBuilder<Duration>(
       stream: widget.player.stream.duration,
+      initialData: widget.player.state.duration,
       builder: (context, durSnap) {
         final duration = durSnap.data ?? Duration.zero;
         return StreamBuilder<Duration>(
           stream: widget.player.stream.buffer,
+          initialData: widget.player.state.buffer,
           builder: (context, bufSnap) {
             final buffered = bufSnap.data ?? Duration.zero;
             return StreamBuilder<Duration>(
               stream: widget.player.stream.position,
+              initialData: widget.player.state.position,
               builder: (context, posSnap) {
                 final position = posSnap.data ?? Duration.zero;
                 final total = duration.inMilliseconds;
@@ -3285,9 +3526,11 @@ class _StatsOverlay extends StatelessWidget {
       ),
       child: StreamBuilder<Duration>(
         stream: player.stream.position,
+        initialData: player.state.position,
         builder: (context, posSnap) {
           return StreamBuilder<Duration>(
             stream: player.stream.buffer,
+            initialData: player.state.buffer,
             builder: (context, bufSnap) {
               final pos = posSnap.data ?? Duration.zero;
               final buf = bufSnap.data ?? Duration.zero;
@@ -3337,12 +3580,16 @@ class _AudioSeekBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // initialData from the synchronous player state (broadcast streams
+    // don't replay for fresh subscriptions).
     return StreamBuilder<Duration>(
       stream: player.stream.duration,
+      initialData: player.state.duration,
       builder: (context, durSnap) {
         final duration = durSnap.data ?? Duration.zero;
         return StreamBuilder<Duration>(
           stream: player.stream.position,
+          initialData: player.state.position,
           builder: (context, posSnap) {
             final position = posSnap.data ?? Duration.zero;
             return Column(
