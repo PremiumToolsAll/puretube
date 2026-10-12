@@ -131,15 +131,29 @@ class DownloadsController
   void _upsert(DownloadRecord r) =>
       state = {...state, r.id: r};
 
-  Future<void> startDownload(
-      DownloadOption option, VideoDetails video) async {
+  /// Starts a download. When [option] is a video-only DASH stream and
+  /// [audioOption] is given, both files are fetched (video, then audio)
+  /// and the record keeps the audio path so the offline player can
+  /// attach it via mpv's `audio-file` — video plays WITH audio without
+  /// an FFmpeg merge step.
+  Future<void> startDownload(DownloadOption option,
+      VideoDetails video, {DownloadOption? audioOption}) async {
     final service = ref.read(downloadServiceProvider);
     final repo = ref.read(downloadRepositoryProvider);
     final id = '${video.id}_${option.label}';
     if (state[id]?.status == DownloadStatus.downloading) return;
 
+    // Video-only DASH + a chosen audio track => paired download.
+    final pairAudio =
+        option.videoOnly && !option.audioOnly ? audioOption : null;
+
     final savePath = await service.buildFilePath(
         video.id, video.title, option.label, option.audioOnly);
+    final audioSavePath = pairAudio == null
+        ? null
+        : await service.buildFilePath(video.id, video.title,
+            pairAudio.label, true,
+            role: 'audio');
     var record = DownloadRecord(
       id: id,
       videoId: video.id,
@@ -149,6 +163,9 @@ class DownloadsController
       qualityLabel: option.label,
       audioOnly: option.audioOnly,
       filePath: savePath,
+      audioFilePath: audioSavePath,
+      videoOnly: option.videoOnly,
+      audioQualityLabel: pairAudio?.label,
       totalBytes: option.sizeBytes,
       status: DownloadStatus.downloading,
       createdAt: DateTime.now(),
@@ -156,27 +173,58 @@ class DownloadsController
     _upsert(record);
     await repo.save(record);
 
+    void reportProgress(double p) {
+      final cur = state[id];
+      if (cur != null &&
+          cur.status == DownloadStatus.downloading) {
+        _upsert(cur.copyWith(progress: p.clamp(0.0, 1.0)));
+      }
+    }
+
+    void reportSpeed(double mbps) {
+      final cur = state[id];
+      if (cur != null &&
+          cur.status == DownloadStatus.downloading) {
+        _upsert(cur.copyWith(speedMbps: mbps));
+      }
+    }
+
     try {
-      await service.startDownload(
-        id: id,
-        url: option.url,
-        savePath: savePath,
-        totalBytesHint: option.sizeBytes,
-        onProgress: (p) {
-          final cur = state[id];
-          if (cur != null &&
-              cur.status == DownloadStatus.downloading) {
-            _upsert(cur.copyWith(progress: p));
-          }
-        },
-        onSpeed: (mbps) {
-          final cur = state[id];
-          if (cur != null &&
-              cur.status == DownloadStatus.downloading) {
-            _upsert(cur.copyWith(speedMbps: mbps));
-          }
-        },
-      );
+      if (pairAudio == null) {
+        await service.startDownload(
+          id: id,
+          url: option.url,
+          savePath: savePath,
+          totalBytesHint: option.sizeBytes,
+          onProgress: reportProgress,
+          onSpeed: reportSpeed,
+        );
+      } else {
+        // Weighted progress: video ~80%, audio ~20% of the bar.
+        final videoBytes = option.sizeBytes ?? 0;
+        final audioBytes = pairAudio.sizeBytes ?? 0;
+        final totalBytes = videoBytes + audioBytes;
+        final videoShare = totalBytes > 0
+            ? videoBytes / totalBytes
+            : 0.8;
+        await service.startDownload(
+          id: '${id}_video',
+          url: option.url,
+          savePath: savePath,
+          totalBytesHint: option.sizeBytes,
+          onProgress: (p) => reportProgress(p * videoShare),
+          onSpeed: reportSpeed,
+        );
+        await service.startDownload(
+          id: '${id}_audio',
+          url: pairAudio.url,
+          savePath: audioSavePath!,
+          totalBytesHint: pairAudio.sizeBytes,
+          onProgress: (p) =>
+              reportProgress(videoShare + p * (1 - videoShare)),
+          onSpeed: reportSpeed,
+        );
+      }
       final done = state[id];
       if (done != null) {
         final finished = done.copyWith(
@@ -222,6 +270,19 @@ class DownloadsController
           o.audioOnly == record.audioOnly,
       orElse: () => fresh.first,
     );
+    DownloadOption? audioMatch;
+    if (record.videoOnly && record.audioFilePath != null) {
+      final audioOpts = fresh.where((o) => o.audioOnly).toList();
+      if (audioOpts.isNotEmpty) {
+        final wanted = record.audioQualityLabel;
+        audioMatch = wanted == null
+            ? audioOpts.first
+            : audioOpts.firstWhere(
+                (o) => o.label == wanted,
+                orElse: () => audioOpts.first,
+              );
+      }
+    }
     await startDownload(
       match,
       VideoDetails(
@@ -236,20 +297,26 @@ class DownloadsController
         uploadDate: null,
         description: '',
       ),
+      audioOption: audioMatch,
     );
   }
 
   Future<void> cancel(String id) async {
-    ref.read(downloadServiceProvider).cancel(id);
+    final service = ref.read(downloadServiceProvider);
+    service.cancel(id);
+    // Paired DASH downloads use suffixed token ids.
+    service.cancel('${id}_video');
+    service.cancel('${id}_audio');
   }
 
   Future<void> remove(String id) async {
     final record = state[id];
-    ref.read(downloadServiceProvider).cancel(id);
+    cancel(id);
     if (record != null) {
-      await ref
-          .read(downloadServiceProvider)
-          .deleteFile(record.filePath);
+      final service = ref.read(downloadServiceProvider);
+      await service.deleteFile(record.filePath);
+      final audioPath = record.audioFilePath;
+      if (audioPath != null) await service.deleteFile(audioPath);
       await ref.read(downloadRepositoryProvider).delete(id);
     }
     state = {...state}..remove(id);
