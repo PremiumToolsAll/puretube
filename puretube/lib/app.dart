@@ -24,6 +24,8 @@ class _PureTubeAppState extends ConsumerState<PureTubeApp> {
     super.initState();
     _checkOnboarding();
     loadSavedLocale(ref);
+    loadSavedDoubleTapSeconds(ref);
+    loadSavedSkipSponsors(ref);
   }
 
   Future<void> _checkOnboarding() async {
