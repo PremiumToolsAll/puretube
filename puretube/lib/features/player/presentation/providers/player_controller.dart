@@ -290,21 +290,19 @@ class PlayerController extends Notifier<PlayerUiState>
   }
 
   /// Toggle between video and background-audio mode, preserving position.
+  ///
+  /// Does NOT switch streams: the current stream (muxed, or DASH video with
+  /// its attached audio track) keeps playing; only the UI changes (video
+  /// hidden in audio mode). This preserves position perfectly and starts
+  /// audio immediately — switching to the audio-only URL was unreliable
+  /// (stale/expired URLs, delayed start, position reset).
   Future<void> toggleAudioOnly() async {
     if (state.status != PlayerStatus.ready ||
         state.videoId == null) {
       return;
     }
     final goingAudioOnly = !state.audioOnly;
-    try {
-      final streams = await _ensureFreshStreams();
-      final url =
-          goingAudioOnly ? streams.audioOnlyUrl : streams.muxedUrl;
-      await _handler.switchStream(url);
-      state = state.copyWith(audioOnly: goingAudioOnly);
-    } on PureTubeException catch (e) {
-      state = state.copyWith(errorMessage: e.message);
-    }
+    state = state.copyWith(audioOnly: goingAudioOnly);
   }
 
   Future<void> enterPip() async {
@@ -502,15 +500,6 @@ class PlayerController extends Notifier<PlayerUiState>
   }
 
   // ---------------- stream expiry & error recovery ----------------
-
-  Future<PlaybackStreams> _ensureFreshStreams() async {
-    final current = state.streams;
-    if (current != null && !current.isExpired) return current;
-    final fresh =
-        await _extractor.getPlaybackStreams(state.videoId!);
-    state = state.copyWith(streams: fresh);
-    return fresh;
-  }
 
   /// media_kit reports fatal errors (expired/403'd URL, lost connection)
   /// on player.stream.error. Recover by re-extracting fresh URLs and
