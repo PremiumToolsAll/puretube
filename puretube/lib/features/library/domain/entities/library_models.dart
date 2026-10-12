@@ -181,6 +181,18 @@ class DownloadRecord {
   final String qualityLabel;
   final bool audioOnly;
   final String filePath;
+
+  /// Companion audio track for video-only (DASH) downloads. When set,
+  /// the offline player attaches it via mpv's `audio-file` so the
+  /// downloaded video plays WITH audio without needing an FFmpeg merge.
+  final String? audioFilePath;
+
+  /// True when [filePath] is a video-only DASH stream.
+  final bool videoOnly;
+
+  /// Label of the companion audio option for DASH pair downloads
+  /// (used to re-match a fresh URL on retry).
+  final String? audioQualityLabel;
   final int? totalBytes;
   final DownloadStatus status;
   final double progress;
@@ -197,6 +209,9 @@ class DownloadRecord {
     required this.qualityLabel,
     required this.audioOnly,
     required this.filePath,
+    this.audioFilePath,
+    this.videoOnly = false,
+    this.audioQualityLabel,
     this.totalBytes,
     required this.status,
     this.progress = 0,
@@ -211,6 +226,9 @@ class DownloadRecord {
     double? speedMbps,
     String? error,
     int? totalBytes,
+    String? audioFilePath,
+    bool? videoOnly,
+    String? audioQualityLabel,
   }) =>
       DownloadRecord(
         id: id,
@@ -221,6 +239,10 @@ class DownloadRecord {
         qualityLabel: qualityLabel,
         audioOnly: audioOnly,
         filePath: filePath,
+        audioFilePath: audioFilePath ?? this.audioFilePath,
+        videoOnly: videoOnly ?? this.videoOnly,
+        audioQualityLabel:
+            audioQualityLabel ?? this.audioQualityLabel,
         totalBytes: totalBytes ?? this.totalBytes,
         status: status ?? this.status,
         progress: progress ?? this.progress,
@@ -238,6 +260,9 @@ class DownloadRecord {
         'qualityLabel': qualityLabel,
         'audioOnly': audioOnly,
         'filePath': filePath,
+        'audioFilePath': audioFilePath,
+        'videoOnly': videoOnly,
+        'audioQualityLabel': audioQualityLabel,
         'totalBytes': totalBytes,
         'status': status.name,
         'progress': progress,
@@ -260,6 +285,9 @@ class DownloadRecord {
       qualityLabel: j['qualityLabel'] as String? ?? '',
       audioOnly: j['audioOnly'] as bool? ?? false,
       filePath: j['filePath'] as String? ?? '',
+      audioFilePath: j['audioFilePath'] as String?,
+      videoOnly: j['videoOnly'] as bool? ?? false,
+      audioQualityLabel: j['audioQualityLabel'] as String?,
       totalBytes: j['totalBytes'] as int?,
       status: status,
       progress: (j['progress'] as num?)?.toDouble() ?? 0,
