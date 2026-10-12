@@ -7,6 +7,7 @@ import '../../../search/presentation/widgets/search_filter_sheet.dart';
 import '../../../shorts/presentation/screens/shorts_screen.dart';
 import '../providers/search_provider.dart';
 import '../../../player/presentation/widgets/mini_player_bar.dart';
+import '../widgets/continue_watching_card.dart';
 import '../widgets/video_card.dart';
 import '../../../player/presentation/widgets/popup_player.dart';
 import '../../../library/presentation/screens/downloads_screen.dart';
@@ -225,6 +226,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 4),
+          const ContinueWatchingCard(),
           SizedBox(
             height: 42,
             child: ListView.separated(
