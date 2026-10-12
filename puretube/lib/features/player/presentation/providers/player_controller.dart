@@ -138,6 +138,22 @@ class PlayerController extends Notifier<PlayerUiState>
   bool _prefAudioOnly = false;
   static const _kAudioOnlyKey = 'audio_only';
 
+  /// "Continue watching" keys (Hive player_prefs box): the last played
+  /// video + position, so the home screen can offer resume after an
+  /// app restart — like original YouTube.
+  static const kLastVideoId = 'last_video_id';
+  static const kLastVideoTitle = 'last_video_title';
+  static const kLastVideoAuthor = 'last_video_author';
+  static const kLastVideoThumb = 'last_video_thumb';
+  static const kLastVideoDurationSecs = 'last_video_duration_secs';
+  static const kLastVideoPositionSecs = 'last_video_position_secs';
+  static const kLastVideoAudioOnly = 'last_video_audio_only';
+  static const kLastVideoUpdatedAt = 'last_video_updated_at';
+
+  /// Throttle for periodic last-video saves during playback.
+  DateTime? _lastVideoSavedAt;
+  int _lastVideoSavedSecs = -1;
+
   @override
   PlayerUiState build() {
     final binding = WidgetsBinding.instance;
@@ -147,8 +163,10 @@ class PlayerController extends Notifier<PlayerUiState>
     _pipSub = _pip.onPipChanged.listen((inPip) {
       state = state.copyWith(isInPip: inPip);
     });
-    _positionSub =
-        _handler.player.stream.position.listen(_maybeSkipSponsor);
+    _positionSub = _handler.player.stream.position.listen((pos) {
+      _maybeSkipSponsor(pos);
+      _maybePersistLastVideo(pos);
+    });
     _errorSub = _handler.player.stream.error.listen(_onPlayerError);
 
     // Wire notification skip buttons to the Up Next queue.
@@ -249,6 +267,8 @@ class PlayerController extends Notifier<PlayerUiState>
         sponsorSegments: segments,
         pipSupported: await _pip.isPipSupported,
       );
+      // Record this video for "Continue watching" on the home screen.
+      unawaited(_saveLastVideo());
       // Resume from saved position if the user watched this before.
       // Skip if position is 0 or within 10s of the end (likely finished).
       final savedSecs =
@@ -717,6 +737,51 @@ class PlayerController extends Notifier<PlayerUiState>
             durationSecs: v?.duration?.inSeconds,
           );
     } catch (_) {}
+    // Also refresh the "Continue watching" entry.
+    await _saveLastVideo();
+  }
+
+  /// Saves the current video + position + mode to the player_prefs box
+  /// for the home screen's "Continue watching" card. Safe to call
+  /// often; failures are silent.
+  Future<void> _saveLastVideo() async {
+    final id = state.videoId;
+    final v = state.video;
+    if (id == null || v == null || state.status != PlayerStatus.ready) {
+      return;
+    }
+    try {
+      final posSecs = _handler.player.state.position.inSeconds;
+      await Hive.box(HiveBoxes.playerPrefs).putAll({
+        kLastVideoId: id,
+        kLastVideoTitle: v.title,
+        kLastVideoAuthor: v.author,
+        kLastVideoThumb: v.thumbnailUrl,
+        kLastVideoDurationSecs: v.duration?.inSeconds ?? 0,
+        kLastVideoPositionSecs: posSecs,
+        kLastVideoAudioOnly: state.audioOnly,
+        kLastVideoUpdatedAt: DateTime.now().millisecondsSinceEpoch,
+      });
+      _lastVideoSavedAt = DateTime.now();
+      _lastVideoSavedSecs = posSecs;
+    } catch (_) {}
+  }
+
+  /// Throttled last-video saver: at most once every 10s and only when
+  /// the position actually advanced (avoids Hive churn on pause).
+  void _maybePersistLastVideo(Duration pos) {
+    if (state.status != PlayerStatus.ready ||
+        state.videoId == null) {
+      return;
+    }
+    final secs = pos.inSeconds;
+    if (secs < 3 || secs == _lastVideoSavedSecs) return;
+    final last = _lastVideoSavedAt;
+    if (last != null &&
+        DateTime.now().difference(last).inSeconds < 10) {
+      return;
+    }
+    unawaited(_saveLastVideo());
   }
 
   Future<void> _persistThenStop() async {
