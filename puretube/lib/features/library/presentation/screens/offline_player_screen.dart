@@ -25,7 +25,27 @@ class _OfflinePlayerScreenState
     super.initState();
     _player = Player();
     _controller = VideoController(_player);
-    _player.open(Media('file://${widget.record.filePath}'));
+    _attachCompanionAudio().then((_) {
+      if (mounted) {
+        _player.open(Media('file://${widget.record.filePath}'));
+      }
+    });
+  }
+
+  /// DASH video-only downloads ship a companion audio file. Attach it
+  /// via mpv's `audio-file` (same mechanism as DASH streaming) so the
+  /// video plays WITH audio — no FFmpeg merge required.
+  Future<void> _attachCompanionAudio() async {
+    final audioPath = widget.record.audioFilePath;
+    if (audioPath == null || audioPath.isEmpty) return;
+    final platform = _player.platform;
+    if (platform is NativePlayer) {
+      try {
+        await platform.setProperty('audio-file', audioPath);
+      } catch (_) {
+        // Video still plays; just without the companion audio.
+      }
+    }
   }
 
   @override
