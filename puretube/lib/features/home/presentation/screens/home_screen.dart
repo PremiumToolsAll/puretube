@@ -101,16 +101,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           'PureTube',
           style: TextStyle(
               color: Color(0xFF10B981),
-              fontWeight: FontWeight.bold),
+              fontWeight: FontWeight.w900,
+              fontSize: 24,
+              letterSpacing: 1.2),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Refresh feed',
-            icon: const Icon(Icons.refresh),
-            onPressed: () => ref
-                .read(searchControllerProvider.notifier)
-                .refreshFeed(),
-          ),
           IconButton(
             tooltip: 'Shorts',
             icon: const Icon(
