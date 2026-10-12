@@ -600,11 +600,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   // ---------------- prev / next ----------------
 
-  /// Previous: restart the current video.
+  /// Previous: restart the current video when past 3s, otherwise go to
+  /// the previously played video (Spotify/YouTube behavior).
   Future<void> _playPrevious() async {
     await ref
         .read(playerControllerProvider.notifier)
-        .seekTo(Duration.zero);
+        .playPrevious();
     _restartHideTimer();
   }
 
