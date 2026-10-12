@@ -205,6 +205,8 @@ class PlayerController extends Notifier<PlayerUiState>
     unawaited(_loadSavedSkipSponsors());
     // Restore the persisted audio-only preference (default OFF).
     unawaited(_loadPlayerPrefs());
+    // Restore a persisted sleep timer (e.g. after backgrounding).
+    _restoreSleepTimer();
     _handler.onSkipToPrevious = () async {
       await playPrevious();
     };
@@ -762,21 +764,31 @@ class PlayerController extends Notifier<PlayerUiState>
 
   // ---------------- sleep timer ----------------
 
+  /// Hive key for the persisted sleep-timer end time (epoch millis),
+  /// so the timer survives app backgrounding.
+  static const _kSleepEndsAtKey = 'sleep_ends_at_ms';
+
   void startSleepTimer(Duration duration) {
     _cancelSleepTimer();
     _sleepEndsAt = DateTime.now().add(duration);
     state = state.copyWith(sleepRemaining: duration);
-    _sleepCountdown =
-        Timer.periodic(const Duration(seconds: 1), (_) {
-      final endsAt = _sleepEndsAt;
-      if (endsAt == null) return;
-      final left = endsAt.difference(DateTime.now());
-      if (left <= Duration.zero) {
-        _finishSleepTimer();
-      } else {
-        state = state.copyWith(sleepRemaining: left);
-      }
-    });
+    // Persist the end time — the Dart timer keeps running while the
+    // audio foreground service holds the process alive in background.
+    try {
+      Hive.box(HiveBoxes.playerPrefs)
+          .put(_kSleepEndsAtKey, _sleepEndsAt!.millisecondsSinceEpoch);
+    } catch (_) {}
+    _armSleepCountdown();
+  }
+
+  /// Starts a sleep timer that fires when the current video ends.
+  /// Returns false when the remaining time can't be determined.
+  bool startSleepTimerUntilEndOfVideo() {
+    final total = _handler.player.state.duration;
+    final pos = _handler.player.state.position;
+    if (total <= Duration.zero || pos >= total) return false;
+    startSleepTimer(total - pos);
+    return true;
   }
 
   void cancelSleepTimer() {
@@ -790,10 +802,46 @@ class PlayerController extends Notifier<PlayerUiState>
     state = state.copyWith(sleepRemaining: null);
   }
 
+  void _armSleepCountdown() {
+    _sleepCountdown =
+        Timer.periodic(const Duration(seconds: 1), (_) {
+      final endsAt = _sleepEndsAt;
+      if (endsAt == null) return;
+      final left = endsAt.difference(DateTime.now());
+      if (left <= Duration.zero) {
+        _finishSleepTimer();
+      } else {
+        state = state.copyWith(sleepRemaining: left);
+      }
+    });
+  }
+
   void _cancelSleepTimer() {
     _sleepCountdown?.cancel();
     _sleepCountdown = null;
     _sleepEndsAt = null;
+    try {
+      Hive.box(HiveBoxes.playerPrefs).delete(_kSleepEndsAtKey);
+    } catch (_) {}
+  }
+
+  /// Restores a persisted sleep timer (e.g. the app was backgrounded
+  /// and the controller was rebuilt). Called once from [build].
+  void _restoreSleepTimer() {
+    try {
+      final box = Hive.box(HiveBoxes.playerPrefs);
+      final ms = box.get(_kSleepEndsAtKey) as int?;
+      if (ms == null) return;
+      final endsAt = DateTime.fromMillisecondsSinceEpoch(ms);
+      final left = endsAt.difference(DateTime.now());
+      if (left <= Duration.zero) {
+        box.delete(_kSleepEndsAtKey);
+        return;
+      }
+      _sleepEndsAt = endsAt;
+      state = state.copyWith(sleepRemaining: left);
+      _armSleepCountdown();
+    } catch (_) {}
   }
 
   // ---------------- SponsorBlock ----------------
