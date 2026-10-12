@@ -2975,6 +2975,7 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
                                 horizontal: 12),
                             color: Colors.transparent,
                             child: CustomPaint(
+                              size: const Size(double.infinity, 36),
                               painter: _SeekBarPainter(
                                 playedFrac: frac,
                                 bufferedFrac: bufferedFrac,
