@@ -2561,15 +2561,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             ),
           ),
           PressIconButton(
-            tooltip: 'Save to playlist',
-            onPressed: () {
-              final v = uiState.video;
-              if (v != null) {
-                showSaveToPlaylistSheet(context, v);
-              }
-            },
-            icon: const Icon(Icons.playlist_add,
-                color: Colors.white),
+            tooltip: 'Background audio',
+            onPressed: () => ref
+                .read(playerControllerProvider.notifier)
+                .toggleAudioOnly(),
+            icon: Icon(Icons.headphones,
+                color: uiState.audioOnly ? _accent : Colors.white),
           ),
           PressIconButton(
             onPressed: _showMoreSheet,
