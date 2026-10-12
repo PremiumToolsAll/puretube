@@ -10,6 +10,7 @@ import '../../../../core/di/providers.dart';
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/services/pip_service.dart';
 import '../../../../core/services/sponsorblock_service.dart';
+import '../../../../core/services/watch_category_tracker.dart';
 import '../../../../core/services/youtube_extractor_service.dart';
 import '../../data/services/audio_player_handler.dart';
 import '../../domain/entities/playback_models.dart';
@@ -241,6 +242,9 @@ class PlayerController extends Notifier<PlayerUiState>
       // the player and the Next button both read them from state.
       unawaited(_loadRelated(videoId,
           titleHint: video.title, authorHint: video.author));
+      // Track the watch category for personalized suggestions
+      // (Up Next + home feed).
+      unawaited(WatchCategoryTracker.record(video.title));
     } on PureTubeException catch (e) {
       state = state.copyWith(
           status: PlayerStatus.error, errorMessage: e.message);
@@ -357,8 +361,19 @@ class PlayerController extends Notifier<PlayerUiState>
   Future<void> _loadRelated(String videoId,
       {String? titleHint, String? authorHint}) async {
     try {
+      // Boost: current video's category first, then the user's
+      // most-watched categories — so waz suggests waz, songs suggest
+      // songs, etc.
+      final currentCat = WatchCategoryTracker.detect(titleHint ?? '');
+      final historyTop = await WatchCategoryTracker.top(2);
+      final boost = <String>[
+        if (currentCat != null) currentCat,
+        ...historyTop.where((c) => c != currentCat),
+      ];
       final videos = await _extractor.getRelatedVideos(videoId,
-          titleHint: titleHint, authorHint: authorHint);
+          titleHint: titleHint,
+          authorHint: authorHint,
+          boostCategories: boost);
       if (state.videoId != videoId) return;
       state = state.copyWith(
         relatedVideos: videos,
@@ -378,6 +393,30 @@ class PlayerController extends Notifier<PlayerUiState>
     final v = state.video;
     await _loadRelated(id,
         titleHint: v?.title, authorHint: v?.author);
+  }
+
+  /// Returns a video id to play for "Next", making sure Up Next is
+  /// loaded first. Retries the related-videos fetch, then falls back
+  /// to a direct keyword search, so Next almost always finds a video.
+  /// Returns null only if every attempt fails.
+  Future<String?> ensureNextVideoId() async {
+    if (state.relatedVideos.isNotEmpty) {
+      return state.relatedVideos.first.id;
+    }
+    await retryRelated();
+    if (state.relatedVideos.isNotEmpty) {
+      return state.relatedVideos.first.id;
+    }
+    // Last resort: search YouTube directly for the current title.
+    final v = state.video;
+    if (v == null) return null;
+    try {
+      final results = await _extractor.searchVideos(v.title, limit: 10);
+      for (final r in results) {
+        if (r.id != state.videoId) return r.id;
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// Switches to a different muxed quality, preserving the current
