@@ -94,9 +94,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             !ref.watch(popupVisibleProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0F0C),
+      backgroundColor: const Color(0xFF0C110E),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0A0F0C),
+        backgroundColor: const Color(0xFF0C110E),
         title: const Text(
           'PureTube',
           style: TextStyle(
@@ -190,7 +190,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                       filled: true,
                       fillColor:
-                          const Color(0xFF0E1512),
+                          const Color(0xFF16211C),
                       contentPadding:
                           const EdgeInsets.symmetric(
                               vertical: 0),
@@ -221,7 +221,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 ? const Color(
                                     0xFF10B981)
                                 : const Color(
-                                    0xFF0E1512),
+                                    0xFF16211C),
                       ),
                       icon: const Icon(
                           Icons.tune,
@@ -245,7 +245,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               separatorBuilder: (_, __) =>
                   const SizedBox(width: 8),
               itemBuilder: (ctx, i) => ActionChip(
-                backgroundColor: const Color(0xFF0E1512),
+                backgroundColor: const Color(0xFF16211C),
                 side: const BorderSide(
                     color: Color(0xFF10B981), width: 0.5),
                 label: Text(_categories[i],
@@ -262,7 +262,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           Expanded(
             child: RefreshIndicator(
               color: const Color(0xFF10B981),
-              backgroundColor: const Color(0xFF0E1512),
+              backgroundColor: const Color(0xFF16211C),
               onRefresh: () => ref
                   .read(searchControllerProvider.notifier)
                   .refreshFeed(),
@@ -298,7 +298,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           itemCount: 6,
           itemBuilder: (_, __) => Shimmer.fromColors(
-            baseColor: const Color(0xFF0E1512),
+            baseColor: const Color(0xFF16211C),
             highlightColor: const Color(0xFF1E2A22),
             child: Container(
               decoration: BoxDecoration(
