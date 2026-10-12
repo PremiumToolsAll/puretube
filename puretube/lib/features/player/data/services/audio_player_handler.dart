@@ -110,6 +110,9 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
       }
     }
     await _player.open(Media(streamUrl, start: pos), play: wasPlaying);
+    // The stream listeners will fire, but broadcast explicitly so the
+    // notification updates promptly (new duration, position).
+    _broadcastState();
   }
 
   @override
