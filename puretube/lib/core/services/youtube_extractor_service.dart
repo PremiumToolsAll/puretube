@@ -546,8 +546,11 @@ class YoutubeExtractorService {
 
       final seen = <String>{videoId};
       final collected = <VideoDetails>[];
+      // Collect extra candidates: aggressive dedupe below shrinks the
+      // list, so over-collect to keep Up Next full AND diverse.
+      final collectCap = limit * 2;
       for (final query in queries) {
-        if (collected.length >= limit) break;
+        if (collected.length >= collectCap) break;
         try {
           final results = await _yt.search
               .search(query)
@@ -555,7 +558,7 @@ class YoutubeExtractorService {
           for (final v in results.whereType<Video>()) {
             if (seen.add(v.id.value)) {
               collected.add(VideoDetails.fromExplode(v));
-              if (collected.length >= limit) break;
+              if (collected.length >= collectCap) break;
             }
           }
         } catch (e) {
@@ -565,7 +568,7 @@ class YoutubeExtractorService {
       // Near-duplicate removal: the same song/video re-uploaded by other
       // channels (e.g. "Vaaste" appearing 8+ times). Keeps the
       // most-viewed copy of each similar-title group.
-      final unique = _dedupeSimilarTitles(collected);
+      final unique = _dedupeSimilarTitles(collected).take(limit).toList();
       // Category boost: rank results matching the user's frequent
       // categories first (earlier category = stronger boost).
       if (boostCategories.isNotEmpty && unique.length > 1) {
@@ -609,8 +612,9 @@ class YoutubeExtractorService {
   };
 
   /// Noise tokens stripped when normalizing titles for near-duplicate
-  /// detection: quality badges, upload-type words and filler that make
-  /// "the same song re-uploaded by another channel" look different.
+  /// detection: quality badges, upload-type words, version/re-upload
+  /// markers and filler that make "the same song re-uploaded by another
+  /// channel" look different.
   static const _dedupeNoiseWords = <String>{
     'official', 'video', 'videos', 'full', 'hd', 'hq', 'sd',
     '4k', '8k', '2k', 'uhd', 'fhd', 'qhd',
@@ -620,8 +624,42 @@ class YoutubeExtractorService {
     'music', 'musical', 'visualizer', 'mv', 'mtv',
     'trailer', 'teaser', 'promo', 'clip', 'short', 'shorts',
     'remix', 'remake', 'cover', 'version', 'original',
+    // Version/re-upload markers: slowed+reverb, lofi, tiktok etc.
+    'slowed', 'slow', 'reverb', 'reverbed', 'sped', 'nightcore',
+    'tiktok', 'mashup', 'unplugged', 'acoustic', 'extended',
+    'edit', 'bass', 'boosted', '8d', '10d', 'flp',
     '2024', '2025', '2026', '2027',
   };
+
+  /// Splits text into lowercase alphanumeric tokens (unicode-aware,
+  /// so Bengali works), dropping tokens shorter than 2 chars.
+  static List<String> _wordTokens(String text) {
+    final tokens = <String>[];
+    for (final w in text
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), ' ')
+        .split(RegExp(r'\s+'))) {
+      if (w.length >= 2 && !tokens.contains(w)) tokens.add(w);
+    }
+    return tokens;
+  }
+
+  /// The "core" of a title: the first few meaningful tokens — the
+  /// distinctive song/video name. Noise words and the video's own
+  /// author/channel tokens are stripped, so "Artist - Song A" vs
+  /// "Artist - Song B" don't look like the same song, while
+  /// "Vaaste Remix" vs "Vaaste Lofi" both reduce to "vaaste".
+  static String _coreTitle(String title,
+      {Set<String> authorTokens = const {}}) {
+    final tokens = <String>[];
+    for (final w in _wordTokens(title)) {
+      if (_dedupeNoiseWords.contains(w)) continue;
+      if (authorTokens.contains(w)) continue;
+      tokens.add(w);
+      if (tokens.length >= 3) break;
+    }
+    return tokens.join(' ');
+  }
 
   /// Normalizes a title for near-duplicate detection: lowercase, strip
   /// punctuation, drop noise tokens, collapse whitespace. Unicode-aware
@@ -666,19 +704,33 @@ class YoutubeExtractorService {
   }
 
   /// Drops near-duplicate suggestions (same song/video re-uploaded by
-  /// other channels): titles more than [threshold] similar keep only
-  /// the highest view-count copy. First-appearance order is preserved.
+  /// other channels): titles more than [threshold] similar, or whose
+  /// "core" titles (distinctive song/video name) match, keep only the
+  /// highest view-count copy. First-appearance order is preserved.
+  /// Aggressive by design: "Vaaste Song" / "Vaaste Remix" / "Vaaste
+  /// Lofi" / "Vaaste Official Video" all collapse to one entry so Up
+  /// Next stays diverse.
   static List<VideoDetails> _dedupeSimilarTitles(
     List<VideoDetails> videos, {
-    double threshold = 0.7,
+    double threshold = 0.5,
+    double coreThreshold = 0.6,
   }) {
     if (videos.length < 2) return videos;
     final normalized = [for (final v in videos) _normalizeTitle(v.title)];
+    final cores = [
+      for (final v in videos)
+        _coreTitle(v.title,
+            authorTokens: _wordTokens(v.author).toSet()),
+    ];
     final kept = <int>[];
     for (var i = 0; i < videos.length; i++) {
       var dupOf = -1;
       for (final k in kept) {
-        if (_titleSimilarity(normalized[i], normalized[k]) > threshold) {
+        final fullSim = _titleSimilarity(normalized[i], normalized[k]);
+        final coreSim = (cores[i].isEmpty || cores[k].isEmpty)
+            ? 0.0
+            : _titleSimilarity(cores[i], cores[k]);
+        if (fullSim > threshold || coreSim > coreThreshold) {
           dupOf = k;
           break;
         }
