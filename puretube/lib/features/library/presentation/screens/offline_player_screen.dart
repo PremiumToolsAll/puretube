@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -38,10 +40,16 @@ class _OfflinePlayerScreenState
   Future<void> _attachCompanionAudio() async {
     final audioPath = widget.record.audioFilePath;
     if (audioPath == null || audioPath.isEmpty) return;
+    // Skip a deleted companion file — mpv would fail the whole load.
+    if (!await File(audioPath).exists()) return;
     final platform = _player.platform;
     if (platform is NativePlayer) {
       try {
         await platform.setProperty('audio-file', audioPath);
+        // Same settle delay as the streaming switch path: without it
+        // mpv can start the demuxer before the property applies and the
+        // companion audio is silently dropped on some devices.
+        await Future.delayed(const Duration(milliseconds: 500));
       } catch (_) {
         // Video still plays; just without the companion audio.
       }
