@@ -2857,16 +2857,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           ),
           const SizedBox(width: 8),
           chip(
-            icon: Icons.playlist_add,
-            label: 'Save',
-            onTap: () {
-              if (video != null) {
-                showSaveToPlaylistSheet(context, video);
-              }
-            },
-          ),
-          const SizedBox(width: 8),
-          chip(
             icon: Icons.headphones,
             label: 'Background',
             active: uiState.audioOnly,
