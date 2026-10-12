@@ -395,6 +395,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   // fullscreen (landscape)
   bool _isFullscreen = false;
+  bool _screenLocked = false;
 
   // audio (music) mode state
   bool _liked = false;
@@ -1283,6 +1284,42 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   onTap: () {
                     Navigator.pop(ctx);
                     _showSleepSheet();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.speed),
+                  title: const Text('Playback speed'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('${ui.speed}x',
+                          style:
+                              const TextStyle(color: Colors.grey)),
+                      const Icon(Icons.chevron_right,
+                          color: Colors.grey),
+                    ],
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showSpeedSheet();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.closed_caption),
+                  title: const Text('Captions'),
+                  trailing: const Icon(Icons.chevron_right,
+                      color: Colors.grey),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    SubtitleSheet.show(context);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.lock_outline),
+                  title: const Text('Lock screen'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() => _screenLocked = true);
                   },
                 ),
                 ListTile(
@@ -2281,6 +2318,46 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 ),
               ),
             if (_gauge != null) _buildGauge(),
+            if (_screenLocked)
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: () {},
+                  child: Container(
+                    color: Colors.black54,
+                    child: Center(
+                      child: GestureDetector(
+                        onTap: () =>
+                            setState(() => _screenLocked = false),
+                        child: Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.black87,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                                color: _emerald, width: 1),
+                          ),
+                          child: const Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.lock,
+                                  color: Colors.white, size: 32),
+                              SizedBox(height: 8),
+                              Text('Screen locked',
+                                  style: TextStyle(
+                                      color: Colors.white)),
+                              SizedBox(height: 4),
+                              Text('Tap to unlock',
+                                  style: TextStyle(
+                                      color: Colors.grey,
+                                      fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             if (_showStats && isReady)
               Positioned(
                 top: 8,
