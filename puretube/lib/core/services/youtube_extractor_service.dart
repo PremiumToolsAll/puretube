@@ -6,6 +6,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import '../error/exceptions.dart';
 import '../../features/player/domain/entities/playback_models.dart';
+import 'watch_category_tracker.dart';
 
 /// All YouTube contact goes through here. Everything else in the app
 /// talks to [VideoDetails] / [PlaybackStreams] / [DownloadOption], so when
@@ -479,9 +480,14 @@ class YoutubeExtractorService {
   ///
   /// [titleHint]/[authorHint] let callers that already loaded the video
   /// details skip the extra `videos.get` network call.
+  /// [boostCategories] (most important first) re-ranks results so videos
+  /// matching the user's frequent categories surface at the top.
   /// Returns an empty list (never throws) only if every strategy fails.
   Future<List<VideoDetails>> getRelatedVideos(String videoId,
-      {int limit = 12, String? titleHint, String? authorHint}) async {
+      {int limit = 12,
+      String? titleHint,
+      String? authorHint,
+      List<String> boostCategories = const []}) async {
     try {
       await _requireNetwork();
 
@@ -533,11 +539,35 @@ class YoutubeExtractorService {
           debugPrint('getRelatedVideos: search "$query" failed: $e');
         }
       }
+      // Category boost: rank results matching the user's frequent
+      // categories first (earlier category = stronger boost).
+      if (boostCategories.isNotEmpty && collected.length > 1) {
+        collected.sort((a, b) => _categoryScore(b.title, boostCategories)
+            .compareTo(_categoryScore(a.title, boostCategories)));
+      }
       return collected;
     } catch (e) {
       debugPrint('getRelatedVideos: fatal failure for $videoId: $e');
       return [];
     }
+  }
+
+  /// Scores how well a title matches the boosted categories.
+  /// Earlier categories in the list score higher.
+  static int _categoryScore(String title, List<String> categories) {
+    final t = title.toLowerCase();
+    var score = 0;
+    for (var i = 0; i < categories.length; i++) {
+      final kws = WatchCategoryTracker.categoryKeywords[categories[i]];
+      if (kws == null) continue;
+      for (final kw in kws) {
+        if (t.contains(kw)) {
+          score += (categories.length - i) * 2;
+          break;
+        }
+      }
+    }
+    return score;
   }
 
   /// Words that carry no signal for "more like this" searches.
