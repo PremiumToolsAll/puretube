@@ -27,7 +27,7 @@ class PlaylistsScreen extends ConsumerWidget {
           : ListView.separated(
               itemCount: playlists.length,
               separatorBuilder: (_, __) => const Divider(
-                  height: 1, color: Color(0xFF0E1512)),
+                  height: 1, color: Color(0xFF16211C)),
               itemBuilder: (ctx, i) {
                 final p = playlists[i];
                 return Dismissible(
@@ -49,7 +49,7 @@ class PlaylistsScreen extends ConsumerWidget {
                       width: 48,
                       height: 48,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF0E1512),
+                        color: const Color(0xFF16211C),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Icon(Icons.playlist_play,
@@ -142,7 +142,7 @@ class PlaylistDetailScreen extends ConsumerWidget {
           : ListView.separated(
               itemCount: playlist.items.length,
               separatorBuilder: (_, __) => const Divider(
-                  height: 1, color: Color(0xFF0E1512)),
+                  height: 1, color: Color(0xFF16211C)),
               itemBuilder: (ctx, i) {
                 final item = playlist.items[i];
                 return Dismissible(
@@ -171,7 +171,7 @@ class PlaylistDetailScreen extends ConsumerWidget {
                         errorWidget: (_, __, ___) =>
                             Container(
                                 color:
-                                    const Color(0xFF0E1512)),
+                                    const Color(0xFF16211C)),
                       ),
                     ),
                     title: Text(item.title,
