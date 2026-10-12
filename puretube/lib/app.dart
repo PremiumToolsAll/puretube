@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/l10n/app_localizations.dart';
 import 'core/theme/app_theme.dart';
+import 'core/theme/theme_provider.dart';
 import 'features/home/presentation/screens/home_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/player/presentation/widgets/popup_player.dart';
@@ -26,6 +27,7 @@ class _PureTubeAppState extends ConsumerState<PureTubeApp> {
     loadSavedLocale(ref);
     loadSavedDoubleTapSeconds(ref);
     loadSavedSkipSponsors(ref);
+    loadSavedThemeOption(ref);
   }
 
   Future<void> _checkOnboarding() async {
@@ -43,7 +45,7 @@ class _PureTubeAppState extends ConsumerState<PureTubeApp> {
     return MaterialApp(
       title: 'PureTube',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark,
+      theme: AppTheme.darkFor(ref.watch(themeOptionProvider)),
       locale: ref.watch(localeProvider),
       localizationsDelegates:
           AppLocalizations.localizationsDelegates,
