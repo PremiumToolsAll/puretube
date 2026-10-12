@@ -16,6 +16,14 @@ import 'watch_category_tracker.dart';
 /// Converts technical extractor errors to user-friendly Bengali messages.
 String _friendlyError(Object e) {
   final msg = e.toString();
+  final lower = msg.toLowerCase();
+  if (lower.contains('login_required') ||
+      lower.contains('confirm your age') ||
+      lower.contains('age-restricted') ||
+      lower.contains('age restricted') ||
+      lower.contains('inappropriate for some users')) {
+    return 'এই ভিডিওটি 18+ (বয়স যাচাই প্রয়োজন)। চালানোর চেষ্টা করা হয়েছে কিন্তু YouTube অনুমতি দেয়নি।';
+  }
   if (msg.contains('RequestLimitExceededException') ||
       msg.contains('rate limiting')) {
     return 'YouTube সাময়িকভাবে block করেছে (অনেক request)। ১-২ ঘণ্টা পরে আবার চেষ্টা করো, অথবা WiFi/mobile data বদলে দেখো।';
@@ -85,6 +93,27 @@ class YoutubeExtractorService {
     }
   }
 
+  /// Fetches the stream manifest, working around YouTube's age gate.
+  ///
+  /// Age-restricted (18+) videos return LOGIN_REQUIRED for the default
+  /// client, so the manifest comes back with no playable streams. The
+  /// library retries internally with the TVHTML5 client (which sends
+  /// racyCheckOk/contentCheckOk — YouTube's age-gate bypass), but if that
+  /// still reports the video unplayable we retry once more explicitly
+  /// with the TV client so a stale-version or transient failure on the
+  /// first attempt doesn't silently kill playback.
+  Future<StreamManifest> _getManifestWithAgeBypass(String videoId) async {
+    try {
+      return await _yt.videos.streamsClient
+          .getManifest(videoId)
+          .timeout(const Duration(seconds: 30));
+    } on VideoUnplayableException {
+      return await _yt.videos.streamsClient
+          .getManifest(videoId, ytClients: [YoutubeApiClient.tv])
+          .timeout(const Duration(seconds: 30));
+    }
+  }
+
   Future<VideoDetails> getVideoDetails(String videoId) async {
     await _requireNetwork();
     try {
@@ -111,9 +140,7 @@ class YoutubeExtractorService {
   }) async {
     await _requireNetwork();
     try {
-      final manifest = await _yt.videos.streamsClient
-          .getManifest(videoId)
-          .timeout(const Duration(seconds: 30));
+      final manifest = await _getManifestWithAgeBypass(videoId);
 
       final muxed = [...manifest.muxed]
         ..sort((a, b) =>
@@ -159,9 +186,7 @@ class YoutubeExtractorService {
       String videoId) async {
     await _requireNetwork();
     try {
-      final manifest = await _yt.videos.streamsClient
-          .getManifest(videoId)
-          .timeout(const Duration(seconds: 30));
+      final manifest = await _getManifestWithAgeBypass(videoId);
 
       final muxed = [...manifest.muxed]
         ..sort((a, b) => b.videoQuality.height
@@ -239,9 +264,7 @@ class YoutubeExtractorService {
       String videoId) async {
     await _requireNetwork();
     try {
-      final manifest = await _yt.videos.streamsClient
-          .getManifest(videoId)
-          .timeout(const Duration(seconds: 30));
+      final manifest = await _getManifestWithAgeBypass(videoId);
 
       final muxed = [...manifest.muxed]
         ..sort((a, b) => b.videoQuality.height
