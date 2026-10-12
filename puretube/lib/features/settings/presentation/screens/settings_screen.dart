@@ -96,8 +96,8 @@ class SettingsScreen extends ConsumerWidget {
 
   static const _accent = Color(0xFF10B981);
   static const _accentLight = Color(0xFF34D399);
-  static const _bg = Color(0xFF0A0F0C);
-  static const _card = Color(0xFF0E1512);
+  static const _bg = Color(0xFF0C110E);
+  static const _card = Color(0xFF16211C);
 
   /// Real app version from pubspec (via package_info_plus), fetched once.
   static final Future<PackageInfo> _packageInfoFuture =
@@ -124,7 +124,7 @@ class SettingsScreen extends ConsumerWidget {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
-          backgroundColor: const Color(0xFF0E1512),
+          backgroundColor: const Color(0xFF16211C),
           title: const Text('Language',
               style: TextStyle(color: Colors.white)),
           content: Column(
@@ -175,7 +175,7 @@ class SettingsScreen extends ConsumerWidget {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
-          backgroundColor: const Color(0xFF0E1512),
+          backgroundColor: const Color(0xFF16211C),
           title: const Text('Double-tap to seek',
               style: TextStyle(color: Colors.white)),
           content: Column(
@@ -220,7 +220,7 @@ class SettingsScreen extends ConsumerWidget {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF0E1512),
+        backgroundColor: const Color(0xFF16211C),
         title: const Text('Clear watch history?',
             style: TextStyle(color: Colors.white)),
         content: const Text(
