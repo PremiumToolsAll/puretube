@@ -139,7 +139,10 @@ class YoutubeApiClient {
             "userAgent":
                 "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version,gzip(gfe)",
             'clientName': 'TVHTML5',
-            "clientVersion": "7.20251105.10.00",
+            // Bumped 2026-10: YouTube deprecates stale InnerTube client
+            // versions; the TV client carries racyCheckOk/contentCheckOk
+            // which is the age-gate (18+) bypass. Keep in sync with yt-dlp.
+            "clientVersion": "7.20260114.12.00",
             'hl': 'en',
             'timeZone': 'UTC',
             'gl': 'US',
