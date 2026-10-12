@@ -76,7 +76,7 @@ class _HistoryTab extends ConsumerWidget {
     return ListView.separated(
       itemCount: history.length,
       separatorBuilder: (_, __) =>
-          const Divider(height: 1, color: Color(0xFF0E1512)),
+          const Divider(height: 1, color: Color(0xFF16211C)),
       itemBuilder: (ctx, i) {
         final e = history[i];
         final resume = e.positionSecs > 10
@@ -104,7 +104,7 @@ class _HistoryTab extends ConsumerWidget {
                 height: 54,
                 fit: BoxFit.cover,
                 errorWidget: (_, __, ___) =>
-                    Container(color: const Color(0xFF0E1512)),
+                    Container(color: const Color(0xFF16211C)),
               ),
             ),
             title: Text(e.title,
@@ -147,7 +147,7 @@ class _BookmarksTab extends ConsumerWidget {
     return ListView.separated(
       itemCount: bookmarks.length,
       separatorBuilder: (_, __) =>
-          const Divider(height: 1, color: Color(0xFF0E1512)),
+          const Divider(height: 1, color: Color(0xFF16211C)),
       itemBuilder: (ctx, i) {
         final b = bookmarks[i];
         return ListTile(
@@ -159,7 +159,7 @@ class _BookmarksTab extends ConsumerWidget {
               height: 54,
               fit: BoxFit.cover,
               errorWidget: (_, __, ___) =>
-                  Container(color: const Color(0xFF0E1512)),
+                  Container(color: const Color(0xFF16211C)),
             ),
           ),
           title: Text(b.title,
