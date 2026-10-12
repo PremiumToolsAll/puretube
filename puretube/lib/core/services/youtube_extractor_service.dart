@@ -539,13 +539,17 @@ class YoutubeExtractorService {
           debugPrint('getRelatedVideos: search "$query" failed: $e');
         }
       }
+      // Near-duplicate removal: the same song/video re-uploaded by other
+      // channels (e.g. "Vaaste" appearing 8+ times). Keeps the
+      // most-viewed copy of each similar-title group.
+      final unique = _dedupeSimilarTitles(collected);
       // Category boost: rank results matching the user's frequent
       // categories first (earlier category = stronger boost).
-      if (boostCategories.isNotEmpty && collected.length > 1) {
-        collected.sort((a, b) => _categoryScore(b.title, boostCategories)
+      if (boostCategories.isNotEmpty && unique.length > 1) {
+        unique.sort((a, b) => _categoryScore(b.title, boostCategories)
             .compareTo(_categoryScore(a.title, boostCategories)));
       }
-      return collected;
+      return unique;
     } catch (e) {
       debugPrint('getRelatedVideos: fatal failure for $videoId: $e');
       return [];
@@ -580,6 +584,95 @@ class YoutubeExtractorService {
     'music', 'movie', 'film', 'trailer', 'teaser', 'promo',
     '2024', '2025', '2026', '2027',
   };
+
+  /// Noise tokens stripped when normalizing titles for near-duplicate
+  /// detection: quality badges, upload-type words and filler that make
+  /// "the same song re-uploaded by another channel" look different.
+  static const _dedupeNoiseWords = <String>{
+    'official', 'video', 'videos', 'full', 'hd', 'hq', 'sd',
+    '4k', '8k', '2k', 'uhd', 'fhd', 'qhd',
+    '1080p', '720p', '480p', '360p', '240p', '144p',
+    '1440p', '2160p', '4320p',
+    'lyrics', 'lyric', 'lyrical', 'audio', 'song', 'songs',
+    'music', 'musical', 'visualizer', 'mv', 'mtv',
+    'trailer', 'teaser', 'promo', 'clip', 'short', 'shorts',
+    'remix', 'remake', 'cover', 'version', 'original',
+    '2024', '2025', '2026', '2027',
+  };
+
+  /// Normalizes a title for near-duplicate detection: lowercase, strip
+  /// punctuation, drop noise tokens, collapse whitespace. Unicode-aware
+  /// so Bengali titles work too.
+  static String _normalizeTitle(String title) {
+    final tokens = <String>[];
+    for (final w in title
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), ' ')
+        .split(RegExp(r'\s+'))) {
+      if (w.length >= 2 &&
+          !_dedupeNoiseWords.contains(w) &&
+          !tokens.contains(w)) {
+        tokens.add(w);
+      }
+    }
+    return tokens.join(' ');
+  }
+
+  /// Dice coefficient (0..1) over the token multisets of two normalized
+  /// titles. 1.0 means identical token bags.
+  static double _titleSimilarity(String a, String b) {
+    if (a.isEmpty || b.isEmpty) return 0.0;
+    if (a == b) return 1.0;
+    final aTokens = a.split(' ');
+    final bTokens = b.split(' ');
+    final counts = <String, int>{};
+    for (final t in aTokens) {
+      counts[t] = (counts[t] ?? 0) + 1;
+    }
+    var intersection = 0;
+    final used = <String, int>{};
+    for (final t in bTokens) {
+      final have = counts[t] ?? 0;
+      final taken = used[t] ?? 0;
+      if (taken < have) {
+        intersection++;
+        used[t] = taken + 1;
+      }
+    }
+    return 2 * intersection / (aTokens.length + bTokens.length);
+  }
+
+  /// Drops near-duplicate suggestions (same song/video re-uploaded by
+  /// other channels): titles more than [threshold] similar keep only
+  /// the highest view-count copy. First-appearance order is preserved.
+  static List<VideoDetails> _dedupeSimilarTitles(
+    List<VideoDetails> videos, {
+    double threshold = 0.7,
+  }) {
+    if (videos.length < 2) return videos;
+    final normalized = [for (final v in videos) _normalizeTitle(v.title)];
+    final kept = <int>[];
+    for (var i = 0; i < videos.length; i++) {
+      var dupOf = -1;
+      for (final k in kept) {
+        if (_titleSimilarity(normalized[i], normalized[k]) > threshold) {
+          dupOf = k;
+          break;
+        }
+      }
+      if (dupOf == -1) {
+        kept.add(i);
+      } else {
+        // Same song/video: keep the copy with more views.
+        final curViews = videos[i].viewCount ?? 0;
+        final keptViews = videos[dupOf].viewCount ?? 0;
+        if (curViews > keptViews) {
+          kept[kept.indexOf(dupOf)] = i;
+        }
+      }
+    }
+    return [for (final i in kept) videos[i]];
+  }
 
   /// Extracts the most meaningful search keywords from a video title:
   /// drops punctuation, stop-words and tiny tokens, keeps order,
