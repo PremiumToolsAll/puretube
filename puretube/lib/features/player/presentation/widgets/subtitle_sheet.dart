@@ -19,7 +19,7 @@ class SubtitleSheet extends ConsumerWidget {
     final ui = ref.watch(playerControllerProvider);
     final notifier =
         ref.read(playerControllerProvider.notifier);
-    const accent = Color(0xFF6200EA);
+    const accent = Color(0xFF10B981);
 
     return SafeArea(
       child: Column(
