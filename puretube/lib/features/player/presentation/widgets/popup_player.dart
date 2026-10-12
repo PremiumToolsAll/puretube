@@ -8,6 +8,7 @@ import '../../../../core/di/providers.dart';
 import '../../../../core/widgets/press_scale.dart';
 import '../providers/player_controller.dart';
 import '../screens/player_screen.dart';
+import 'sleep_timer_sheet.dart';
 import 'subtitle_sheet.dart';
 
 /// Visibility flag for the floating in-app popup player.
@@ -476,7 +477,7 @@ class _PopupSettingsSheet extends ConsumerWidget {
               ),
               onTap: () {
                 Navigator.pop(context);
-                _sleepOptions(context, ref);
+                _sleepOptions(context);
               },
             ),
             const SizedBox(height: 12),
@@ -486,39 +487,7 @@ class _PopupSettingsSheet extends ConsumerWidget {
     );
   }
 
-  void _sleepOptions(BuildContext context, WidgetRef ref) {
-    final notifier = ref.read(playerControllerProvider.notifier);
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF141414),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final m in [5, 10, 15, 30, 60])
-              ListTile(
-                dense: true,
-                title: Text('$m minutes',
-                    style:
-                        const TextStyle(color: Colors.white)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  notifier.startSleepTimer(
-                      Duration(minutes: m));
-                },
-              ),
-            ListTile(
-              dense: true,
-              title: const Text('Turn off',
-                  style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(ctx);
-                notifier.cancelSleepTimer();
-              },
-            ),
-          ],
-        ),
-      ),
-    );
+  void _sleepOptions(BuildContext context) {
+    SleepTimerSheet.show(context);
   }
 }
