@@ -496,6 +496,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // ---------------- horizontal drag: scrub ----------------
 
   void _onScrubStart(DragStartDetails d) {
+    // Ignore scrub gestures that start on the bottom controls (seekbar
+    // area). The seekbar has its own Listener-based drag handling; letting
+    // the video-area scrub also fire causes a conflict (double-seek,
+    // wrong position). Bottom controls are ~120px tall.
+    final screenHeight = MediaQuery.of(context).size.height;
+    if (d.globalPosition.dy > screenHeight - 140) return;
     _scrubStartPosition =
         ref.read(mediaKitPlayerProvider).state.position;
     _scrubPreview = _scrubStartPosition;
