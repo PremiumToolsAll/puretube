@@ -10,7 +10,20 @@ import 'package:media_kit/media_kit.dart';
 class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
   PureTubeAudioHandler() {
     _playingSub = _player.stream.playing.listen((_) => _broadcastState());
-    _positionSub = _player.stream.position.listen((_) => _broadcastState());
+    _positionSub = _player.stream.position.listen((_) {
+      // Position ticks arrive several times per second; the media
+      // notification only needs ~1 update/sec. State changes
+      // (play/pause, buffering, duration, completion) always broadcast
+      // immediately. Flooding the platform channel with playbackState
+      // updates can destabilize or suppress the notification.
+      final now = DateTime.now();
+      if (_lastPositionBroadcast == null ||
+          now.difference(_lastPositionBroadcast!) >=
+              const Duration(milliseconds: 900)) {
+        _lastPositionBroadcast = now;
+        _broadcastState();
+      }
+    });
     _bufferingSub =
         _player.stream.buffering.listen((_) => _broadcastState());
     _durationSub = _player.stream.duration.listen((duration) {
@@ -49,6 +62,9 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
   StreamSubscription<Duration>? _durationSub;
   StreamSubscription<bool>? _completedSub;
 
+  /// Last time a position-driven _broadcastState went out (throttle).
+  DateTime? _lastPositionBroadcast;
+
   Future<void> loadMedia({
     required MediaItem mediaItem,
     required String streamUrl,
@@ -80,13 +96,14 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
     // is a no-op on web (setProperty is defined on NativePlayer).
     // A brief pause after setProperty ensures mpv processes the property
     // before loadfile starts — without it the audio track is silently
-    // dropped on some devices.
+    // dropped on some devices. 500ms gives slow devices enough margin;
+    // this only runs for DASH (audioUrl != null) switches.
     final platform = _player.platform;
     if (platform is NativePlayer) {
       try {
         await platform.setProperty('audio-file', audioUrl ?? 'no');
         if (audioUrl != null) {
-          await Future.delayed(const Duration(milliseconds: 300));
+          await Future.delayed(const Duration(milliseconds: 500));
         }
       } catch (_) {
         // Property set failed; continue — video may still play.
@@ -139,6 +156,17 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
 
   void _broadcastState() {
     final playing = _player.state.playing;
+    // audio_service misbehaves when updatePosition exceeds the media
+    // item's duration (can suppress or break the notification), which
+    // happens transiently when the extractor's duration estimate differs
+    // from mpv's real duration. Clamp defensively.
+    var updatePosition = _player.state.position;
+    final itemDuration = mediaItem.value?.duration;
+    if (itemDuration != null &&
+        itemDuration > Duration.zero &&
+        updatePosition > itemDuration) {
+      updatePosition = itemDuration;
+    }
     playbackState.add(
       playbackState.value.copyWith(
         controls: [
@@ -155,7 +183,7 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
         androidCompactActionIndices: const [1],
         processingState: _mapProcessingState(),
         playing: playing,
-        updatePosition: _player.state.position,
+        updatePosition: updatePosition,
         bufferedPosition: _player.state.buffer,
         speed: _player.state.rate,
         queueIndex: 0,
