@@ -4,6 +4,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/di/providers.dart';
 import '../../../../core/error/exceptions.dart';
@@ -12,6 +13,7 @@ import '../../../../core/services/sponsorblock_service.dart';
 import '../../../../core/services/youtube_extractor_service.dart';
 import '../../data/services/audio_player_handler.dart';
 import '../../domain/entities/playback_models.dart';
+import '../../../library/presentation/providers/library_providers.dart';
 
 enum PlayerStatus { idle, loading, ready, error }
 
@@ -144,6 +146,8 @@ class PlayerController extends Notifier<PlayerUiState>
         await loadVideo(related.first.id);
       }
     };
+    // Sync saved sponsor-skip preference (default ON).
+    unawaited(_loadSavedSkipSponsors());
     _handler.onSkipToPrevious = () async {
       await seekTo(Duration.zero);
     };
@@ -218,6 +222,16 @@ class PlayerController extends Notifier<PlayerUiState>
         sponsorSegments: segments,
         pipSupported: await _pip.isPipSupported,
       );
+      // Resume from saved position if the user watched this before.
+      // Skip if position is 0 or within 10s of the end (likely finished).
+      final savedSecs =
+          ref.read(historyRepositoryProvider).getPosition(videoId);
+      final totalSecs = video.duration?.inSeconds ?? 0;
+      if (savedSecs > 5 &&
+          (totalSecs <= 0 || savedSecs < totalSecs - 10)) {
+        await _handler.player
+            .seek(Duration(seconds: savedSecs));
+      }
       // Load captions in the background; UI updates when ready.
       unawaited(loadSubtitles());
       // Same for quality options; current quality starts at the
@@ -453,6 +467,17 @@ class PlayerController extends Notifier<PlayerUiState>
 
   void toggleSkipSponsors(bool value) {
     state = state.copyWith(skipSponsors: value);
+  }
+
+  /// Loads the saved sponsor-skip preference (default ON).
+  Future<void> _loadSavedSkipSponsors() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final v = prefs.getBool('skip_sponsors');
+      if (v != null && v != state.skipSponsors) {
+        state = state.copyWith(skipSponsors: v);
+      }
+    } catch (_) {}
   }
 
   // ---------------- Subtitles / CC ----------------
