@@ -916,13 +916,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-                title: Text('Playback speed',
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold))),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const ListTile(
+                    title: Text('Playback speed',
+                        style:
+                            TextStyle(fontWeight: FontWeight.bold))),
             for (final s in [
               0.25,
               0.5,
@@ -947,6 +952,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 },
               ),
           ],
+            ),
+          ),
         ),
       ),
     );
