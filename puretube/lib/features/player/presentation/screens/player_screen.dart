@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -1391,233 +1392,296 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   Widget _buildAudioMode(
       PlayerUiState uiState, Player player, PlayerController notifier) {
     final video = uiState.video!;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Stack(
       children: [
-        // Header: back | PLAYING FROM / Queue | more
-        Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          child: Row(
-            children: [
-              PressIconButton(
-                tooltip: 'Back',
-                icon: const Icon(Icons.keyboard_arrow_down,
-                    color: Colors.white, size: 30),
-                // Audio keeps playing in the background.
-                onPressed: () => Navigator.pop(context),
-              ),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Text('PLAYING FROM',
-                        style: TextStyle(
-                            color: Colors.grey,
-                            fontSize: 10,
-                            letterSpacing: 1.6)),
-                    SizedBox(height: 2),
-                    Text('Queue',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15)),
-                  ],
-                ),
-              ),
-              PressIconButton(
-                tooltip: 'More',
-                icon: const Icon(Icons.more_vert,
-                    color: Colors.white),
-                onPressed: _showMoreSheet,
-              ),
-              PressIconButton(
-                tooltip: 'Video mode',
-                icon: const Icon(Icons.videocam,
-                    color: Colors.white),
-                onPressed: () => ref
-                    .read(playerControllerProvider.notifier)
-                    .toggleAudioOnly(),
-              ),
-            ],
+        // Blurred album-art backdrop — Spotify premium look.
+        Positioned.fill(
+          child: CachedNetworkImage(
+            imageUrl: video.thumbnailUrl,
+            fit: BoxFit.cover,
+            errorWidget: (_, __, ___) =>
+                Container(color: const Color(0xFF0A0A0F)),
           ),
         ),
-        // Album art
-        Padding(
-          padding: const EdgeInsets.symmetric(
-              horizontal: 36, vertical: 10),
-          child: AspectRatio(
-            aspectRatio: 1,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: CachedNetworkImage(
-                imageUrl: video.thumbnailUrl,
-                fit: BoxFit.cover,
-                errorWidget: (_, __, ___) => Container(
-                  color: const Color(0xFF1A1A1A),
-                  child: const Icon(Icons.music_note,
-                      size: 80, color: Colors.white24),
+        Positioned.fill(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withOpacity(0.60),
+                    Colors.black.withOpacity(0.88),
+                  ],
                 ),
               ),
             ),
           ),
         ),
-        // Title + download + like
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 10, 8, 0),
-          child: Row(
-            children: [
-              Expanded(
+        // Foreground content.
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header: back | PLAYING FROM / Queue | video mode | more
+            Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Row(
+                children: [
+                  PressIconButton(
+                    tooltip: 'Back',
+                    icon: const Icon(Icons.keyboard_arrow_down,
+                        color: Colors.white, size: 30),
+                    // Audio keeps playing in the background.
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  const Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('PLAYING FROM',
+                            style: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 10,
+                                letterSpacing: 1.6)),
+                        SizedBox(height: 2),
+                        Text('Queue',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15)),
+                      ],
+                    ),
+                  ),
+                  PressIconButton(
+                    tooltip: 'Video mode',
+                    icon: const Icon(Icons.videocam,
+                        color: Colors.white),
+                    onPressed: () => ref
+                        .read(playerControllerProvider.notifier)
+                        .toggleAudioOnly(),
+                  ),
+                  PressIconButton(
+                    tooltip: 'More',
+                    icon: const Icon(Icons.more_vert,
+                        color: Colors.white),
+                    onPressed: _showMoreSheet,
+                  ),
+                ],
+              ),
+            ),
+            // Album art with premium drop shadow.
+            Padding(
+              padding:
+                  const EdgeInsets.fromLTRB(44, 14, 44, 0),
+              child: AspectRatio(
+                aspectRatio: 1,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.55),
+                        blurRadius: 36,
+                        spreadRadius: 2,
+                        offset: const Offset(0, 14),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: CachedNetworkImage(
+                      imageUrl: video.thumbnailUrl,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, __, ___) => Container(
+                        color: const Color(0xFF1A1A1A),
+                        child: const Icon(Icons.music_note,
+                            size: 80, color: Colors.white24),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Title (20px bold, centered) + artist (14px grey).
+            Padding(
+              padding:
+                  const EdgeInsets.fromLTRB(36, 16, 36, 0),
+              child: Center(
                 child: _MarqueeText(
                   text: video.title,
                   style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
-                      fontSize: 18),
+                      fontSize: 20),
                 ),
               ),
-              PressIconButton(
-                tooltip: 'Download',
-                icon: const Icon(Icons.download_outlined,
-                    color: Colors.white70),
-                onPressed: () => _showDownloadSheet(video),
+            ),
+            const SizedBox(height: 4),
+            Text(video.author,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: Colors.grey, fontSize: 14)),
+            // Small action icons: download + like (centered).
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  PressIconButton(
+                    tooltip: 'Download',
+                    icon: const Icon(Icons.download_outlined,
+                        color: Colors.white70, size: 26),
+                    onPressed: () => _showDownloadSheet(video),
+                  ),
+                  const SizedBox(width: 28),
+                  PressIconButton(
+                    tooltip: _liked ? 'Liked' : 'Like',
+                    icon: Icon(
+                        _liked
+                            ? Icons.favorite
+                            : Icons.favorite_border,
+                        color: _liked ? _gold : Colors.white70,
+                        size: 26),
+                    onPressed: () {
+                      setState(() => _liked = !_liked);
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(SnackBar(
+                        content: Text(_liked
+                            ? 'Added to Liked'
+                            : 'Removed from Liked'),
+                        duration: const Duration(seconds: 1),
+                      ));
+                    },
+                  ),
+                ],
               ),
-              PressIconButton(
-                tooltip: _liked ? 'Liked' : 'Like',
-                icon: Icon(
-                    _liked
-                        ? Icons.favorite
-                        : Icons.favorite_border,
-                    color:
-                        _liked ? _gold : Colors.white70),
-                onPressed: () {
-                  setState(() => _liked = !_liked);
-                  ScaffoldMessenger.of(context)
-                      .showSnackBar(SnackBar(
-                    content: Text(_liked
-                        ? 'Added to Liked'
-                        : 'Removed from Liked'),
-                    duration: const Duration(seconds: 1),
-                  ));
-                },
+            ),
+            // Seekbar + times.
+            Padding(
+              padding:
+                  const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              child: _AudioSeekBar(player: player),
+            ),
+            // Controls: shuffle | prev | WHITE 72 play | next | repeat
+            Padding(
+              padding:
+                  const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              child: Row(
+                mainAxisAlignment:
+                    MainAxisAlignment.spaceEvenly,
+                children: [
+                  PressIconButton(
+                    tooltip: 'Shuffle',
+                    icon: Icon(Icons.shuffle,
+                        color: _shuffle
+                            ? _gold
+                            : Colors.white70),
+                    onPressed: () {
+                      setState(() => _shuffle = !_shuffle);
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(SnackBar(
+                        content: Text(_shuffle
+                            ? 'Shuffle on'
+                            : 'Shuffle off'),
+                        duration: const Duration(seconds: 1),
+                      ));
+                    },
+                  ),
+                  PressIconButton(
+                    tooltip: 'Previous',
+                    iconSize: 44,
+                    icon: const Icon(Icons.skip_previous,
+                        color: Colors.white),
+                    onPressed: _playPrevious,
+                  ),
+                  StreamBuilder<bool>(
+                    stream: player.stream.playing,
+                    builder: (context, snap) {
+                      final playing = snap.data ?? false;
+                      return PressScale(
+                        onTap: notifier.togglePlayPause,
+                        child: Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.white
+                                    .withOpacity(0.28),
+                                blurRadius: 28,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                          child: AnimatedSwitcher(
+                            duration: const Duration(
+                                milliseconds: 200),
+                            child: Icon(
+                              playing
+                                  ? Icons.pause
+                                  : Icons.play_arrow,
+                              key: ValueKey<bool>(playing),
+                              color: Colors.black,
+                              size: 40,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  PressIconButton(
+                    tooltip: 'Next',
+                    iconSize: 44,
+                    icon: const Icon(Icons.skip_next,
+                        color: Colors.white),
+                    onPressed: _playNext,
+                  ),
+                  PressIconButton(
+                    tooltip: 'Repeat',
+                    icon: Icon(
+                        _repeatMode == 2
+                            ? Icons.repeat_one
+                            : Icons.repeat,
+                        color: _repeatMode == 0
+                            ? Colors.white70
+                            : _gold),
+                    onPressed: _cycleRepeatMode,
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-        // Artist
-        Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 24),
-          child: Text(video.author,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  color: Colors.grey, fontSize: 14)),
-        ),
-        // Seekbar + times
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-          child: _AudioSeekBar(player: player),
-        ),
-        // Main controls: shuffle | prev | BIG gold play | next | repeat
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-          child: Row(
-            mainAxisAlignment:
-                MainAxisAlignment.spaceEvenly,
-            children: [
-              PressIconButton(
-                tooltip: 'Shuffle',
-                icon: Icon(Icons.shuffle,
-                    color: _shuffle
-                        ? _gold
-                        : Colors.white70),
-                onPressed: () {
-                  setState(() => _shuffle = !_shuffle);
-                  ScaffoldMessenger.of(context)
-                      .showSnackBar(SnackBar(
-                    content: Text(_shuffle
-                        ? 'Shuffle on'
-                        : 'Shuffle off'),
-                    duration: const Duration(seconds: 1),
-                  ));
-                },
+            ),
+            const Spacer(),
+            // Bottom tabs: QUEUE | LYRICS | TIMER
+            Padding(
+              padding: const EdgeInsets.only(bottom: 18),
+              child: Row(
+                mainAxisAlignment:
+                    MainAxisAlignment.spaceEvenly,
+                children: [
+                  _audioTab(
+                      Icons.queue_music, 'QUEUE', _showQueueSheet),
+                  _audioTab(Icons.lyrics_outlined, 'LYRICS',
+                      () {
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(const SnackBar(
+                      content:
+                          Text('Lyrics not available'),
+                      duration: Duration(seconds: 1),
+                    ));
+                  }),
+                  _audioTab(Icons.timer_outlined, 'TIMER',
+                      _showSleepSheet),
+                ],
               ),
-              PressIconButton(
-                tooltip: 'Previous',
-                iconSize: 42,
-                icon: const Icon(Icons.skip_previous,
-                    color: Colors.white),
-                onPressed: _playPrevious,
-              ),
-              StreamBuilder<bool>(
-                stream: player.stream.playing,
-                builder: (context, snap) {
-                  final playing = snap.data ?? false;
-                  return PressScale(
-                    onTap: notifier.togglePlayPause,
-                    child: Container(
-                      width: 76,
-                      height: 76,
-                      decoration: const BoxDecoration(
-                        color: _gold,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        playing
-                            ? Icons.pause
-                            : Icons.play_arrow,
-                        color: Colors.black,
-                        size: 42,
-                      ),
-                    ),
-                  );
-                },
-              ),
-              PressIconButton(
-                tooltip: 'Next',
-                iconSize: 42,
-                icon: const Icon(Icons.skip_next,
-                    color: Colors.white),
-                onPressed: _playNext,
-              ),
-              PressIconButton(
-                tooltip: 'Repeat',
-                icon: Icon(
-                    _repeatMode == 2
-                        ? Icons.repeat_one
-                        : Icons.repeat,
-                    color: _repeatMode == 0
-                        ? Colors.white70
-                        : _gold),
-                onPressed: _cycleRepeatMode,
-              ),
-            ],
-          ),
-        ),
-        const Spacer(),
-        // Bottom tabs: QUEUE | LYRICS | TIMER
-        Padding(
-          padding: const EdgeInsets.only(bottom: 18),
-          child: Row(
-            mainAxisAlignment:
-                MainAxisAlignment.spaceEvenly,
-            children: [
-              _audioTab(
-                  Icons.queue_music, 'QUEUE', _showQueueSheet),
-              _audioTab(Icons.lyrics_outlined, 'LYRICS',
-                  () {
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(const SnackBar(
-                  content:
-                      Text('Lyrics not available'),
-                  duration: Duration(seconds: 1),
-                ));
-              }),
-              _audioTab(Icons.timer_outlined, 'TIMER',
-                  _showSleepSheet),
-            ],
-          ),
+            ),
+          ],
         ),
       ],
     );
