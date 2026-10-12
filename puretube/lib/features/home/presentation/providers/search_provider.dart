@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/di/providers.dart';
 import '../../../../core/error/exceptions.dart';
+import '../../../../core/services/watch_category_tracker.dart';
 import '../../../../core/services/youtube_extractor_service.dart';
 import '../../../library/domain/entities/library_models.dart';
 import '../../../library/presentation/providers/library_providers.dart';
@@ -184,13 +185,23 @@ class SearchController extends Notifier<SearchState> {
 
       // Smart suggestions: pull keywords from recent watch history
       // and fetch a few related videos to personalize the feed.
+      // Also searches the user's top watch categories (waz, gazal,
+      // music, …) so the home feed follows what they actually watch.
       try {
         final history =
             ref.read(historyRepositoryProvider).getAll();
         if (history.isNotEmpty) {
           final keywords = _keywordsFromHistory(history, 3);
+          final queries = <String>[...keywords];
+          for (final cat in await WatchCategoryTracker.top(2)) {
+            final kws =
+                WatchCategoryTracker.categoryKeywords[cat];
+            if (kws != null && kws.isNotEmpty) {
+              queries.add(kws.first);
+            }
+          }
           final personalized = <VideoDetails>[];
-          for (final kw in keywords) {
+          for (final kw in queries.take(5)) {
             try {
               final vids =
                   await extractor.searchVideos(kw, limit: 6);
