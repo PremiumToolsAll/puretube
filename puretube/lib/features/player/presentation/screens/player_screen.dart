@@ -514,16 +514,21 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _videoSub?.close();
     _statusSub?.close();
     _errorMsgSub?.close();
-    // Persist resume position for history.
+    // Persist resume position for history (creates entry if needed).
     final uiState = ref.read(playerControllerProvider);
     if (uiState.videoId != null) {
-      ref.read(historyRepositoryProvider).updatePosition(
-            uiState.videoId!,
-            ref
+      final v = uiState.video;
+      ref.read(historyRepositoryProvider).saveResumePosition(
+            videoId: uiState.videoId!,
+            positionSecs: ref
                 .read(mediaKitPlayerProvider)
                 .state
                 .position
                 .inSeconds,
+            title: v?.title ?? '',
+            author: v?.author ?? '',
+            thumbnailUrl: v?.thumbnailUrl ?? '',
+            durationSecs: v?.duration?.inSeconds,
           );
     }
     _hideTimer?.cancel();
