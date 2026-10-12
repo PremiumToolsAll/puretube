@@ -459,6 +459,13 @@ class PlayerController extends Notifier<PlayerUiState>
     unawaited(_saveAudioOnlyPref(goingAudioOnly));
   }
 
+  /// Sets the audio/video mode directly (no-op when already in [value]).
+  /// Used by the header's segmented audio/video toggle.
+  Future<void> setAudioOnly(bool value) async {
+    if (state.audioOnly == value) return;
+    await toggleAudioOnly();
+  }
+
   Future<void> enterPip() async {
     if (state.pipSupported && state.status == PlayerStatus.ready) {
       await _pip.enterPip();
