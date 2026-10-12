@@ -436,6 +436,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _didInitialSeek = false;
   ProviderSubscription<PlayerStatus>? _statusSub;
   ProviderSubscription<VideoDetails?>? _videoSub;
+  ProviderSubscription<String?>? _errorMsgSub;
 
   @override
   void initState() {
@@ -487,6 +488,24 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         }
       },
     );
+    // Surface non-fatal errors (e.g. quality-switch rollback) as a
+    // snackbar while playback continues. Fatal errors (status == error)
+    // are rendered by the full error screen instead.
+    _errorMsgSub = ref.listenManual(
+      playerControllerProvider.select((s) => s.errorMessage),
+      (prev, next) {
+        if (next == null || next == prev || !mounted) return;
+        final st = ref.read(playerControllerProvider);
+        if (st.status != PlayerStatus.ready) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        ref.read(playerControllerProvider.notifier).clearError();
+      },
+    );
     _restartHideTimer();
   }
 
@@ -494,6 +513,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void dispose() {
     _videoSub?.close();
     _statusSub?.close();
+    _errorMsgSub?.close();
     // Persist resume position for history.
     final uiState = ref.read(playerControllerProvider);
     if (uiState.videoId != null) {
@@ -1594,12 +1614,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                           setSheetState(() => selAudio = o),
                     ),
                   if (selVideo != null && selVideo!.videoOnly)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
                       child: Text(
-                        'Video-only has no audio track (merging not supported yet).',
+                        selAudio == null
+                            ? 'Video-only has no audio track.'
+                            : 'Audio track downloads too — attached automatically at playback.',
                         style: TextStyle(
-                            color: Colors.orange,
+                            color: selAudio == null
+                                ? Colors.orange
+                                : Colors.grey,
                             fontSize: 12),
                       ),
                     ),
