@@ -59,7 +59,7 @@ class SearchFilterSheet extends StatefulWidget {
 
 class _SearchFilterSheetState
     extends State<SearchFilterSheet> {
-  static const _accent = Color(0xFF6200EA);
+  static const _accent = Color(0xFF10B981);
   late SearchFilters _f;
 
   @override
@@ -168,7 +168,7 @@ class _SearchFilterSheetState
                     onPick(on ? null : v),
                 selectedColor: _accent,
                 backgroundColor:
-                    const Color(0xFF1A1A1A),
+                    const Color(0xFF0E1512),
                 labelStyle: const TextStyle(
                     color: Colors.white,
                     fontSize: 13),
