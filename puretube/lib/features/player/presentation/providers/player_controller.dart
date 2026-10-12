@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../core/database/hive_setup.dart';
 import '../../../../core/di/providers.dart';
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/services/pip_service.dart';
@@ -127,6 +129,15 @@ class PlayerController extends Notifier<PlayerUiState>
   bool _skipInProgress = false;
   int _recoveryAttempts = 0;
 
+  /// Bumps on every setQuality call; lets in-flight verifications detect
+  /// when the user has moved on to another quality/video.
+  int _qualitySwitchToken = 0;
+
+  /// Last persisted audio-only preference (Hive). Applied on the next
+  /// loadVideo so a fresh app start restores the user's last mode.
+  bool _prefAudioOnly = false;
+  static const _kAudioOnlyKey = 'audio_only';
+
   @override
   PlayerUiState build() {
     final binding = WidgetsBinding.instance;
@@ -149,6 +160,8 @@ class PlayerController extends Notifier<PlayerUiState>
     };
     // Sync saved sponsor-skip preference (default ON).
     unawaited(_loadSavedSkipSponsors());
+    // Restore the persisted audio-only preference (default OFF).
+    unawaited(_loadPlayerPrefs());
     _handler.onSkipToPrevious = () async {
       await seekTo(Duration.zero);
     };
@@ -168,13 +181,25 @@ class PlayerController extends Notifier<PlayerUiState>
   void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
     switch (lifecycleState) {
       case AppLifecycleState.paused:
-        // Home button / app switcher: let audio continue in background.
+        // Home button / app switcher: let audio continue in background,
+        // but persist the resume position first.
         // PiP only when user explicitly taps the PiP button — auto-PiP
         // was interrupting background playback.
+        unawaited(_persistResumePosition());
         break;
       case AppLifecycleState.detached:
-        // PiP window dismissed with X, or process teardown: stop playback.
-        unawaited(stop());
+        // DANGER: On some devices (notably Xiaomi/MIUI), `detached`
+        // fires when the app merely goes to background via the Home
+        // button — stopping here would kill background playback.
+        // Only persist+stop when PiP was dismissed via its X button
+        // (isInPip was true). Swipe-away from recents is handled by
+        // onTaskRemoved in the audio handler, and real process death
+        // stops the native player on its own.
+        if (state.isInPip) {
+          unawaited(_persistThenStop());
+        } else {
+          unawaited(_persistResumePosition());
+        }
         break;
       default:
         break;
@@ -196,7 +221,8 @@ class PlayerController extends Notifier<PlayerUiState>
       videoId: videoId,
       speed: previousSpeed,
       skipSponsors: previousSkip,
-      audioOnly: previousAudioOnly,
+      // Restore the persisted audio-only mode on fresh app starts.
+      audioOnly: previousAudioOnly || _prefAudioOnly,
     );
 
     try {
@@ -322,6 +348,9 @@ class PlayerController extends Notifier<PlayerUiState>
     }
     final goingAudioOnly = !state.audioOnly;
     state = state.copyWith(audioOnly: goingAudioOnly);
+    // Persist so a fresh app start restores the last mode.
+    _prefAudioOnly = goingAudioOnly;
+    unawaited(_saveAudioOnlyPref(goingAudioOnly));
   }
 
   Future<void> enterPip() async {
@@ -419,8 +448,14 @@ class PlayerController extends Notifier<PlayerUiState>
     return null;
   }
 
-  /// Switches to a different muxed quality, preserving the current
-  /// position and play state (via handler.switchStream).
+  /// Switches to a different quality, preserving the current position
+  /// and play state (via handler.switchStream).
+  ///
+  /// DASH (video-only) streams are fragile: YouTube may reject them
+  /// (PO token / throttling / "Failed to open"). The new stream is
+  /// verified after switching; on failure the PREVIOUS quality is
+  /// restored and a clear error is shown — the app never silently
+  /// drops to an arbitrary lower quality.
   Future<void> setQuality(MuxedQuality quality) async {
     final videoId = state.videoId;
     if (state.status != PlayerStatus.ready || videoId == null) {
@@ -428,6 +463,8 @@ class PlayerController extends Notifier<PlayerUiState>
     }
     if (state.audioOnly) return; // quality applies to video mode only
     if (state.currentQuality?.height == quality.height) return;
+    final previous = state.currentQuality;
+    final token = ++_qualitySwitchToken;
     var target = quality;
     // DASH stream URLs are signed with an expiry timestamp. The quality
     // list is fetched once when the video loads, so by the time the user
@@ -436,6 +473,10 @@ class PlayerController extends Notifier<PlayerUiState>
     if (quality.isDash) {
       try {
         final fresh = await _extractor.getQualityOptions(videoId);
+        // Bail if the user moved on while the manifest was loading.
+        if (token != _qualitySwitchToken || state.videoId != videoId) {
+          return;
+        }
         final match =
             fresh.where((q) => q.height == quality.height && q.isDash);
         if (match.isNotEmpty) {
@@ -450,43 +491,55 @@ class PlayerController extends Notifier<PlayerUiState>
     try {
       await _handler.switchStream(target.url,
           audioUrl: target.audioUrl);
-      // DASH (video-only) streams are fragile: YouTube may reject them
-      // (PO token / throttling / "Failed to open"). Verify the stream
-      // actually loads; if not, fall back to the best muxed quality so
-      // the user isn't left with a dead player.
-      if (target.isDash) {
-        final dashOk = await _verifyDashLoad(target);
-        if (!dashOk) {
-          await _fallbackToBestMuxed(
-              'High quality unavailable — using 720p');
-          return;
-        }
+    } catch (_) {
+      // Switch itself threw (e.g. invalid URL): roll back.
+      if (token != _qualitySwitchToken || state.videoId != videoId) {
+        return;
       }
+      await _rollbackQuality(previous: previous, failed: target);
+      return;
+    }
+    // Verify DASH actually loads; muxed streams are trusted.
+    if (target.isDash) {
+      final dashOk = await _verifyDashLoad(target, token);
+      if (token != _qualitySwitchToken || state.videoId != videoId) {
+        return;
+      }
+      if (!dashOk) {
+        await _rollbackQuality(previous: previous, failed: target);
+        return;
+      }
+    }
+    if (token != _qualitySwitchToken || state.videoId != videoId) {
+      return;
+    }
+    // Success: adopt the new quality.
+    final s = state.streams;
+    state = state.copyWith(
+      currentQuality: target,
       // Keep the cached streams record in sync so expiry recovery
       // and audio<->video toggling reuse the chosen quality.
-      final s = state.streams;
-      state = state.copyWith(
-        currentQuality: target,
-        streams: s == null
-            ? null
-            : PlaybackStreams(
-                videoId: s.videoId,
-                muxedUrl: target.url,
-                muxedHeight: target.height,
-                audioOnlyUrl: s.audioOnlyUrl,
-                audioBitrate: s.audioBitrate,
-                fetchedAt: s.fetchedAt,
-              ),
-      );
-    } on PureTubeException catch (e) {
-      state = state.copyWith(errorMessage: e.message);
-    }
+      streams: s == null
+          ? null
+          : PlaybackStreams(
+              videoId: s.videoId,
+              muxedUrl: target.url,
+              muxedHeight: target.height,
+              audioOnlyUrl: s.audioOnlyUrl,
+              audioBitrate: s.audioBitrate,
+              fetchedAt: s.fetchedAt,
+            ),
+    );
   }
 
   /// Waits for a DASH stream to actually start producing a duration.
   /// Returns true if the stream loaded, false on timeout/error.
-  Future<bool> _verifyDashLoad(MuxedQuality target) async {
-    const timeout = Duration(seconds: 10);
+  ///
+  /// [token] must match [_qualitySwitchToken]; a mismatch means the user
+  /// picked another quality (or video) meanwhile and the caller must
+  /// treat the result as stale.
+  Future<bool> _verifyDashLoad(MuxedQuality target, int token) async {
+    const timeout = Duration(seconds: 8);
     const pollInterval = Duration(milliseconds: 500);
     final deadline = DateTime.now().add(timeout);
     var hadError = false;
@@ -494,11 +547,10 @@ class PlayerController extends Notifier<PlayerUiState>
         _handler.player.stream.error.listen((_) => hadError = true);
     try {
       while (DateTime.now().isBefore(deadline)) {
-        // Bail early if the user switched away or an error fired.
-        if (state.currentQuality?.height != target.height ||
-            state.status != PlayerStatus.ready) {
-          return false;
-        }
+        // Bail early if superseded or an error fired. (Do NOT compare
+        // state.currentQuality here: it still holds the OLD quality
+        // until verification succeeds.)
+        if (token != _qualitySwitchToken) return false;
         if (hadError) return false;
         final duration = _handler.player.state.duration;
         if (duration > Duration.zero) return true;
@@ -510,36 +562,66 @@ class PlayerController extends Notifier<PlayerUiState>
     }
   }
 
-  /// Switches to the best available muxed (non-DASH) quality.
-  /// Used when a DASH stream fails to load.
-  Future<void> _fallbackToBestMuxed(String message) async {
-    final options = state.availableQualities;
-    final muxed = options.where((q) => !q.isDash).toList()
-      ..sort((a, b) => b.height.compareTo(a.height));
-    if (muxed.isEmpty) {
-      state = state.copyWith(errorMessage: message);
+  /// Restores the previous quality after a failed switch and surfaces a
+  /// clear error (e.g. "1080p failed to load, back to 720p"). The app
+  /// never silently drops to an arbitrary lower quality.
+  Future<void> _rollbackQuality({
+    required MuxedQuality? previous,
+    required MuxedQuality failed,
+  }) async {
+    final failedName = failed.resolutionLabel;
+    if (previous == null) {
+      state = state.copyWith(
+          errorMessage: '$failedName failed to load');
       return;
     }
-    final best = muxed.first;
+    final prevName = previous.resolutionLabel;
     try {
-      await _handler.switchStream(best.url);
+      // Refresh the previous stream URL too — it may have expired while
+      // the failed attempt was in flight.
+      var prevUrl = previous.url;
+      String? prevAudio = previous.audioUrl;
+      final vid = state.videoId;
+      if (previous.isDash && vid != null) {
+        try {
+          final fresh = await _extractor.getQualityOptions(vid);
+          final match = fresh
+              .where((q) => q.height == previous.height && q.isDash);
+          if (match.isNotEmpty) {
+            prevUrl = match.first.url;
+            prevAudio = match.first.audioUrl;
+          }
+        } catch (_) {}
+      }
+      await _handler.switchStream(prevUrl, audioUrl: prevAudio);
+      final restored = MuxedQuality(
+        label: previous.label,
+        height: previous.height,
+        url: prevUrl,
+        audioUrl: prevAudio,
+        bitrateKbps: previous.bitrateKbps,
+        fps: previous.fps,
+        codec: previous.codec,
+      );
       final s = state.streams;
       state = state.copyWith(
-        currentQuality: best,
-        errorMessage: message,
+        currentQuality: restored,
+        errorMessage: '$failedName failed to load, back to $prevName',
         streams: s == null
             ? null
             : PlaybackStreams(
                 videoId: s.videoId,
-                muxedUrl: best.url,
-                muxedHeight: best.height,
+                muxedUrl: prevUrl,
+                muxedHeight: previous.height,
                 audioOnlyUrl: s.audioOnlyUrl,
                 audioBitrate: s.audioBitrate,
                 fetchedAt: s.fetchedAt,
               ),
       );
-    } on PureTubeException catch (e) {
-      state = state.copyWith(errorMessage: e.message);
+    } catch (e) {
+      state = state.copyWith(
+          errorMessage:
+              '$failedName failed to load, could not restore $prevName: $e');
     }
   }
 
@@ -594,6 +676,52 @@ class PlayerController extends Notifier<PlayerUiState>
         state = state.copyWith(skipSponsors: v);
       }
     } catch (_) {}
+  }
+
+  /// Loads the persisted audio-only preference from Hive (default OFF).
+  /// Applied on the next loadVideo so a fresh app start restores the
+  /// user's last mode.
+  Future<void> _loadPlayerPrefs() async {
+    try {
+      // Dynamic box: stores plain values (bool), unlike the Map boxes.
+      _prefAudioOnly =
+          Hive.box(HiveBoxes.playerPrefs).get(_kAudioOnlyKey) as bool? ??
+              false;
+    } catch (_) {
+      _prefAudioOnly = false;
+    }
+  }
+
+  Future<void> _saveAudioOnlyPref(bool value) async {
+    try {
+      await Hive.box(HiveBoxes.playerPrefs)
+          .put(_kAudioOnlyKey, value);
+    } catch (_) {}
+  }
+
+  /// Persists the current resume position to history. Called when the
+  /// app is backgrounded or torn down so playback position survives
+  /// even if the player screen's dispose() never runs.
+  Future<void> _persistResumePosition() async {
+    final id = state.videoId;
+    if (id == null || state.status != PlayerStatus.ready) return;
+    final v = state.video;
+    try {
+      await ref.read(historyRepositoryProvider).saveResumePosition(
+            videoId: id,
+            positionSecs:
+                _handler.player.state.position.inSeconds,
+            title: v?.title ?? '',
+            author: v?.author ?? '',
+            thumbnailUrl: v?.thumbnailUrl ?? '',
+            durationSecs: v?.duration?.inSeconds,
+          );
+    } catch (_) {}
+  }
+
+  Future<void> _persistThenStop() async {
+    await _persistResumePosition();
+    await stop();
   }
 
   // ---------------- Subtitles / CC ----------------
