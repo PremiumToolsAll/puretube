@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../library/presentation/providers/library_providers.dart';
+import '../../../player/presentation/providers/player_controller.dart';
 import '../../../../main.dart';
 
 /// null = follow the system language.
@@ -65,6 +66,27 @@ Future<int> getDoubleTapSeconds() async {
   } catch (_) {
     return 10;
   }
+}
+
+/// Skip sponsored segments (SponsorBlock). Default ON.
+final skipSponsorsProvider = StateProvider<bool>((ref) => true);
+
+/// Loads the saved sponsor-skip preference at startup.
+Future<void> loadSavedSkipSponsors(WidgetRef ref) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getBool('skip_sponsors');
+    if (v != null) {
+      ref.read(skipSponsorsProvider.notifier).state = v;
+    }
+  } catch (_) {}
+}
+
+Future<void> saveSkipSponsors(bool value) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('skip_sponsors', value);
+  } catch (_) {}
 }
 
 /// Basic settings: language, clear history, clear cache, about.
@@ -327,6 +349,32 @@ class SettingsScreen extends ConsumerWidget {
                     color: Colors.grey),
                 onTap: () =>
                     _showDoubleTapDialog(context, ref, secs),
+              );
+            },
+          ),
+          const Divider(color: Color(0xFF1A1A1A)),
+          Consumer(
+            builder: (context, ref, _) {
+              final skip = ref.watch(skipSponsorsProvider);
+              return SwitchListTile(
+                secondary: const Icon(Icons.block_outlined,
+                    color: Colors.white70),
+                title: const Text('Skip sponsors',
+                    style: TextStyle(color: Colors.white)),
+                subtitle: const Text('Auto-skip sponsored segments',
+                    style: TextStyle(color: Colors.grey)),
+                value: skip,
+                activeColor: _accent,
+                onChanged: (v) async {
+                  ref.read(skipSponsorsProvider.notifier).state = v;
+                  await saveSkipSponsors(v);
+                  // Sync with the player controller if it's alive.
+                  try {
+                    ref
+                        .read(playerControllerProvider.notifier)
+                        .toggleSkipSponsors(v);
+                  } catch (_) {}
+                },
               );
             },
           ),
