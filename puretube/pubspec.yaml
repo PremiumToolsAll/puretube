@@ -46,6 +46,7 @@ dependencies:
   # Share & links
   share_plus: ^10.1.4
   url_launcher: ^6.2.4
+  package_info_plus: ^8.3.1
 
   # UI polish
   google_fonts: ^6.1.0
