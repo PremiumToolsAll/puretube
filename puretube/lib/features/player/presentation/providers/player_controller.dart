@@ -411,6 +411,18 @@ class PlayerController extends Notifier<PlayerUiState>
     try {
       await _handler.switchStream(target.url,
           audioUrl: target.audioUrl);
+      // DASH (video-only) streams are fragile: YouTube may reject them
+      // (PO token / throttling / "Failed to open"). Verify the stream
+      // actually loads; if not, fall back to the best muxed quality so
+      // the user isn't left with a dead player.
+      if (target.isDash) {
+        final dashOk = await _verifyDashLoad(target);
+        if (!dashOk) {
+          await _fallbackToBestMuxed(
+              'High quality unavailable — using 720p');
+          return;
+        }
+      }
       // Keep the cached streams record in sync so expiry recovery
       // and audio<->video toggling reuse the chosen quality.
       final s = state.streams;
@@ -422,6 +434,66 @@ class PlayerController extends Notifier<PlayerUiState>
                 videoId: s.videoId,
                 muxedUrl: target.url,
                 muxedHeight: target.height,
+                audioOnlyUrl: s.audioOnlyUrl,
+                audioBitrate: s.audioBitrate,
+                fetchedAt: s.fetchedAt,
+              ),
+      );
+    } on PureTubeException catch (e) {
+      state = state.copyWith(errorMessage: e.message);
+    }
+  }
+
+  /// Waits for a DASH stream to actually start producing a duration.
+  /// Returns true if the stream loaded, false on timeout/error.
+  Future<bool> _verifyDashLoad(MuxedQuality target) async {
+    const timeout = Duration(seconds: 10);
+    const pollInterval = Duration(milliseconds: 500);
+    final deadline = DateTime.now().add(timeout);
+    var hadError = false;
+    final errorSub =
+        _handler.player.stream.error.listen((_) => hadError = true);
+    try {
+      while (DateTime.now().isBefore(deadline)) {
+        // Bail early if the user switched away or an error fired.
+        if (state.currentQuality?.height != target.height ||
+            state.status != PlayerStatus.ready) {
+          return false;
+        }
+        if (hadError) return false;
+        final duration = _handler.player.state.duration;
+        if (duration > Duration.zero) return true;
+        await Future.delayed(pollInterval);
+      }
+      return false;
+    } finally {
+      await errorSub.cancel();
+    }
+  }
+
+  /// Switches to the best available muxed (non-DASH) quality.
+  /// Used when a DASH stream fails to load.
+  Future<void> _fallbackToBestMuxed(String message) async {
+    final options = state.availableQualities;
+    final muxed = options.where((q) => !q.isDash).toList()
+      ..sort((a, b) => b.height.compareTo(a.height));
+    if (muxed.isEmpty) {
+      state = state.copyWith(errorMessage: message);
+      return;
+    }
+    final best = muxed.first;
+    try {
+      await _handler.switchStream(best.url);
+      final s = state.streams;
+      state = state.copyWith(
+        currentQuality: best,
+        errorMessage: message,
+        streams: s == null
+            ? null
+            : PlaybackStreams(
+                videoId: s.videoId,
+                muxedUrl: best.url,
+                muxedHeight: best.height,
                 audioOnlyUrl: s.audioOnlyUrl,
                 audioBitrate: s.audioBitrate,
                 fetchedAt: s.fetchedAt,
