@@ -22,7 +22,7 @@ class ChannelScreen extends ConsumerStatefulWidget {
 class _ChannelScreenState
     extends ConsumerState<ChannelScreen>
     with SingleTickerProviderStateMixin {
-  static const _accent = Color(0xFF6200EA);
+  static const _accent = Color(0xFF10B981);
   late final TabController _tabCtrl;
   ChannelInfo? _channel;
   List<VideoDetails> _videos = [];
