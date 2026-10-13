@@ -96,11 +96,24 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> loadMedia({
     required MediaItem mediaItem,
     required String streamUrl,
+    String? audioUrl,
     Duration? startAt,
     double speed = 1.0,
   }) async {
     this.mediaItem.add(mediaItem);
     await _player.setRate(speed);
+    // DASH (video-only) initial loads need the separate audio track
+    // attached via mpv's 'audio-file' property BEFORE opening the media,
+    // mirroring switchStream(). Without it the video plays SILENT.
+    final platform = _player.platform;
+    if (platform is NativePlayer && audioUrl != null) {
+      try {
+        await platform.setProperty('audio-file', audioUrl);
+        await Future.delayed(const Duration(milliseconds: 500));
+      } catch (_) {
+        // Property set failed; continue — video may still play.
+      }
+    }
     await _player.open(
       Media(streamUrl, start: startAt ?? Duration.zero),
       play: true,
