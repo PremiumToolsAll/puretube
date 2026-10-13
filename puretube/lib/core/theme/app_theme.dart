@@ -6,7 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 /// in accent color; Sonora is a full theme change (dark brown-black +
 /// gold), matching the audio (SONORA) mode vibe.
 enum AppThemeOption {
-  emerald('Emerald', Color(0xFF10B981), Color(0xFF34D399)),
+  emerald('Willow', Color(0xFF10B981), Color(0xFF34D399)),
   teal('Teal', Color(0xFF14B8A6), Color(0xFF2DD4BF)),
   orange('Orange', Color(0xFFF97316), Color(0xFFFB923C)),
   blue('Blue', Color(0xFF3B82F6), Color(0xFF60A5FA)),
