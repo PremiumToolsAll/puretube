@@ -26,8 +26,9 @@ jobs:
       
       - name: Analyze Dart code
         # Fail only on errors (things that break compilation).
-        # Warnings/infos are pre-existing style issues, not build blockers.
-        run: dart analyze --no-fatal-warnings --no-fatal-infos
+        # --no-fatal-warnings: warnings are pre-existing style issues, not blockers.
+        # (infos are never fatal; --fatal-infos can't be negated on this Dart.)
+        run: dart analyze --no-fatal-warnings
       
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
