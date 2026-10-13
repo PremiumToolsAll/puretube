@@ -214,7 +214,22 @@ class _LyricsSheetState extends ConsumerState<LyricsSheet> {
     if (!result.found || result.lyrics == null) {
       return _buildNotFound();
     }
+    // Final safety net: never display AI refusal text.
+    if (_isRefusal(result.lyrics!)) {
+      return _buildNotFound();
+    }
     return _buildLyrics(result.lyrics!);
+  }
+
+  /// Matches the service-layer refusal filter.
+  bool _isRefusal(String text) {
+    var norm = text.toUpperCase();
+    norm = norm.replaceAll('’', "'");
+    norm = norm.replaceAll('‘', "'");
+    if (norm.contains('SORRY') && norm.contains('PROVIDE')) return true;
+    if (norm.contains('CANNOT PROVIDE')) return true;
+    if (norm.contains('COPYRIGHT')) return true;
+    return false;
   }
 
   Widget _buildShimmer() {
