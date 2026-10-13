@@ -22,7 +22,7 @@ class ChannelScreen extends ConsumerStatefulWidget {
 class _ChannelScreenState
     extends ConsumerState<ChannelScreen>
     with SingleTickerProviderStateMixin {
-  static const _accent = Color(0xFF10B981);
+  Color get _accent => Theme.of(context).colorScheme.primary;
   late final TabController _tabCtrl;
   ChannelInfo? _channel;
   List<VideoDetails> _videos = [];
@@ -106,7 +106,7 @@ class _ChannelScreenState
         title: Text(_channel?.title ?? 'Channel'),
       ),
       body: _loading
-          ? const Center(
+          ? Center(
               child: CircularProgressIndicator(
                   color: _accent))
           : _error != null
