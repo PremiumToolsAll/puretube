@@ -15,7 +15,7 @@ class ShortsScreen extends ConsumerStatefulWidget {
 
 class _ShortsScreenState
     extends ConsumerState<ShortsScreen> {
-  static const _accent = Color(0xFF10B981);
+  Color get _accent => Theme.of(context).colorScheme.primary;
   final _pageCtrl = PageController();
 
   @override
@@ -35,7 +35,7 @@ class _ShortsScreenState
       backgroundColor: Colors.black,
       body: SafeArea(
         child: state.loading
-            ? const Center(
+            ? Center(
                 child: CircularProgressIndicator(
                     color: _accent))
             : state.error != null
