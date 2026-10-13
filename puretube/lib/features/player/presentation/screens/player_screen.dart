@@ -2439,10 +2439,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             const SizedBox(height: 16),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                  backgroundColor: _accent),
+                  backgroundColor: _accent,
+                  foregroundColor: Colors.black),
               onPressed: notifier.retry,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry'),
+              icon: const Icon(Icons.refresh,
+                  color: Colors.black),
+              label: const Text('Retry',
+                  style: TextStyle(
+                      color: Colors.black,
+                      fontWeight: FontWeight.bold)),
             ),
           ],
         ),
