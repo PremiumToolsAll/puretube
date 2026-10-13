@@ -59,11 +59,14 @@ class _PureTubeAppState extends ConsumerState<PureTubeApp> {
         ],
       ),
       home: _showOnboarding == null
-          ? const Scaffold(
-              backgroundColor: Colors.black,
+          ? Scaffold(
+              backgroundColor:
+                  Theme.of(context).scaffoldBackgroundColor,
               body: Center(
                   child: CircularProgressIndicator(
-                      color: Color(0xFF10B981))),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .primary)),
             )
           : _showOnboarding!
               ? const OnboardingScreen()
