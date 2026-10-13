@@ -21,6 +21,11 @@ android {
         targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Ship arm64-only: modern phones only. (flutter's --target-platform
+        // flag does NOT strip media_kit's bundled armeabi-v7a/x86_64 libs.)
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildTypes {
