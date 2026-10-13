@@ -51,10 +51,12 @@ Future<void> main() async {
   late final PureTubeAudioHandler audioHandler;
   bool audioServiceOk = false;
 
-  /// Attempts AudioService.init with retries. Transient failures (e.g.
-  /// service not yet ready, race conditions on some devices) can succeed
-  /// on a second attempt.
+  /// Attempts AudioService.init with retries. On MIUI devices the
+  /// foreground service can fail if started too early — we wait a
+  /// moment before the first attempt.
   Future<PureTubeAudioHandler?> tryAudioServiceInit() async {
+    // Give the activity a moment to settle (MIUI-friendly).
+    await Future.delayed(const Duration(milliseconds: 1500));
     for (var attempt = 1; attempt <= 3; attempt++) {
       try {
         final handler = await AudioService.init(
@@ -79,8 +81,7 @@ Future<void> main() async {
       } catch (e) {
         debugPrint('AudioService init attempt $attempt failed: $e');
         if (attempt < 3) {
-          // Brief pause before retry; the system may need a moment.
-          await Future.delayed(const Duration(milliseconds: 500));
+          await Future.delayed(const Duration(seconds: 2));
         }
       }
     }
