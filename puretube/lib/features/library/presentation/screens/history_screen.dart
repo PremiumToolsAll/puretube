@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/format.dart';
 import '../../../player/presentation/screens/player_screen.dart';
 import '../providers/library_providers.dart';
+import 'playlists_screen.dart';
 
 class HistoryScreen extends ConsumerWidget {
   const HistoryScreen({super.key});
@@ -20,7 +21,7 @@ class HistoryScreen extends ConsumerWidget {
           title: const Text('Library'),
           bottom: const TabBar(tabs: [
             Tab(text: 'History'),
-            Tab(text: 'Bookmarks'),
+            Tab(text: 'Playlists'),
           ]),
           actions: [
             IconButton(
@@ -31,7 +32,7 @@ class HistoryScreen extends ConsumerWidget {
           ],
         ),
         body: const TabBarView(
-          children: [_HistoryTab(), _BookmarksTab()],
+          children: [_HistoryTab(), _PlaylistsTab()],
         ),
       ),
     );
@@ -131,55 +132,57 @@ class _HistoryTab extends ConsumerWidget {
   }
 }
 
-class _BookmarksTab extends ConsumerWidget {
-  const _BookmarksTab();
+class _PlaylistsTab extends ConsumerWidget {
+  const _PlaylistsTab();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final bookmarks = ref.watch(bookmarkControllerProvider);
-    if (bookmarks.isEmpty) {
+    final playlists = ref.watch(playlistsControllerProvider);
+    if (playlists.isEmpty) {
       return const Center(
-          child: Text(
-              'No bookmarks yet.\nBookmark from the player ⋮ menu.',
+          child: Text('No playlists yet.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey)));
     }
     return ListView.separated(
-      itemCount: bookmarks.length,
+      itemCount: playlists.length,
       separatorBuilder: (_, __) =>
           const Divider(height: 1, color: Color(0xFF16211C)),
       itemBuilder: (ctx, i) {
-        final b = bookmarks[i];
-        return ListTile(
-          leading: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: CachedNetworkImage(
-              imageUrl: b.thumbnailUrl,
-              width: 96,
-              height: 54,
-              fit: BoxFit.cover,
-              errorWidget: (_, __, ___) =>
-                  Container(color: const Color(0xFF16211C)),
+        final p = playlists[i];
+        return Dismissible(
+          key: ValueKey(p.id),
+          direction: DismissDirection.endToStart,
+          background: Container(
+            color: Colors.red,
+            alignment: Alignment.centerRight,
+            padding: const EdgeInsets.only(right: 20),
+            child:
+                const Icon(Icons.delete, color: Colors.white),
+          ),
+          onDismissed: (_) => ref
+              .read(playlistsControllerProvider.notifier)
+              .delete(p.id),
+          child: ListTile(
+            leading: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: const Color(0xFF16211C),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.playlist_play,
+                  color: Colors.grey),
             ),
-          ),
-          title: Text(b.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13)),
-          subtitle: Text(b.author,
-              style:
-                  const TextStyle(color: Colors.grey, fontSize: 11)),
-          trailing: IconButton(
-            icon:
-                const Icon(Icons.bookmark_remove_outlined),
-            onPressed: () => ref
-                .read(bookmarkControllerProvider.notifier)
-                .remove(b.videoId),
-          ),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(
-                builder: (_) =>
-                    PlayerScreen(videoId: b.videoId)),
+            title: Text(p.name),
+            subtitle: Text('${p.items.length} videos',
+                style: const TextStyle(
+                    color: Colors.grey, fontSize: 12)),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                  builder: (_) => PlaylistDetailScreen(
+                      playlistId: p.id)),
+            ),
           ),
         );
       },
