@@ -1,22 +1,15 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../../core/di/providers.dart';
 import '../../../../core/widgets/press_scale.dart';
 import '../providers/player_controller.dart';
+import '../providers/popup_visibility.dart';
 import '../screens/player_screen.dart';
 import 'sleep_timer_sheet.dart';
 import 'subtitle_sheet.dart';
-
-/// Visibility flag for the floating in-app popup player.
-///
-/// The popup shares the single media_kit [Player] owned by
-/// [PureTubeAudioHandler] (via [mediaKitPlayerProvider]) — it never creates
-/// its own player. All buttons drive [playerControllerProvider].
-final popupVisibleProvider = StateProvider<bool>((ref) => false);
 
 /// Root-level host for the floating popup player. Mount once above the
 /// [Navigator] (e.g. in `MaterialApp.builder`) so the popup floats over
@@ -392,11 +385,14 @@ class _PopupSettingsSheet extends ConsumerWidget {
             ...ui.availableQualities.map((q) {
               final selected =
                   ui.currentQuality?.height == q.height &&
-                      ui.currentQuality?.isDash == q.isDash;
+                      ui.currentQuality?.isDash == q.isDash &&
+                      ui.currentQuality?.fps == q.fps;
               return ListTile(
                 dense: true,
                 title: Text(
-                  q.isDash ? '${q.label} · DASH' : q.label,
+                  q.isDash
+                      ? '${q.resolutionLabel} · DASH'
+                      : q.resolutionLabel,
                   style: const TextStyle(color: Colors.white),
                 ),
                 trailing: selected
