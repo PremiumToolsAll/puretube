@@ -92,6 +92,32 @@ Future<void> saveSkipSponsors(bool value) async {
   } catch (_) {}
 }
 
+/// Gemini API key for AI lyrics generation (optional).
+/// Null/empty = only free fallbacks (lyrics.ovh, Pollinations) are used.
+final geminiApiKeyProvider = StateProvider<String?>((ref) => null);
+
+/// Loads the saved Gemini API key (if any) at startup.
+Future<void> loadSavedGeminiApiKey(WidgetRef ref) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final key = prefs.getString('gemini_api_key');
+    if (key != null && key.isNotEmpty) {
+      ref.read(geminiApiKeyProvider.notifier).state = key;
+    }
+  } catch (_) {}
+}
+
+Future<void> saveGeminiApiKey(String? key) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    if (key == null || key.isEmpty) {
+      await prefs.remove('gemini_api_key');
+    } else {
+      await prefs.setString('gemini_api_key', key);
+    }
+  } catch (_) {}
+}
+
 /// Basic settings: language, clear history, clear cache, about.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -266,6 +292,72 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showGeminiKeyDialog(
+      BuildContext context, WidgetRef ref, String current) {
+    final controller = TextEditingController(text: current);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF16211C),
+        title: const Text('Gemini API Key',
+            style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Optional. Enables Gemini AI as an extra lyrics fallback. '
+              'Without a key, the free AI fallback is used instead.',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                hintText: 'Paste API key',
+                hintStyle: TextStyle(color: Colors.white38),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white24),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: _accent),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              ref.read(geminiApiKeyProvider.notifier).state = null;
+              await saveGeminiApiKey(null);
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('Clear',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final key = controller.text.trim();
+              ref.read(geminiApiKeyProvider.notifier).state =
+                  key.isEmpty ? null : key;
+              await saveGeminiApiKey(key.isEmpty ? null : key);
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('Save',
+                style: TextStyle(color: _accent)),
+          ),
+        ],
       ),
     );
   }
@@ -591,6 +683,29 @@ class SettingsScreen extends ConsumerWidget {
                           .toggleSkipSponsors(v);
                     } catch (_) {}
                   },
+                );
+              },
+            ),
+            Consumer(
+              builder: (context, ref, _) {
+                final apiKey = ref.watch(geminiApiKeyProvider);
+                final isSet =
+                    apiKey != null && apiKey.isNotEmpty;
+                return ListTile(
+                  leading: const Icon(Icons.auto_awesome_outlined,
+                      color: _accentLight),
+                  title: const Text('Gemini API Key',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: Text(
+                      isSet
+                          ? 'Set — AI lyrics enabled'
+                          : 'Not set — free AI fallback used',
+                      style:
+                          const TextStyle(color: Colors.grey)),
+                  trailing: const Icon(Icons.chevron_right,
+                      color: Colors.grey),
+                  onTap: () => _showGeminiKeyDialog(
+                      context, ref, apiKey ?? ''),
                 );
               },
             ),
