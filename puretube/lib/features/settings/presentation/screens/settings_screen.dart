@@ -71,6 +71,28 @@ Future<int> getDoubleTapSeconds() async {
   }
 }
 
+/// Number of upcoming videos to pre-load for instant Next.
+/// 0 = off. Default 3, max 100.
+final preloadCountProvider = StateProvider<int>((ref) => 3);
+
+/// Loads the saved pre-loading count at startup.
+Future<void> loadSavedPreloadCount(WidgetRef ref) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getInt('preload_count');
+    if (v != null) {
+      ref.read(preloadCountProvider.notifier).state = v.clamp(0, 100);
+    }
+  } catch (_) {}
+}
+
+Future<void> savePreloadCount(int count) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('preload_count', count.clamp(0, 100));
+  } catch (_) {}
+}
+
 /// Skip sponsored segments (SponsorBlock). Default ON.
 final skipSponsorsProvider = StateProvider<bool>((ref) => true);
 
@@ -292,6 +314,90 @@ class SettingsScreen extends ConsumerWidget {
               },
               child: Text('Apply',
                   style: TextStyle(color: accent)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showPreloadDialog(
+      BuildContext context, WidgetRef ref, int current) {
+    final accent = Theme.of(context).colorScheme.primary;
+    final card = Theme.of(context).colorScheme.surfaceContainer;
+    final controller = TextEditingController(text: '$current');
+    String? error;
+    Future<void> apply(void Function(String?) setError) async {
+      final v = int.tryParse(controller.text.trim());
+      if (v == null || v < 0 || v > 100) {
+        setError('Enter a number from 0 to 100');
+        return;
+      }
+      ref.read(preloadCountProvider.notifier).state = v;
+      await savePreloadCount(v);
+      // Restart the pre-load pass with the new count.
+      try {
+        ref.read(playerControllerProvider.notifier).refreshPrecache();
+      } catch (_) {}
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          backgroundColor: card,
+          title: const Text('Pre-loading',
+              style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'How many upcoming videos to pre-load for instant Next. 0 = off.',
+                style: TextStyle(color: Colors.grey, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                keyboardType: TextInputType.number,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'e.g. 3',
+                  hintStyle:
+                      const TextStyle(color: Colors.white38),
+                  errorText: error,
+                  enabledBorder: const OutlineInputBorder(
+                      borderSide:
+                          BorderSide(color: Colors.white24)),
+                  focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: accent)),
+                ),
+                onSubmitted: (_) =>
+                    apply((e) => setState(() => error = e)).then(
+                        (_) {
+                  if (error == null && ctx.mounted) {
+                    Navigator.pop(ctx);
+                  }
+                }),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  apply((e) => setState(() => error = e)).then(
+                      (_) {
+                if (error == null && ctx.mounted) {
+                  Navigator.pop(ctx);
+                }
+              }),
+              child:
+                  Text('Apply', style: TextStyle(color: accent)),
             ),
           ],
         ),
@@ -672,6 +778,29 @@ class SettingsScreen extends ConsumerWidget {
                       color: Colors.grey),
                   onTap: () =>
                       _showDoubleTapDialog(context, ref, secs),
+                );
+              },
+            ),
+            Consumer(
+              builder: (context, ref, _) {
+                final count =
+                    ref.watch(preloadCountProvider);
+                return ListTile(
+                  leading: Icon(
+                      Icons.cloud_download_outlined,
+                      color: accentLight),
+                  title: const Text('Pre-loading',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: Text(
+                      count <= 0
+                          ? 'Off'
+                          : '$count upcoming video${count == 1 ? '' : 's'}',
+                      style:
+                          const TextStyle(color: Colors.grey)),
+                  trailing: const Icon(Icons.chevron_right,
+                      color: Colors.grey),
+                  onTap: () =>
+                      _showPreloadDialog(context, ref, count),
                 );
               },
             ),
