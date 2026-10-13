@@ -96,6 +96,71 @@ class LyricsService {
     return _fetchFromGemini(artist, title);
   }
 
+  /// Fallback order for the in-player AI Lyrics card (no user tap),
+  /// used AFTER YouTube's own captions/transcript (tried first by the
+  /// controller — YouTube's free AI is the primary source):
+  /// 1. lyrics.ovh (free, no key) — real published lyrics when available.
+  /// 2. Pollinations AI (free, no key) — fallback generator.
+  /// 3. Gemini AI — advanced, only when an API key is set in Settings.
+  ///
+  /// Never throws; refusal/copyright responses are filtered to
+  /// [LyricsResult.notFound].
+  Future<LyricsResult> getLyricsAuto({
+    required String videoTitle,
+    required String channelName,
+  }) async {
+    final attempts = _buildAttempts(videoTitle, channelName);
+    if (attempts.isEmpty) {
+      return LyricsResult.notFound(
+        artist: _cleanArtist(channelName),
+        title: _cleanTitle(videoTitle),
+      );
+    }
+
+    // 1. lyrics.ovh across all artist/title combinations.
+    for (final attempt in attempts) {
+      final lyrics = await _fetch(attempt.artist, attempt.title);
+      if (lyrics != null) {
+        return LyricsResult(
+          lyrics: lyrics,
+          artist: attempt.artist,
+          title: attempt.title,
+          found: true,
+        );
+      }
+    }
+
+    final best = attempts.first;
+
+    // 2. Pollinations fallback.
+    final fromPollinations =
+        await _fetchFromPollinations(best.artist, best.title);
+    if (fromPollinations != null) {
+      return LyricsResult(
+        lyrics: fromPollinations,
+        artist: best.artist,
+        title: best.title,
+        found: true,
+      );
+    }
+
+    // 3. Gemini (advanced — only when the user set an API key).
+    final fromGemini = await _fetchFromGemini(best.artist, best.title);
+    if (fromGemini != null) {
+      return LyricsResult(
+        lyrics: fromGemini,
+        artist: best.artist,
+        title: best.title,
+        found: true,
+      );
+    }
+
+    return LyricsResult.notFound(
+      artist: _cleanArtist(channelName),
+      title: _cleanTitle(videoTitle),
+    );
+  }
+
   /// Free, no-API-key AI text generation. Plain-text response.
   Future<String?> _fetchFromPollinations(
       String artist, String title) async {
