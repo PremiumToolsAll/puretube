@@ -23,7 +23,7 @@ class MiniPlayerBar extends ConsumerStatefulWidget {
 
 class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
     with SingleTickerProviderStateMixin {
-  static const _gold = Color(0xFFD4A574);
+  Color get _gold => Theme.of(context).colorScheme.primary;
 
   late final AnimationController _slideController;
   late final Animation<Offset> _slideAnimation;
@@ -230,7 +230,7 @@ class _ProgressLine extends StatelessWidget {
                   : 0,
               minHeight: 2,
               backgroundColor: Colors.white12,
-              color: const Color(0xFFD4A574),
+              color: Theme.of(context).colorScheme.primary,
             );
           },
         );
