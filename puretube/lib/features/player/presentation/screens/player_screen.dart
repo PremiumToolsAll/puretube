@@ -2598,10 +2598,40 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const ListTile(
-              title: Text('Queue',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold)),
+            Consumer(
+              builder: (context, ref, _) {
+                final autoplay = ref.watch(
+                    playerControllerProvider
+                        .select((s) => s.autoplay));
+                return ListTile(
+                  title: const Text('Queue',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold)),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Autoplay',
+                          style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13)),
+                      const SizedBox(width: 6),
+                      Switch(
+                        value: autoplay,
+                        activeThumbColor: Colors.white,
+                        activeTrackColor: _accent,
+                        inactiveThumbColor: Colors.grey,
+                        inactiveTrackColor: Colors.white24,
+                        materialTapTargetSize:
+                            MaterialTapTargetSize.shrinkWrap,
+                        onChanged: (v) => ref
+                            .read(playerControllerProvider
+                                .notifier)
+                            .setAutoplay(v),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
             Flexible(
               child: Consumer(
@@ -3494,7 +3524,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 /// "Up Next" suggestions below the player. Reads the already-loaded
 /// related videos from the player controller (same list the Next button
 /// plays from) — no extra fetch. Shimmer while loading, retry on error.
-/// WILLOW-style "Autoplay" toggle in the header (visual toggle for now).
+/// The Autoplay toggle is wired to the player controller: when ON, a
+/// completed video automatically starts the next Up Next item.
 class _UpNextSection extends ConsumerStatefulWidget {
   const _UpNextSection();
 
@@ -3505,12 +3536,12 @@ class _UpNextSection extends ConsumerStatefulWidget {
 
 class _UpNextSectionState
     extends ConsumerState<_UpNextSection> {
-  bool _autoplay = true;
-
   Color get _emerald => Theme.of(context).colorScheme.primary;
 
   /// Header row: "Up Next" + Autoplay label with an emerald switch.
   Widget _header() {
+    final autoplay = ref.watch(
+        playerControllerProvider.select((s) => s.autoplay));
     return Row(
       children: [
         const Expanded(
@@ -3525,14 +3556,16 @@ class _UpNextSectionState
                 color: Colors.white70, fontSize: 13)),
         const SizedBox(width: 6),
         Switch(
-          value: _autoplay,
+          value: autoplay,
           activeThumbColor: Colors.white,
           activeTrackColor: _emerald,
           inactiveThumbColor: Colors.grey,
           inactiveTrackColor: Colors.white24,
           materialTapTargetSize:
               MaterialTapTargetSize.shrinkWrap,
-          onChanged: (v) => setState(() => _autoplay = v),
+          onChanged: (v) => ref
+              .read(playerControllerProvider.notifier)
+              .setAutoplay(v),
         ),
       ],
     );
