@@ -5,7 +5,7 @@ import 'package:shimmer/shimmer.dart';
 
 import '../../../../core/services/lyrics_service.dart';
 import '../../../settings/presentation/screens/settings_screen.dart';
-import '../../providers/player_controller.dart';
+import '../providers/player_controller.dart';
 
 /// Beautiful WILLOW-themed lyrics bottom sheet.
 ///
