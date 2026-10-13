@@ -1953,7 +1953,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             // the controls stay visible and responsive.
             Padding(
               padding:
-                  const EdgeInsets.fromLTRB(40, 18, 40, 0),
+                  const EdgeInsets.fromLTRB(40, 8, 40, 0),
               child: AspectRatio(
                 aspectRatio: 1,
                 child: GestureDetector(
@@ -2237,7 +2237,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             const Expanded(child: SizedBox.shrink()),
             // Bottom tabs: QUEUE | LYRICS | TIMER
             Padding(
-              padding: const EdgeInsets.only(bottom: 18),
+              padding: const EdgeInsets.only(bottom: 32),
               child: Row(
                 mainAxisAlignment:
                     MainAxisAlignment.spaceEvenly,
