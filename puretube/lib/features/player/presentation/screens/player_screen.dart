@@ -603,6 +603,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _disliked = false;
   bool _shuffle = false;
   int _repeatMode = 0; // 0=off, 1=all, 2=one
+  // Artwork swipe direction for the track-change crossfade:
+  // -1 = next track (slides in from the right), +1 = previous (from left).
+  double _artworkSlideDir = -1;
 
   // double-tap
   Offset? _doubleTapPos;
@@ -809,6 +812,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   /// Previous: restart the current video when past 3s, otherwise go to
   /// the previously played video (Spotify/YouTube behavior).
   Future<void> _playPrevious() async {
+    if (mounted) setState(() => _artworkSlideDir = 1);
     await ref
         .read(playerControllerProvider.notifier)
         .playPrevious();
@@ -821,6 +825,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   /// fallback) while showing progress, so Next almost always
   /// finds a video instead of just saying "not found".
   Future<void> _playNext() async {
+    if (mounted) setState(() => _artworkSlideDir = -1);
     final notifier = ref.read(playerControllerProvider.notifier);
     final related =
         ref.read(playerControllerProvider).relatedVideos;
@@ -1973,12 +1978,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     return Stack(
       children: [
         // Blurred album-art backdrop — Spotify premium look.
+        // Crossfades when the track changes.
         Positioned.fill(
-          child: CachedNetworkImage(
-            imageUrl: video.thumbnailUrl,
-            fit: BoxFit.cover,
-            errorWidget: (_, __, ___) =>
-                Container(color: const Color(0xFF0A0A0F)),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 450),
+            child: CachedNetworkImage(
+              key: ValueKey('bg-${video.id}'),
+              imageUrl: video.thumbnailUrl,
+              fit: BoxFit.cover,
+              errorWidget: (_, __, ___) =>
+                  Container(color: const Color(0xFF0A0A0F)),
+            ),
           ),
         ),
         Positioned.fill(
@@ -2057,66 +2067,147 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               ),
             ),
             // SONORA: large album art, 24px rounded corners, strong shadow.
+            // Swipe left/right on the artwork to change tracks
+            // (YouTube Music style) — only the artwork/title crossfade,
+            // the controls stay visible and responsive.
             Padding(
               padding:
                   const EdgeInsets.fromLTRB(40, 18, 40, 0),
               child: AspectRatio(
                 aspectRatio: 1,
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(24),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.65),
-                        blurRadius: 48,
-                        spreadRadius: 4,
-                        offset: const Offset(0, 18),
+                child: GestureDetector(
+                  onHorizontalDragEnd: (details) {
+                    final v = details.primaryVelocity ?? 0;
+                    if (v < -250) {
+                      HapticFeedback.lightImpact();
+                      _playNext(); // swipe left → next track
+                    } else if (v > 250) {
+                      HapticFeedback.lightImpact();
+                      _playPrevious(); // swipe right → previous track
+                    }
+                  },
+                  child: Stack(
+                    children: [
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 350),
+                        transitionBuilder: (child, animation) {
+                          final curved = CurvedAnimation(
+                            parent: animation,
+                            curve: Curves.easeOutCubic,
+                          );
+                          return FadeTransition(
+                            opacity: curved,
+                            child: SlideTransition(
+                              position: Tween<Offset>(
+                                begin: Offset(
+                                    0.28 * _artworkSlideDir, 0),
+                                end: Offset.zero,
+                              ).animate(curved),
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: Container(
+                          key: ValueKey(video.id),
+                          decoration: BoxDecoration(
+                            borderRadius:
+                                BorderRadius.circular(24),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black
+                                    .withOpacity(0.65),
+                                blurRadius: 48,
+                                spreadRadius: 4,
+                                offset: const Offset(0, 18),
+                              ),
+                              BoxShadow(
+                                color: _gold.withOpacity(0.12),
+                                blurRadius: 60,
+                                spreadRadius: 2,
+                              ),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius:
+                                BorderRadius.circular(24),
+                            child: CachedNetworkImage(
+                              imageUrl: video.thumbnailUrl,
+                              fit: BoxFit.cover,
+                              errorWidget: (_, __, ___) =>
+                                  Container(
+                                color:
+                                    const Color(0xFF1A1A1A),
+                                child: const Icon(
+                                    Icons.music_note,
+                                    size: 80,
+                                    color: Colors.white24),
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                      BoxShadow(
-                        color: _gold.withOpacity(0.12),
-                        blurRadius: 60,
-                        spreadRadius: 2,
-                      ),
+                      // Small loading indicator on the artwork while the
+                      // next track loads — no full-screen spinner.
+                      if (uiState.status ==
+                          PlayerStatus.loading)
+                        Positioned.fill(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.black45,
+                              borderRadius:
+                                  BorderRadius.circular(24),
+                            ),
+                            child: const Center(
+                              child: SizedBox(
+                                width: 34,
+                                height: 34,
+                                child:
+                                    CircularProgressIndicator(
+                                  strokeWidth: 3,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(24),
-                    child: CachedNetworkImage(
-                      imageUrl: video.thumbnailUrl,
-                      fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => Container(
-                        color: const Color(0xFF1A1A1A),
-                        child: const Icon(Icons.music_note,
-                            size: 80, color: Colors.white24),
-                      ),
-                    ),
                   ),
                 ),
               ),
             ),
             // Title (28px w600, centered) + artist (grey).
+            // Crossfades on track change — no jarring swap.
             Padding(
               padding:
                   const EdgeInsets.fromLTRB(36, 20, 36, 0),
               child: Center(
-                child: _MarqueeText(
-                  text: video.title,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 28,
-                      letterSpacing: 0.4),
+                child: AnimatedSwitcher(
+                  duration:
+                      const Duration(milliseconds: 300),
+                  child: _MarqueeText(
+                    key: ValueKey('title-${video.id}'),
+                    text: video.title,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 28,
+                        letterSpacing: 0.4),
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 6),
-            Text(video.author,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    color: Colors.grey.shade400,
-                    fontSize: 15)),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              child: Text(video.author,
+                  key: ValueKey('artist-${video.id}'),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: Colors.grey.shade400,
+                      fontSize: 15)),
+            ),
             // SONORA: heart + download as circular outline buttons.
             Padding(
               padding: const EdgeInsets.only(top: 14),
@@ -4256,7 +4347,8 @@ class _AudioSeekBar extends StatelessWidget {
 class _MarqueeText extends StatefulWidget {
   final String text;
   final TextStyle style;
-  const _MarqueeText({required this.text, required this.style});
+  const _MarqueeText(
+      {super.key, required this.text, required this.style});
 
   @override
   State<_MarqueeText> createState() => _MarqueeTextState();
