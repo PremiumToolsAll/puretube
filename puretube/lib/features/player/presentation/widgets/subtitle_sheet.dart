@@ -19,7 +19,7 @@ class SubtitleSheet extends ConsumerWidget {
     final ui = ref.watch(playerControllerProvider);
     final notifier =
         ref.read(playerControllerProvider.notifier);
-    const accent = Color(0xFF10B981);
+    final accent = Theme.of(context).colorScheme.primary;
 
     return SafeArea(
       child: Column(
@@ -35,7 +35,7 @@ class SubtitleSheet extends ConsumerWidget {
           ListTile(
             title: const Text('Off'),
             trailing: ui.activeSubtitle == null
-                ? const Icon(Icons.check, color: accent)
+                ? Icon(Icons.check, color: accent)
                 : null,
             onTap: () {
               notifier.selectSubtitle(null);
@@ -66,7 +66,7 @@ class SubtitleSheet extends ConsumerWidget {
                               fontSize: 12))
                       : null,
                   trailing: active
-                      ? const Icon(Icons.check,
+                      ? Icon(Icons.check,
                           color: accent)
                       : null,
                   onTap: () {
