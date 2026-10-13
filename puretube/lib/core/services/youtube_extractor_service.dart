@@ -123,6 +123,14 @@ class YoutubeExtractorService {
     return dot > 0 ? c.substring(0, dot) : c;
   }
 
+  /// Best-effort HDR detection. youtube_explode_dart does not expose
+  /// per-stream color metadata, so this only matches an explicit "HDR"
+  /// in the stream's quality label. HDR streams still parse and play
+  /// through the normal path — nothing in the pipeline assumes SDR,
+  /// so there is no HDR-specific crash path.
+  static bool _looksHdr(String qualityLabel) =>
+      qualityLabel.toLowerCase().contains('hdr');
+
   Future<void> _requireNetwork() async {
     final results = await _connectivity.checkConnectivity();
     if (results.isEmpty || results.contains(ConnectivityResult.none)) {
@@ -240,9 +248,12 @@ class YoutubeExtractorService {
     }
   }
 
-  /// Lists all muxed (audio+video) quality options for a video,
-  /// sorted by height descending. Labels look like "MPEG-4 720p".
-  /// One entry per distinct height (duplicates by codec are dropped).
+  /// Lists all muxed (audio+video) quality options for a video plus
+  /// DASH video-only options, sorted by height then fps, both
+  /// descending. Labels look like "MPEG-4 720p60".
+  /// One entry per distinct (height, fps) pair (NewPipe-style): 720p30
+  /// and 720p60 stay as separate options instead of collapsing into
+  /// one entry the way a height-only key did.
   Future<List<MuxedQuality>> getQualityOptions(
       String videoId) async {
     await _requireNetwork();
@@ -258,18 +269,25 @@ class YoutubeExtractorService {
             'No playable streams for this video.');
       }
 
-      final seenHeights = <int>{};
+      // Dedup key is (height, fps) — shared across muxed and DASH so a
+      // DASH (height, fps) already offered as muxed is skipped while
+      // other fps variants at that height are kept (e.g. muxed 720p30
+      // + DASH 720p60).
+      final seen = <String>{};
       final options = <MuxedQuality>[];
       for (final m in muxed) {
         final h = m.videoQuality.height;
-        if (h <= 0 || !seenHeights.add(h)) continue;
+        final fps = m.framerate.framesPerSecond.round();
+        if (h <= 0 || !seen.add('$h@$fps')) continue;
+        final fpsSuffix = fps > 30 ? '$fps' : '';
         options.add(MuxedQuality(
-          label: 'MPEG-4 ${h}p',
+          label: 'MPEG-4 ${h}p$fpsSuffix',
           height: h,
           url: m.url.toString(),
           bitrateKbps: m.bitrate.bitsPerSecond / 1000,
-          fps: m.framerate.framesPerSecond.round(),
+          fps: fps,
           codec: _shortCodec(m.videoCodec),
+          isHdr: _looksHdr(m.qualityLabel),
         ));
       }
 
@@ -286,25 +304,38 @@ class YoutubeExtractorService {
               .compareTo(a.videoResolution.height));
         for (final v in videoOnly) {
           final h = v.videoResolution.height;
-          if (h <= 720 || !seenHeights.add(h)) continue;
+          final fps = v.framerate.framesPerSecond.round();
+          if (h <= 0 || !seen.add('$h@$fps')) continue;
+          final fpsSuffix = fps > 30 ? '$fps' : '';
           final resLabel = h >= 2160
-              ? '2160p (2K)'
+              ? '2160p$fpsSuffix (2K)'
               : h >= 1440
-                  ? '1440p (1.5K)'
-                  : '${h}p';
+                  ? '1440p$fpsSuffix (1.5K)'
+                  : '${h}p$fpsSuffix';
           options.add(MuxedQuality(
             label: '$resLabel · DASH',
             height: h,
             url: v.url.toString(),
             audioUrl: audioUrl,
             bitrateKbps: v.bitrate.bitsPerSecond / 1000,
-            fps: v.framerate.framesPerSecond.round(),
+            fps: fps,
             codec: _shortCodec(v.videoCodec),
+            isHdr: _looksHdr(v.qualityLabel),
           ));
         }
       }
 
-      options.sort((a, b) => b.height.compareTo(a.height));
+      // Height desc, then fps desc (higher fps wins ties — this also
+      // makes the auto/default pick prefer 60fps variants), then muxed
+      // before DASH on full ties.
+      options.sort((a, b) {
+        final h = b.height.compareTo(a.height);
+        if (h != 0) return h;
+        final f = b.fps.compareTo(a.fps);
+        if (f != 0) return f;
+        if (a.isDash != b.isDash) return a.isDash ? 1 : -1;
+        return 0;
+      });
       if (options.isEmpty) {
         throw UnplayableVideoException(videoId,
             'No playable streams for this video.');
