@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
@@ -14,6 +15,7 @@ import '../../../../core/services/pip_service.dart';
 import '../../../../core/services/sponsorblock_service.dart';
 import '../../../../core/services/watch_category_tracker.dart';
 import '../../../../core/services/youtube_extractor_service.dart';
+import '../../../settings/presentation/providers/quality_providers.dart';
 import '../../data/services/audio_player_handler.dart';
 import '../../domain/entities/playback_models.dart';
 import '../../../library/presentation/providers/library_providers.dart';
@@ -305,20 +307,65 @@ class PlayerController extends Notifier<PlayerUiState>
     );
 
     try {
+      // Resolve the user's stream-quality preferences for this network.
+      // Videos always open in portrait (not fullscreen), so the
+      // no-fullscreen choice applies to the initial load.
+      final onWifi = await _isOnWifi();
+      final targetHeight =
+          _targetVideoHeight(onWifi: onWifi, fullscreen: false);
+      final worstAudio = _wantWorstAudio(onWifi);
+      // DASH targets (1440p/2160p) need video-only + separate audio;
+      // the pre-cache only holds muxed streams, so it can't serve them.
+      final wantDash = targetHeight != null &&
+          targetHeight >= 1440 &&
+          !keepAudioOnly;
+
       // Use pre-fetched Up Next data when available (instant Next),
       // otherwise fetch normally. The hit is removed; other queued
       // videos stay precached for later.
       final VideoDetails video;
       final PlaybackStreams streams;
       final List<SponsorSegment> segments;
+      String? dashAudioUrl;
       final PrecachedData? hit = _precache.remove(videoId);
-      if (hit != null) {
+      if (hit != null && !wantDash) {
         video = hit.details;
         streams = hit.streams;
         segments = hit.segments;
       } else {
         video = await _extractor.getVideoDetails(videoId);
-        streams = await _extractor.getPlaybackStreams(videoId);
+        if (wantDash) {
+          // Fetch the DASH option list and the audio track in parallel,
+          // then build a DASH-backed PlaybackStreams.
+          final results = await Future.wait([
+            _extractor.getQualityOptions(videoId),
+            _extractor.getPlaybackStreams(videoId,
+                preferBestAudio: !worstAudio),
+          ]);
+          final options = results[0] as List<MuxedQuality>;
+          final base = results[1] as PlaybackStreams;
+          final dash = _pickDashOption(options, targetHeight!);
+          if (dash != null) {
+            streams = PlaybackStreams(
+              videoId: videoId,
+              muxedUrl: dash.url,
+              muxedHeight: dash.height,
+              audioOnlyUrl: base.audioOnlyUrl,
+              audioBitrate: base.audioBitrate,
+              fetchedAt: DateTime.now(),
+            );
+            dashAudioUrl = dash.audioUrl;
+          } else {
+            // No DASH stream at that height — fall back to muxed.
+            streams = base;
+          }
+        } else {
+          streams = await _extractor.getPlaybackStreams(
+            videoId,
+            maxMuxedHeight: targetHeight ?? 720,
+            preferBestAudio: !worstAudio,
+          );
+        }
         segments = await _sponsorBlock.getSegments(videoId);
       }
 
@@ -331,6 +378,7 @@ class PlayerController extends Notifier<PlayerUiState>
           duration: video.duration,
         ),
         streamUrl: streams.muxedUrl,
+        audioUrl: dashAudioUrl,
         speed: previousSpeed,
       );
 
@@ -644,6 +692,12 @@ class PlayerController extends Notifier<PlayerUiState>
     if (count <= 0) return;
     final currentId = state.videoId;
     if (currentId == null || state.relatedVideos.isEmpty) return;
+    // Honor the user's quality preference for pre-cached videos too
+    // (muxed range only — DASH targets are fetched fresh on load).
+    final onWifi = await _isOnWifi();
+    final targetHeight =
+        _targetVideoHeight(onWifi: onWifi, fullscreen: false);
+    final worstAudio = _wantWorstAudio(onWifi);
     final ids = <String>[];
     for (final v in state.relatedVideos) {
       if (ids.length >= count) break;
@@ -657,7 +711,11 @@ class PlayerController extends Notifier<PlayerUiState>
       try {
         final details = await _extractor.getVideoDetails(id);
         if (token != _precacheToken || state.videoId != currentId) return;
-        final streams = await _extractor.getPlaybackStreams(id);
+        final streams = await _extractor.getPlaybackStreams(
+          id,
+          maxMuxedHeight: targetHeight ?? 720,
+          preferBestAudio: !worstAudio,
+        );
         if (token != _precacheToken || state.videoId != currentId) return;
         final segments = await _sponsorBlock.getSegments(id);
         if (token != _precacheToken || state.videoId != currentId) return;
@@ -678,6 +736,100 @@ class PlayerController extends Notifier<PlayerUiState>
     _precacheToken++; // cancel any in-flight pass
     _precache.clear();
     unawaited(precacheUpcoming());
+  }
+
+  // ---------------- Stream quality preferences ----------------
+
+  /// True when the active network is Wi-Fi/Ethernet; anything else
+  /// (mobile, unknown) counts as mobile data. Defaults to Wi-Fi when
+  /// the check itself fails.
+  Future<bool> _isOnWifi() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      return results.contains(ConnectivityResult.wifi) ||
+          results.contains(ConnectivityResult.ethernet);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Desired initial video height for the current network, or null for
+  /// "auto" (current behavior). When not fullscreen, the no-fullscreen
+  /// choice wins unless it is 'same' (mirror fullscreen).
+  int? _targetVideoHeight(
+      {required bool onWifi, required bool fullscreen}) {
+    final nofs = ref.read(onWifi
+        ? wifiNoFullscreenQualityProvider
+        : mobileNoFullscreenQualityProvider);
+    final full = ref.read(onWifi
+        ? wifiVideoQualityProvider
+        : mobileVideoQualityProvider);
+    final value = (!fullscreen && nofs != 'same') ? nofs : full;
+    return qualityValueToHeight(value);
+  }
+
+  /// True when the user picked the data-saver audio tier.
+  bool _wantWorstAudio(bool onWifi) =>
+      ref
+          .read(onWifi
+              ? wifiAudioQualityProvider
+              : mobileAudioQualityProvider) ==
+      'worst';
+
+  /// Best DASH option at exactly [targetHeight], else the closest DASH
+  /// option below it. Null when no DASH stream qualifies.
+  MuxedQuality? _pickDashOption(
+      List<MuxedQuality> options, int targetHeight) {
+    MuxedQuality? best;
+    for (final q in options) {
+      if (!q.isDash || q.height > targetHeight) continue;
+      if (best == null || q.height > best.height) best = q;
+    }
+    return best;
+  }
+
+  /// Closest option at-or-below [targetHeight], preferring muxed over
+  /// DASH on ties. Falls back to the lowest available option.
+  MuxedQuality? _pickClosestOption(
+      List<MuxedQuality> options, int targetHeight) {
+    if (options.isEmpty) return null;
+    MuxedQuality? best;
+    for (final q in options) {
+      if (q.height > targetHeight) continue;
+      if (best == null ||
+          q.height > best.height ||
+          (q.height == best.height && best.isDash && !q.isDash)) {
+        best = q;
+      }
+    }
+    return best ?? options.last;
+  }
+
+  /// Re-applies the quality preference when the user enters/exits
+  /// fullscreen: fullscreen uses the "Video" choice, portrait uses the
+  /// "When not fullscreen" choice ('same' = keep the current stream).
+  /// 'auto' never forces a switch.
+  Future<void> applyFullscreenQuality(bool isFullscreen) async {
+    if (state.status != PlayerStatus.ready || state.audioOnly) return;
+    final videoId = state.videoId;
+    if (videoId == null) return;
+    final onWifi = await _isOnWifi();
+    final target =
+        _targetVideoHeight(onWifi: onWifi, fullscreen: isFullscreen);
+    if (target == null) return; // 'auto' — leave the stream alone.
+    if (state.currentQuality?.height == target) return;
+    var options = state.availableQualities;
+    if (options.isEmpty) {
+      try {
+        options = await _extractor.getQualityOptions(videoId);
+      } catch (_) {
+        return;
+      }
+      if (state.videoId != videoId) return;
+    }
+    final match = _pickClosestOption(options, target);
+    if (match == null) return;
+    await setQuality(match);
   }
 
   /// Reads the Pre-loading setting directly from SharedPreferences
@@ -1155,8 +1307,9 @@ class PlayerController extends Notifier<PlayerUiState>
 
     try {
       final resumeAt = _handler.player.state.position;
-      final fresh =
-          await _extractor.getPlaybackStreams(state.videoId!);
+      final onWifi = await _isOnWifi();
+      final fresh = await _extractor.getPlaybackStreams(state.videoId!,
+          preferBestAudio: !_wantWorstAudio(onWifi));
       if (state.status != PlayerStatus.ready) return;
       // Preserve the user's chosen quality across recovery when possible.
       // Exception: DASH (video-only) qualities are fragile — if the player
