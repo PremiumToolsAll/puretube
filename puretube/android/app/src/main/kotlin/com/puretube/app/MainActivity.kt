@@ -5,7 +5,8 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 import android.util.Rational
-import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServiceActivity
+import com.ryanheise.audioservice.AudioServicePlugin
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
@@ -15,9 +16,28 @@ import io.flutter.plugin.common.MethodChannel
  *  - isInPip         -> Boolean
  *  - enterPip        -> Boolean
  * Notifies Dart via "onPipChanged" whenever PiP mode changes.
+ *
+ * Extends AudioServiceActivity (audio_service 0.18.x official integration):
+ * the activity shares audio_service's cached FlutterEngine instead of
+ * creating its own. Without this, AudioService.init throws
+ * IllegalStateException ("The Activity class declared in your
+ * AndroidManifest.xml is wrong...") and the app silently falls back to a
+ * handler with no foreground service — i.e. NO media notification ever.
  */
-class MainActivity : FlutterActivity() {
+class MainActivity : AudioServiceActivity() {
     private var pipChannel: MethodChannel? = null
+
+    // Warm up / reuse audio_service's shared engine (mirrors the official
+    // AudioServiceFragmentActivity pattern).
+    override fun getCachedEngineId(): String? {
+        AudioServicePlugin.getFlutterEngine(this)
+        return AudioServicePlugin.getFlutterEngineId()
+    }
+
+    // The engine is created and managed by AudioServicePlugin; it must NOT
+    // be destroyed with the activity, otherwise background playback (and
+    // its notification) dies as soon as the UI goes away.
+    override fun shouldDestroyEngineWithHost(): Boolean = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)

@@ -19,6 +19,10 @@ bool mediaKitReady = false;
 /// Used for background-playback diagnostics.
 bool audioServiceReady = false;
 
+/// The exact exception if AudioService.init failed (shown in
+/// Settings → Diagnostics so the real cause is visible on-device).
+String? audioServiceError;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -51,13 +55,11 @@ Future<void> main() async {
   late final PureTubeAudioHandler audioHandler;
   bool audioServiceOk = false;
 
-  /// Attempts AudioService.init with retries. On MIUI devices the
-  /// foreground service can fail if started too early — we wait a
-  /// moment before the first attempt.
+  /// Attempts AudioService.init. MainActivity extends audio_service's
+  /// AudioServiceActivity, so the activity shares the plugin's engine and
+  /// init is expected to succeed on the first attempt.
   Future<PureTubeAudioHandler?> tryAudioServiceInit() async {
-    // Give the activity a moment to settle (MIUI-friendly).
-    await Future.delayed(const Duration(milliseconds: 1500));
-    for (var attempt = 1; attempt <= 3; attempt++) {
+    for (var attempt = 1; attempt <= 2; attempt++) {
       try {
         final handler = await AudioService.init(
           builder: () => PureTubeAudioHandler(),
@@ -74,14 +76,18 @@ Future<void> main() async {
             rewindInterval: Duration(seconds: 10),
           ),
         );
+        audioServiceError = null;
         if (attempt > 1) {
           debugPrint('AudioService init succeeded on attempt $attempt');
         }
         return handler;
       } catch (e) {
+        // Persist the exact failure so Settings → Diagnostics shows the
+        // real cause instead of guessing about phone settings.
+        audioServiceError = e.toString();
         debugPrint('AudioService init attempt $attempt failed: $e');
-        if (attempt < 3) {
-          await Future.delayed(const Duration(seconds: 2));
+        if (attempt < 2) {
+          await Future.delayed(const Duration(seconds: 1));
         }
       }
     }

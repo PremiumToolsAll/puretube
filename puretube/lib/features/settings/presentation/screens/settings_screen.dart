@@ -951,6 +951,7 @@ class SettingsScreen extends ConsumerWidget {
                   audioServiceReady
                       ? 'Running — background playback and notification controls should work.'
                       : 'NOT running — background audio may stop when you leave the app. '
+                          '${audioServiceError != null ? 'Error: $audioServiceError. ' : ''}'
                           'Fix: enable Notifications, set Battery to "No restrictions", '
                           'allow Autostart for PureTube, then restart the app.',
                   style:
