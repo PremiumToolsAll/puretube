@@ -1891,49 +1891,62 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 ],
               ),
             ),
-            // Sleep timer countdown badge — visible only while a timer is
-            // active. Tapping opens the sleep timer sheet.
-            if (uiState.sleepRemaining != null)
-              Center(
-                child: Padding(
-                  padding:
-                      const EdgeInsets.only(top: 6, bottom: 2),
-                  child: PressScale(
-                    onTap: _showSleepSheet,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        borderRadius:
-                            BorderRadius.circular(20),
-                        color:
-                            _gold.withValues(alpha: 0.12),
-                        border: Border.all(
-                          color:
-                              _gold.withValues(alpha: 0.45),
-                          width: 1,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.timer_outlined,
-                              color: _gold, size: 14),
-                          const SizedBox(width: 6),
-                          Text(
-                            '${formatDuration(uiState.sleepRemaining)} left',
-                            style: TextStyle(
-                              color: _gold,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
+            // Sleep timer countdown badge — fixed-height slot so the
+            // layout never shifts when the timer starts/stops. Tapping
+            // opens the sleep timer sheet.
+            Center(
+              child: SizedBox(
+                height: 36,
+                child: uiState.sleepRemaining != null
+                    ? Padding(
+                        padding: const EdgeInsets.only(
+                            top: 6, bottom: 2),
+                        child: PressScale(
+                          onTap: _showSleepSheet,
+                          child: Container(
+                            padding:
+                                const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6),
+                            decoration: BoxDecoration(
+                              borderRadius:
+                                  BorderRadius.circular(
+                                      20),
+                              color: _gold.withValues(
+                                  alpha: 0.12),
+                              border: Border.all(
+                                color: _gold.withValues(
+                                    alpha: 0.45),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize:
+                                  MainAxisSize.min,
+                              children: [
+                                Icon(
+                                    Icons.timer_outlined,
+                                    color: _gold,
+                                    size: 14),
+                                const SizedBox(
+                                    width: 6),
+                                Text(
+                                  '${formatDuration(uiState.sleepRemaining)} left',
+                                  style: TextStyle(
+                                    color: _gold,
+                                    fontSize: 12,
+                                    fontWeight:
+                                        FontWeight.w600,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
               ),
+            ),
             // SONORA: large album art, 24px rounded corners, strong shadow.
             // Swipe left/right on the artwork to change tracks
             // (YouTube Music style) — only the artwork/title crossfade,
