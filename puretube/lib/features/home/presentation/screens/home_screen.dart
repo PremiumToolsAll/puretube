@@ -12,7 +12,6 @@ import '../widgets/video_card.dart';
 import '../../../player/presentation/providers/popup_visibility.dart';
 import '../../../library/presentation/screens/downloads_screen.dart';
 import '../../../library/presentation/screens/history_screen.dart';
-import '../../../library/presentation/screens/playlists_screen.dart';
 import '../../../settings/presentation/screens/settings_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
