@@ -30,7 +30,8 @@ import '../widgets/popup_player.dart';
 import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/subtitle_sheet.dart';
 import '../../../../features/settings/presentation/screens/settings_screen.dart'
-    show doubleTapSecondsProvider;
+    show doubleTapSecondsProvider, geminiApiKeyProvider;
+import '../../../../core/services/ai_summary_service.dart';
 
 enum _GaugeKind { volume, brightness, info }
 
@@ -375,6 +376,197 @@ class PlayerScreen extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<PlayerScreen> createState() => _PlayerScreenState();
+}
+
+/// Expandable "AI Summary" card below the video/channel info.
+///
+/// Generates a 2-3 sentence summary via Pollinations AI (free, no key)
+/// with Gemini as an optional fallback when the API key is set in
+/// Settings. Collapsible; never throws; never breaks the player UI.
+class _AiSummaryCard extends ConsumerStatefulWidget {
+  final String videoId;
+  final String title;
+  final String channelName;
+  final String description;
+
+  const _AiSummaryCard({
+    super.key,
+    required this.videoId,
+    required this.title,
+    required this.channelName,
+    required this.description,
+  });
+
+  @override
+  ConsumerState<_AiSummaryCard> createState() => _AiSummaryCardState();
+}
+
+class _AiSummaryCardState extends ConsumerState<_AiSummaryCard> {
+  static const _accent = Color(0xFF10B981);
+  static const _card = Color(0xFF16211C);
+
+  AiSummaryService? _service;
+  String? _summary;
+  bool _loading = true;
+  bool _expanded = true;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AiSummaryCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoId != widget.videoId) {
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+      _summary = null;
+    });
+    _service?.dispose();
+    _service =
+        AiSummaryService(geminiApiKey: ref.read(geminiApiKeyProvider));
+    try {
+      final summary = await _service!.getSummary(
+        title: widget.title,
+        channelName: widget.channelName,
+        description: widget.description,
+      );
+      if (!mounted) return;
+      setState(() {
+        _summary = summary;
+        _loading = false;
+        if (summary == null) _error = 'unavailable';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _service?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: _card,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color: _accent.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () =>
+                setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  const Icon(Icons.auto_awesome,
+                      color: _accent, size: 18),
+                  const SizedBox(width: 8),
+                  const Text('AI Summary',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _accent.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text('Powered by AI',
+                        style: TextStyle(
+                            color: _accent, fontSize: 10)),
+                  ),
+                  const Spacer(),
+                  Icon(
+                      _expanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      color: Colors.grey),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded) ...[
+            const Divider(height: 1, color: Colors.white10),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: _buildBody(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (int i = 0; i < 3; i++)
+            Container(
+              margin: EdgeInsets.only(
+                  bottom: 8, right: i == 2 ? 80 : 0),
+              height: 12,
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(6),
+              ),
+            ),
+        ],
+      );
+    }
+    if (_summary != null) {
+      return Text(_summary!,
+          style: const TextStyle(
+              color: Color(0xFFE8F0EC),
+              fontSize: 13,
+              height: 1.6));
+    }
+    return Row(
+      children: [
+        const Expanded(
+          child: Text('Summary not available.',
+              style:
+                  TextStyle(color: Colors.grey, fontSize: 13)),
+        ),
+        TextButton.icon(
+          onPressed: _load,
+          icon: const Icon(Icons.refresh,
+              color: _accent, size: 16),
+          label: const Text('Retry',
+              style: TextStyle(color: _accent)),
+        ),
+      ],
+    );
+  }
 }
 
 class _PlayerScreenState extends ConsumerState<PlayerScreen> {
@@ -3542,6 +3734,13 @@ class _DescriptionSheetState
                         : 'Subscribe'),
                   ),
                 ],
+              ),
+              const SizedBox(height: 16),
+              _AiSummaryCard(
+                videoId: video.id,
+                title: video.title,
+                channelName: video.author,
+                description: video.description,
               ),
               const SizedBox(height: 16),
               Row(
