@@ -30,10 +30,14 @@ class VideoCard extends StatelessWidget {
                   child: CachedNetworkImage(
                     imageUrl: video.thumbnailUrl,
                     fit: BoxFit.cover,
-                    placeholder: (_, __) =>
-                        Container(color: const Color(0xFF16211C)),
+                    placeholder: (_, __) => Container(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainer),
                     errorWidget: (_, __, ___) => Container(
-                      color: const Color(0xFF16211C),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainer,
                       child: const Icon(Icons.broken_image,
                           color: Colors.grey),
                     ),
