@@ -79,7 +79,7 @@ class _IosPill extends StatelessWidget {
     const width = 48.0;
     const height = 132.0;
     const radius = 14.0;
-    const gold = Color(0xFFD4A574);
+    final gold = Theme.of(context).colorScheme.primary;
     final clamped = value.clamp(0.0, 1.0);
     final icon = kind == _GaugeKind.volume
         ? Icons.headphones
@@ -177,7 +177,7 @@ class _IosPill extends StatelessWidget {
           ),
           child: Text(
             '$percent%',
-            style: const TextStyle(
+            style: TextStyle(
               color: gold,
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -281,7 +281,7 @@ class _ChannelRowState extends ConsumerState<_ChannelRow> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                color: _PlayerScreenState._emerald,
+                color: Theme.of(context).colorScheme.primary,
                 width: 2,
               ),
             ),
@@ -339,14 +339,16 @@ class _ChannelRowState extends ConsumerState<_ChannelRow> {
           style: ElevatedButton.styleFrom(
             // WILLOW: solid emerald pill; subscribed = dark pill, emerald text.
             backgroundColor: _subscribed
-                ? const Color(0xFF16211C)
-                : _PlayerScreenState._emerald,
+                ? Theme.of(context).colorScheme.surfaceContainer
+                : Theme.of(context).colorScheme.primary,
             foregroundColor: _subscribed
-                ? _PlayerScreenState._emeraldLight
-                : const Color(0xFF0C110E),
+                ? Theme.of(context).colorScheme.secondary
+                : Theme.of(context).scaffoldBackgroundColor,
             side: _subscribed
                 ? BorderSide(
-                    color: _PlayerScreenState._emerald
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
                         .withValues(alpha: 0.6))
                 : BorderSide.none,
             shape: RoundedRectangleBorder(
@@ -402,8 +404,8 @@ class _AiSummaryCard extends ConsumerStatefulWidget {
 }
 
 class _AiSummaryCardState extends ConsumerState<_AiSummaryCard> {
-  static const _accent = Color(0xFF10B981);
-  static const _card = Color(0xFF16211C);
+  Color get _accent => Theme.of(context).colorScheme.primary;
+  Color get _card => Theme.of(context).colorScheme.surfaceContainer;
 
   AiSummaryService? _service;
   String? _summary;
@@ -483,7 +485,7 @@ class _AiSummaryCardState extends ConsumerState<_AiSummaryCard> {
                   horizontal: 12, vertical: 10),
               child: Row(
                 children: [
-                  const Icon(Icons.auto_awesome,
+                  Icon(Icons.auto_awesome,
                       color: _accent, size: 18),
                   const SizedBox(width: 8),
                   const Text('AI Summary',
@@ -499,7 +501,7 @@ class _AiSummaryCardState extends ConsumerState<_AiSummaryCard> {
                       color: _accent.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Text('Powered by AI',
+                    child: Text('Powered by AI',
                         style: TextStyle(
                             color: _accent, fontSize: 10)),
                   ),
@@ -559,9 +561,9 @@ class _AiSummaryCardState extends ConsumerState<_AiSummaryCard> {
         ),
         TextButton.icon(
           onPressed: _load,
-          icon: const Icon(Icons.refresh,
+          icon: Icon(Icons.refresh,
               color: _accent, size: 16),
-          label: const Text('Retry',
+          label: Text('Retry',
               style: TextStyle(color: _accent)),
         ),
       ],
@@ -570,18 +572,23 @@ class _AiSummaryCardState extends ConsumerState<_AiSummaryCard> {
 }
 
 class _PlayerScreenState extends ConsumerState<PlayerScreen> {
-  static const _accent = Color(0xFF10B981);
+  Color get _accent => Theme.of(context).colorScheme.primary;
 
   /// WILLOW emerald theme for video mode: glowing controls, seekbar,
   /// outlined chips, avatar rings and the autoplay toggle.
-  static const _emerald = Color(0xFF10B981);
-  static const _emeraldLight = Color(0xFF34D399);
+  /// Follows the selected theme accent.
+  Color get _emerald => Theme.of(context).colorScheme.primary;
+  Color get _emeraldLight =>
+      Theme.of(context).colorScheme.secondary;
 
   /// Dark green-black scaffold background for video mode (WILLOW).
-  static const _willowBg = Color(0xFF0C110E);
+  /// Follows the selected theme background.
+  Color get _willowBg =>
+      Theme.of(context).scaffoldBackgroundColor;
 
   /// Spotify-style gold/tan accent used by the audio (music) mode.
-  static const _gold = Color(0xFFD4A574);
+  /// Follows the selected theme accent so the whole app converts.
+  Color get _gold => Theme.of(context).colorScheme.primary;
 
   VideoController? _videoController;
   bool _showControls = true;
@@ -1165,7 +1172,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               ListTile(
                 title: Text('${s}x'),
                 trailing: s == current
-                    ? const Icon(Icons.check, color: _accent)
+                    ? Icon(Icons.check, color: _accent)
                     : null,
                 onTap: () {
                   notifier.setSpeed(s);
@@ -1305,7 +1312,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                                               BorderRadius.circular(
                                                   4),
                                         ),
-                                        child: const Text('DASH',
+                                        child: Text('DASH',
                                             style: TextStyle(
                                                 color: _accent,
                                                 fontSize: 11,
@@ -2472,7 +2479,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 onHorizontalDragEnd: (_) => _onScrubEnd(),
               ),
             if (uiState.status == PlayerStatus.loading)
-              const Center(
+              Center(
                   child: CircularProgressIndicator(
                       color: _accent)),
             if (uiState.status == PlayerStatus.error)
@@ -2687,7 +2694,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     const EdgeInsets.symmetric(horizontal: 8),
                 child: Text(
                   '⏾ ${formatDuration(uiState.sleepRemaining)}',
-                  style: const TextStyle(
+                  style: TextStyle(
                       color: _accent, fontSize: 12),
                 ),
               ),
@@ -3009,7 +3016,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF16211C),
+                  color:
+                      Theme.of(context).colorScheme.surfaceContainer,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: _emerald.withValues(alpha: 0.25),
@@ -3019,7 +3027,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   crossAxisAlignment:
                       CrossAxisAlignment.start,
                   children: [
-                    const Text('Description',
+                    Text('Description',
                         style: TextStyle(
                             color: _emeraldLight,
                             fontSize: 13,
@@ -3263,7 +3271,7 @@ class _UpNextSectionState
     extends ConsumerState<_UpNextSection> {
   bool _autoplay = true;
 
-  static const _emerald = _PlayerScreenState._emerald;
+  Color get _emerald => Theme.of(context).colorScheme.primary;
 
   /// Header row: "Up Next" + Autoplay label with an emerald switch.
   Widget _header() {
@@ -3312,8 +3320,12 @@ class _UpNextSectionState
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: Shimmer.fromColors(
-                baseColor: const Color(0xFF1A1A1A),
-                highlightColor: const Color(0xFF2E2E2E),
+                baseColor: Theme.of(context)
+                    .colorScheme
+                    .surfaceContainer,
+                highlightColor: Theme.of(context)
+                    .colorScheme
+                    .surfaceContainerHigh,
                 child: Row(
                   children: [
                     Container(
@@ -4161,7 +4173,6 @@ class _StatsOverlay extends StatelessWidget {
 /// Seek bar for the audio (music) mode: gold track with time labels.
 class _AudioSeekBar extends StatelessWidget {
   final Player player;
-  static const _gold = Color(0xFFD4A574);
 
   const _AudioSeekBar({required this.player});
 
@@ -4190,7 +4201,9 @@ class _AudioSeekBar extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _PlayerSeekBar(
-                    player: player, activeColor: _gold),
+                    player: player,
+                    activeColor:
+                        Theme.of(context).colorScheme.primary),
                 Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12),
