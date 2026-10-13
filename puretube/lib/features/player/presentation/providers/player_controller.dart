@@ -391,11 +391,12 @@ class PlayerController extends Notifier<PlayerUiState>
       final targetHeight =
           _targetVideoHeight(onWifi: onWifi, fullscreen: false);
       final worstAudio = _wantWorstAudio(onWifi);
-      // DASH targets (1440p/2160p) need video-only + separate audio;
-      // the pre-cache only holds muxed streams, so it can't serve them.
-      final wantDash = targetHeight != null &&
-          targetHeight >= 1440 &&
-          !keepAudioOnly;
+      // 'auto' (null target) means best available quality — DASH included.
+      // 1080p and up have no muxed stream on YouTube, so auto and any
+      // target >= 1080 need the DASH path (video-only + separate audio).
+      // The pre-cache only holds muxed streams, so it can't serve them.
+      final wantDash =
+          !keepAudioOnly && (targetHeight == null || targetHeight >= 1080);
 
       // Use pre-fetched Up Next data when available (instant Next),
       // otherwise fetch normally. The hit is removed; other queued
@@ -1017,14 +1018,15 @@ class PlayerController extends Notifier<PlayerUiState>
               : mobileAudioQualityProvider) ==
       'worst';
 
-  /// Best DASH option at exactly [targetHeight], else the closest DASH
-  /// option below it, preferring the higher fps variant on ties. Null
-  /// when no DASH stream qualifies.
+  /// Best DASH option at-or-below [targetHeight] (null = no cap: the
+  /// highest DASH option wins), preferring the higher fps variant on
+  /// ties. Null when no DASH stream qualifies.
   MuxedQuality? _pickDashOption(
-      List<MuxedQuality> options, int targetHeight) {
+      List<MuxedQuality> options, int? targetHeight) {
     MuxedQuality? best;
     for (final q in options) {
-      if (!q.isDash || q.height > targetHeight) continue;
+      if (!q.isDash) continue;
+      if (targetHeight != null && q.height > targetHeight) continue;
       if (best == null ||
           q.height > best.height ||
           (q.height == best.height && q.fps > best.fps)) {

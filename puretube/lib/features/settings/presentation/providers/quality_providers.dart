@@ -6,7 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// PureTube's own take on quality settings — no YouTube clone UI.
 ///
 /// Video values: 'auto', '2160', '1440', '1080', '720', '480', '360',
-/// '240', '144'. 'auto' keeps the current behavior (best muxed stream).
+/// '240', '144'. 'auto' = best available quality (DASH included, so
+/// 1080p/1440p/2160p when the upload has them).
 /// No-fullscreen values: 'same' (mirror the fullscreen choice) plus the
 /// video values. Audio values: 'auto', 'best', 'worst'.
 
