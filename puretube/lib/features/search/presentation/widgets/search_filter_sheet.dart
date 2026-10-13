@@ -59,7 +59,7 @@ class SearchFilterSheet extends StatefulWidget {
 
 class _SearchFilterSheetState
     extends State<SearchFilterSheet> {
-  static const _accent = Color(0xFF10B981);
+  Color get _accent => Theme.of(context).colorScheme.primary;
   late SearchFilters _f;
 
   @override
@@ -86,7 +86,7 @@ class _SearchFilterSheetState
                   onPressed: () => Navigator.pop(
                       context,
                       const SearchFilters()),
-                  child: const Text('Reset',
+                  child: Text('Reset',
                       style:
                           TextStyle(color: _accent)),
                 ),
@@ -171,8 +171,9 @@ class _SearchFilterSheetState
                 onSelected: (_) =>
                     onPick(on ? null : v),
                 selectedColor: _accent,
-                backgroundColor:
-                    const Color(0xFF16211C),
+                backgroundColor: Theme.of(context)
+                    .colorScheme
+                    .surfaceContainer,
                 labelStyle: TextStyle(
                     color: on ? Colors.black : Colors.white,
                     fontWeight:
@@ -183,7 +184,9 @@ class _SearchFilterSheetState
                   side: BorderSide(
                     color: on
                         ? _accent
-                        : const Color(0xFF2D4A3E),
+                        : Theme.of(context)
+                            .colorScheme
+                            .outlineVariant,
                   ),
                 ),
               );
