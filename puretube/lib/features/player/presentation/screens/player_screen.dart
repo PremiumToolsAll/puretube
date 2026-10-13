@@ -2283,6 +2283,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   ),
                   StreamBuilder<bool>(
                     stream: player.stream.playing,
+                    initialData: player.state.playing,
                     builder: (context, snap) {
                       final playing = snap.data ?? false;
                       return PressScale(
@@ -2948,6 +2949,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final player = ref.read(mediaKitPlayerProvider);
     return StreamBuilder<bool>(
       stream: player.stream.playing,
+      initialData: player.state.playing,
       builder: (context, snap) {
         final playing = snap.data ?? false;
         return Row(
