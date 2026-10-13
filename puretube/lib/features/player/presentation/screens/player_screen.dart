@@ -2238,9 +2238,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             // the LYRICS button's bottom sheet (no separate card).
             const Expanded(child: SizedBox.shrink()),
             // Bottom tabs: QUEUE | LYRICS | TIMER
-            // Generous empty space below (user wants the row lifted up).
+            // Large empty space below (user wants the row well lifted up
+            // in audio mode for a clean, beautiful look).
             Padding(
-              padding: const EdgeInsets.only(bottom: 96),
+              padding: const EdgeInsets.only(bottom: 140),
               child: Row(
                 mainAxisAlignment:
                     MainAxisAlignment.spaceEvenly,
