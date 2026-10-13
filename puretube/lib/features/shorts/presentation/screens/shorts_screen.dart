@@ -56,9 +56,15 @@ class _ShortsScreenState
                           style: ElevatedButton
                               .styleFrom(
                                   backgroundColor:
-                                      _accent),
+                                      _accent,
+                                  foregroundColor:
+                                      Colors.black),
                           child: const Text(
-                              'Retry'),
+                              'Retry',
+                              style: TextStyle(
+                                  color: Colors.black,
+                                  fontWeight:
+                                      FontWeight.bold)),
                         ),
                       ],
                     ),
