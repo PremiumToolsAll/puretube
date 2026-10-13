@@ -391,11 +391,16 @@ class PlayerController extends Notifier<PlayerUiState>
       final targetHeight =
           _targetVideoHeight(onWifi: onWifi, fullscreen: false);
       final worstAudio = _wantWorstAudio(onWifi);
-      // DASH targets (1440p/2160p) need video-only + separate audio;
-      // the pre-cache only holds muxed streams, so it can't serve them.
-      final wantDash = targetHeight != null &&
-          targetHeight >= 1440 &&
-          !keepAudioOnly;
+      // Force best quality: 'auto' (null target) and any 1080p+ target
+      // take the DASH path (video-only + separate audio). The pre-cache
+      // only holds muxed streams, so it can't serve them.
+      // Safe: manifest extraction now defaults to the visionOS client,
+      // whose video-only/audio-only URLs survive YouTube's PO-token 403s
+      // (the reason DASH never played on androidSdkless). If DASH
+      // playback still fails, player error recovery falls back to the
+      // reliable 720p muxed stream.
+      final wantDash =
+          !keepAudioOnly && (targetHeight == null || targetHeight >= 1080);
 
       // Use pre-fetched Up Next data when available (instant Next),
       // otherwise fetch normally. The hit is removed; other queued
@@ -1017,14 +1022,15 @@ class PlayerController extends Notifier<PlayerUiState>
               : mobileAudioQualityProvider) ==
       'worst';
 
-  /// Best DASH option at exactly [targetHeight], else the closest DASH
-  /// option below it, preferring the higher fps variant on ties. Null
-  /// when no DASH stream qualifies.
+  /// Best DASH option at-or-below [targetHeight], preferring the higher
+  /// fps variant on ties. Null [targetHeight] ('auto') picks the highest
+  /// DASH option available. Null when no DASH stream qualifies.
   MuxedQuality? _pickDashOption(
-      List<MuxedQuality> options, int targetHeight) {
+      List<MuxedQuality> options, int? targetHeight) {
     MuxedQuality? best;
     for (final q in options) {
-      if (!q.isDash || q.height > targetHeight) continue;
+      if (!q.isDash) continue;
+      if (targetHeight != null && q.height > targetHeight) continue;
       if (best == null ||
           q.height > best.height ||
           (q.height == best.height && q.fps > best.fps)) {
