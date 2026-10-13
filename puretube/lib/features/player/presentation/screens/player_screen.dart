@@ -2989,7 +2989,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   ),
                   child: Icon(
                     playing ? Icons.pause : Icons.play_arrow,
-                    key: ValueKey<bool>(playing),
                     color: Colors.white,
                     size: 36,
                   ),
