@@ -13,7 +13,7 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
-  static const _accent = Color(0xFF6200EA);
+  Color get _accent => Theme.of(context).colorScheme.primary;
   final _pageCtrl = PageController();
   int _page = 0;
 
@@ -82,7 +82,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             SmoothPageIndicator(
               controller: _pageCtrl,
               count: _pages.length,
-              effect: const WormEffect(
+              effect: WormEffect(
                 dotColor: Colors.white24,
                 activeDotColor: _accent,
                 dotHeight: 8,
@@ -154,10 +154,10 @@ class _OnboardPage extends StatelessWidget {
             width: 120,
             height: 120,
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
+              gradient: LinearGradient(
                 colors: [
-                  Color(0xFF6200EA),
-                  Color(0xFF00BCD4)
+                  Theme.of(context).colorScheme.primary,
+                  const Color(0xFF00BCD4)
                 ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
@@ -165,7 +165,9 @@ class _OnboardPage extends StatelessWidget {
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF6200EA)
+                  color: Theme.of(context)
+                      .colorScheme
+                      .primary
                       .withOpacity(0.4),
                   blurRadius: 32,
                   spreadRadius: 8,
