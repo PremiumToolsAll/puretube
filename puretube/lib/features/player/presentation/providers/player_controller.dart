@@ -539,6 +539,23 @@ class PlayerController extends Notifier<PlayerUiState>
         titleHint: v?.title, authorHint: v?.author);
   }
 
+  /// Reorders the Up Next queue (drag-to-reorder in the queue sheet).
+  /// Playback order follows the queue, so "Next" plays the new first item.
+  /// Note: the sheet uses onReorderItem, which already adjusts newIndex
+  /// for the removed item — no manual index shifting needed here.
+  void reorderQueue(int oldIndex, int newIndex) {
+    final videos = List<VideoDetails>.from(state.relatedVideos);
+    if (oldIndex < 0 ||
+        oldIndex >= videos.length ||
+        newIndex < 0 ||
+        newIndex > videos.length) {
+      return;
+    }
+    final item = videos.removeAt(oldIndex);
+    videos.insert(newIndex, item);
+    state = state.copyWith(relatedVideos: videos);
+  }
+
   /// Returns a video id to play for "Next", making sure Up Next is
   /// loaded first. Retries the related-videos fetch, then falls back
   /// to a direct keyword search, so Next almost always finds a video.
