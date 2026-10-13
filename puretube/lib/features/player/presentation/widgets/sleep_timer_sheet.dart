@@ -29,6 +29,8 @@ class SleepTimerSheet extends ConsumerWidget {
     final ui = ref.watch(playerControllerProvider);
     final notifier = ref.read(playerControllerProvider.notifier);
     final remaining = ui.sleepRemaining;
+    final sleepTotal = ui.sleepTotal;
+    final sleepEndOfVideo = ui.sleepEndOfVideo;
 
     final playerState = ref.read(mediaKitPlayerProvider).state;
     final videoLeft =
@@ -146,7 +148,8 @@ class SleepTimerSheet extends ConsumerWidget {
                       label: videoLeft > Duration.zero
                           ? 'End of video (${formatDuration(videoLeft)})'
                           : 'End of video',
-                      selected: false,
+                      selected:
+                          sleepEndOfVideo && remaining != null,
                       onTap: () {
                         HapticFeedback.lightImpact();
                         final ok = notifier
@@ -166,8 +169,10 @@ class SleepTimerSheet extends ConsumerWidget {
                     _option(
                       context,
                       icon: Icons.edit_outlined,
-                      label: 'Custom…',
-                      selected: false,
+                      label: _customLabel(
+                          remaining, sleepTotal, sleepEndOfVideo),
+                      selected: _isCustomSelected(
+                          remaining, sleepTotal, sleepEndOfVideo),
                       onTap: () {
                         Navigator.pop(context);
                         _showCustomDialog(context, ref);
@@ -191,6 +196,36 @@ class SleepTimerSheet extends ConsumerWidget {
     if (remaining == null) return false;
     return (remaining - preset).abs() <
         const Duration(seconds: 90);
+  }
+
+  static const _presetMinutes = [10, 15, 20, 30, 45, 60];
+
+  /// True when [total] is one of the preset durations (10/15/20/30/45/60
+  /// minutes), tolerating 90 seconds of drift.
+  bool _matchesAnyPreset(Duration? total) {
+    if (total == null) return false;
+    return _presetMinutes.any(
+        (m) => _matches(total, Duration(minutes: m)));
+  }
+
+  /// The Custom row is selected when a timer is running, it is not an
+  /// end-of-video timer, and the originally set duration is not one of
+  /// the presets (i.e. it was set through the custom dialog).
+  bool _isCustomSelected(
+      Duration? remaining, Duration? total, bool endOfVideo) {
+    if (remaining == null || endOfVideo || total == null) return false;
+    return !_matchesAnyPreset(total);
+  }
+
+  /// Label for the Custom row: shows the originally set value while a
+  /// custom timer is active, e.g. "Custom (90 minutes)".
+  String _customLabel(
+      Duration? remaining, Duration? total, bool endOfVideo) {
+    if (_isCustomSelected(remaining, total, endOfVideo)) {
+      final mins = total!.inMinutes;
+      return 'Custom ($mins minute${mins == 1 ? '' : 's'})';
+    }
+    return 'Custom…';
   }
 
   Widget _option(
