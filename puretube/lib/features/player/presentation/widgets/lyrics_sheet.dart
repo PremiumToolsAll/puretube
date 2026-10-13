@@ -25,10 +25,6 @@ class LyricsSheet extends ConsumerStatefulWidget {
     this.thumbnailUrl = '',
   });
 
-  static const _bg = Color(0xFF0C110E);
-  static const _card = Color(0xFF16211C);
-  static const _accent = Color(0xFF10B981);
-  static const _accentLight = Color(0xFF34D399);
 
   static Future<void> show(
     BuildContext context, {
@@ -54,6 +50,12 @@ class LyricsSheet extends ConsumerStatefulWidget {
 }
 
 class _LyricsSheetState extends ConsumerState<LyricsSheet> {
+  Color get _bg => Theme.of(context).scaffoldBackgroundColor;
+  Color get _card => Theme.of(context).colorScheme.surfaceContainer;
+  Color get _accent => Theme.of(context).colorScheme.primary;
+  Color get _accentLight =>
+      Theme.of(context).colorScheme.secondary;
+
   LyricsService? _service;
   LyricsResult? _result;
   bool _loading = true;
@@ -101,11 +103,12 @@ class _LyricsSheetState extends ConsumerState<LyricsSheet> {
     final maxH = MediaQuery.of(context).size.height * 0.85;
     return Container(
       constraints: BoxConstraints(maxHeight: maxH),
-      decoration: const BoxDecoration(
-        color: LyricsSheet._bg,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: _bg,
+        borderRadius:
+            const BorderRadius.vertical(top: Radius.circular(24)),
         border: Border(
-          top: BorderSide(color: LyricsSheet._accent, width: 1.5),
+          top: BorderSide(color: _accent, width: 1.5),
         ),
       ),
       child: SafeArea(
@@ -126,8 +129,8 @@ class _LyricsSheetState extends ConsumerState<LyricsSheet> {
                   const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
               child: Row(
                 children: [
-                  const Icon(Icons.lyrics_outlined,
-                      color: LyricsSheet._accent, size: 24),
+                  Icon(Icons.lyrics_outlined,
+                      color: _accent, size: 24),
                   const SizedBox(width: 12),
                   const Text(
                     'Lyrics',
@@ -171,8 +174,8 @@ class _LyricsSheetState extends ConsumerState<LyricsSheet> {
                           _result?.artist ?? widget.channelName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: LyricsSheet._accentLight,
+                          style: TextStyle(
+                            color: _accentLight,
                             fontSize: 13,
                           ),
                         ),
@@ -207,8 +210,9 @@ class _LyricsSheetState extends ConsumerState<LyricsSheet> {
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       physics: const NeverScrollableScrollPhysics(),
       child: Shimmer.fromColors(
-        baseColor: const Color(0xFF1C2A23),
-        highlightColor: const Color(0xFF2A3F34),
+        baseColor: _card,
+        highlightColor:
+            Theme.of(context).colorScheme.surfaceContainerHigh,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: List.generate(
@@ -261,15 +265,15 @@ class _LyricsSheetState extends ConsumerState<LyricsSheet> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color:
-                  LyricsSheet._accent.withValues(alpha: 0.12),
+                  _accent.withValues(alpha: 0.12),
               border: Border.all(
                 color:
-                    LyricsSheet._accent.withValues(alpha: 0.35),
+                    _accent.withValues(alpha: 0.35),
               ),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.music_off_outlined,
-              color: LyricsSheet._accent,
+              color: _accent,
               size: 34,
             ),
           ),
@@ -295,17 +299,16 @@ class _LyricsSheetState extends ConsumerState<LyricsSheet> {
           const SizedBox(height: 20),
           OutlinedButton.icon(
             onPressed: _retry,
-            icon: const Icon(Icons.refresh,
-                color: LyricsSheet._accent, size: 18),
+            icon: Icon(Icons.refresh, color: _accent, size: 18),
             label: Text(
               _attemptCount > 0 ? 'Try again' : 'Retry',
               style:
-                  const TextStyle(color: LyricsSheet._accent),
+                  TextStyle(color: _accent),
             ),
             style: OutlinedButton.styleFrom(
               side: BorderSide(
                 color:
-                    LyricsSheet._accent.withValues(alpha: 0.5),
+                    _accent.withValues(alpha: 0.5),
               ),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
