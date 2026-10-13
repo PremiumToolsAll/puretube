@@ -173,9 +173,19 @@ class _SearchFilterSheetState
                 selectedColor: _accent,
                 backgroundColor:
                     const Color(0xFF16211C),
-                labelStyle: const TextStyle(
-                    color: Colors.white,
+                labelStyle: TextStyle(
+                    color: on ? Colors.black : Colors.white,
+                    fontWeight:
+                        on ? FontWeight.bold : FontWeight.normal,
                     fontSize: 13),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: BorderSide(
+                    color: on
+                        ? _accent
+                        : const Color(0xFF2D4A3E),
+                  ),
+                ),
               );
             }),
           ),
