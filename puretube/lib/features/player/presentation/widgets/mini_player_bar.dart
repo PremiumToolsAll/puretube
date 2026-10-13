@@ -92,7 +92,7 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
               InkWell(
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => PlayerScreen(videoId: video!.id),
+                    builder: (_) => PlayerScreen(videoId: video.id),
                   ),
                 ),
                 child: Padding(
