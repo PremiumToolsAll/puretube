@@ -40,9 +40,21 @@ class ShortsController extends Notifier<ShortsState> {
   Future<void> _load() async {
     try {
       // Shorts via search (no dedicated shorts feed in the extractor).
-      final videos = await ref
-          .read(extractorProvider)
-          .searchVideos('#shorts', limit: 30);
+      // Try multiple queries as fallback for rate limiting.
+      List<VideoDetails> videos = [];
+      for (final q in ['#shorts', 'shorts', 'short videos']) {
+        try {
+          videos = await ref
+              .read(extractorProvider)
+              .searchVideos(q, limit: 30);
+          if (videos.isNotEmpty) break;
+        } catch (_) {
+          continue;
+        }
+      }
+      if (videos.isEmpty) {
+        throw Exception('No shorts found');
+      }
       final shorts = videos
           .where((v) =>
               v.duration != null &&
