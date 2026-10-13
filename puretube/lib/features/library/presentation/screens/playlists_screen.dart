@@ -26,8 +26,8 @@ class PlaylistsScreen extends ConsumerWidget {
                   style: TextStyle(color: Colors.grey)))
           : ListView.separated(
               itemCount: playlists.length,
-              separatorBuilder: (_, __) => const Divider(
-                  height: 1, color: Color(0xFF16211C)),
+              separatorBuilder: (_, __) => Divider(
+                  height: 1, color: Theme.of(context).colorScheme.surfaceContainer),
               itemBuilder: (ctx, i) {
                 final p = playlists[i];
                 return Dismissible(
@@ -49,7 +49,7 @@ class PlaylistsScreen extends ConsumerWidget {
                       width: 48,
                       height: 48,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF16211C),
+                        color: Theme.of(context).colorScheme.surfaceContainer,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Icon(Icons.playlist_play,
@@ -141,8 +141,8 @@ class PlaylistDetailScreen extends ConsumerWidget {
                   style: TextStyle(color: Colors.grey)))
           : ListView.separated(
               itemCount: playlist.items.length,
-              separatorBuilder: (_, __) => const Divider(
-                  height: 1, color: Color(0xFF16211C)),
+              separatorBuilder: (_, __) => Divider(
+                  height: 1, color: Theme.of(context).colorScheme.surfaceContainer),
               itemBuilder: (ctx, i) {
                 final item = playlist.items[i];
                 return Dismissible(
@@ -170,8 +170,9 @@ class PlaylistDetailScreen extends ConsumerWidget {
                         fit: BoxFit.cover,
                         errorWidget: (_, __, ___) =>
                             Container(
-                                color:
-                                    const Color(0xFF16211C)),
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainer),
                       ),
                     ),
                     title: Text(item.title,
