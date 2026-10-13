@@ -21,6 +21,7 @@ import '../../../../features/library/presentation/screens/downloads_screen.dart'
 import '../../../../features/library/presentation/screens/playlists_screen.dart'
     show showSaveToPlaylistSheet;
 import '../../../ai/ai_summary_section.dart';
+import '../widgets/ai_lyrics_card.dart';
 import '../../../channel/presentation/screens/channel_screen.dart';
 import '../../domain/entities/playback_models.dart';
 import '../providers/player_controller.dart';
@@ -2399,7 +2400,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 ],
               ),
             ),
-            const Spacer(),
+            const SizedBox(height: 10),
+            // AI Lyrics card (audio mode): expandable lyrics below the
+            // controls, scrollable so long lyrics never overflow.
+            // Auto-fetched by the controller when the track loads.
+            const Expanded(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: AiLyricsCard(),
+              ),
+            ),
             // Bottom tabs: QUEUE | LYRICS | TIMER
             Padding(
               padding: const EdgeInsets.only(bottom: 18),
@@ -3980,6 +3990,11 @@ class _DescriptionSheetState
                 channelName: video.author,
                 description: video.description,
               ),
+              const SizedBox(height: 16),
+              // AI Lyrics (video mode): auto-generated when the video
+              // loads; shares the controller's lyrics cache with audio
+              // mode.
+              const AiLyricsCard(),
               const SizedBox(height: 16),
               Row(
                 children: [
