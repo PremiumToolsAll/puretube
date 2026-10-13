@@ -189,6 +189,14 @@ class MuxedQuality {
   /// Short codec name: "avc", "vp9", "av1". Empty when unknown.
   final String codec;
 
+  /// True when the stream carries HDR (PQ/HLG) metadata, detected from
+  /// the stream's quality label when the extractor exposes it.
+  /// youtube_explode_dart does not surface per-stream color info, so
+  /// this stays false unless the label names HDR explicitly — HDR
+  /// streams still parse and play through the normal path (nothing in
+  /// the pipeline assumes SDR, so there is no HDR-specific crash).
+  final bool isHdr;
+
   const MuxedQuality({
     required this.label,
     required this.height,
@@ -197,6 +205,7 @@ class MuxedQuality {
     this.bitrateKbps = 0,
     this.fps = 0,
     this.codec = '',
+    this.isHdr = false,
   });
 
   /// True when this is a video-only DASH stream needing external audio.
@@ -215,22 +224,27 @@ class MuxedQuality {
     return parts.join(' · ');
   }
 
-  /// Display resolution, e.g. "2160p (2K)", "1440p (1.5K)", "720p".
+  /// Display resolution, e.g. "2160p60 (2K)", "1440p (1.5K)", "720p",
+  /// "720p60". High-frame-rate variants (>30fps) get the fps suffix so
+  /// they are visually distinct from their 24/30fps twins at the same
+  /// height (YouTube-style "720p60").
   String get resolutionLabel {
-    if (height >= 2160) return '2160p (2K)';
-    if (height >= 1440) return '1440p (1.5K)';
-    return '${height}p';
+    final fpsSuffix = fps > 30 ? '$fps' : '';
+    if (height >= 2160) return '2160p$fpsSuffix (2K)';
+    if (height >= 1440) return '1440p$fpsSuffix (1.5K)';
+    return '${height}p$fpsSuffix';
   }
 
   @override
   bool operator ==(Object other) =>
       other is MuxedQuality &&
       other.height == height &&
+      other.fps == fps &&
       other.url == url &&
       other.audioUrl == audioUrl;
 
   @override
-  int get hashCode => Object.hash(height, url, audioUrl);
+  int get hashCode => Object.hash(height, fps, url, audioUrl);
 }
 
 /// A subtitle/caption track available for a video.
