@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -411,7 +410,6 @@ class SettingsScreen extends ConsumerWidget {
       BuildContext context, WidgetRef ref, String current) {
     final controller = TextEditingController(text: current);
     final accent = Theme.of(context).colorScheme.primary;
-    final accentLight = Theme.of(context).colorScheme.secondary;
     final card = Theme.of(context).colorScheme.surfaceContainer;
     showDialog(
       context: context,
@@ -481,7 +479,6 @@ class SettingsScreen extends ConsumerWidget {
   Future<void> _confirmClearHistory(
       BuildContext context, WidgetRef ref) async {
     final card = Theme.of(context).colorScheme.surfaceContainer;
-    final accent = Theme.of(context).colorScheme.primary;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -563,7 +560,6 @@ class SettingsScreen extends ConsumerWidget {
 
   void _showAbout(BuildContext context) async {
     final accent = Theme.of(context).colorScheme.primary;
-    final accentLight = Theme.of(context).colorScheme.secondary;
     final card = Theme.of(context).colorScheme.surfaceContainer;
     PackageInfo? info;
     try {
