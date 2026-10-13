@@ -2972,45 +2972,24 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   height: 72,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _emerald.withValues(alpha: 0.92),
+                    color: Colors.white,
                     border: Border.all(
-                      color:
-                          _emeraldLight.withValues(alpha: 0.55),
+                      color: Colors.white,
                       width: 2,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color:
-                            _emerald.withValues(alpha: 0.40),
+                        color: Colors.white.withValues(alpha: 0.25),
                         blurRadius: 24,
                         spreadRadius: 3,
                       ),
                     ],
                   ),
-                  child: AnimatedSwitcher(
-                    duration:
-                        const Duration(milliseconds: 200),
-                    switchInCurve: Curves.easeInOut,
-                    switchOutCurve: Curves.easeInOut,
-                    transitionBuilder: (child, animation) {
-                      return FadeTransition(
-                        opacity: animation,
-                        child: ScaleTransition(
-                          scale: Tween<double>(
-                                  begin: 0.6, end: 1.0)
-                              .animate(animation),
-                          child: child,
-                        ),
-                      );
-                    },
-                    child: Icon(
-                      playing
-                          ? Icons.pause
-                          : Icons.play_arrow,
-                      key: ValueKey<bool>(playing),
-                      color: Colors.white,
-                      size: 36,
-                    ),
+                  child: Icon(
+                    playing ? Icons.pause : Icons.play_arrow,
+                    key: ValueKey<bool>(playing),
+                    color: Colors.black,
+                    size: 36,
                   ),
                 ),
               ),
