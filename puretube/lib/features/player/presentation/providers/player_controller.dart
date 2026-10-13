@@ -180,6 +180,17 @@ class PlayerController extends Notifier<PlayerUiState>
   /// push a duplicate entry for the navigation itself.
   final List<String> _history = [];
   int _historyIndex = -1;
+
+  /// Pre-fetched Up Next data so tapping Next plays instantly.
+  /// Filled by [precacheNext] in the background after each successful
+  /// load; consumed by [loadVideo] when the requested id matches.
+  /// Pure extractor HTTP calls — never touches the player, so the
+  /// currently playing video is unaffected.
+  String? _precachedVideoId;
+  VideoDetails? _precachedDetails;
+  PlaybackStreams? _precachedStreams;
+  List<SponsorSegment>? _precachedSegments;
+  bool _precacheInFlight = false;
   bool _navigatingHistory = false;
 
   @override
@@ -279,9 +290,27 @@ class PlayerController extends Notifier<PlayerUiState>
     );
 
     try {
-      final video = await _extractor.getVideoDetails(videoId);
-      final streams = await _extractor.getPlaybackStreams(videoId);
-      final segments = await _sponsorBlock.getSegments(videoId);
+      // Use the pre-fetched Up Next data when available (instant Next),
+      // otherwise fetch normally. A precache for a different video is
+      // stale — drop it.
+      final VideoDetails video;
+      final PlaybackStreams streams;
+      final List<SponsorSegment> segments;
+      if (videoId == _precachedVideoId &&
+          _precachedDetails != null &&
+          _precachedStreams != null) {
+        video = _precachedDetails!;
+        streams = _precachedStreams!;
+        segments = _precachedSegments ?? const [];
+      } else {
+        video = await _extractor.getVideoDetails(videoId);
+        streams = await _extractor.getPlaybackStreams(videoId);
+        segments = await _sponsorBlock.getSegments(videoId);
+      }
+      _precachedVideoId = null;
+      _precachedDetails = null;
+      _precachedStreams = null;
+      _precachedSegments = null;
 
       await _handler.loadMedia(
         mediaItem: MediaItem(
@@ -527,6 +556,9 @@ class PlayerController extends Notifier<PlayerUiState>
         relatedVideos: videos,
         relatedFailed: videos.isEmpty,
       );
+      // Up Next is known now — pre-fetch the first video's streams so
+      // tapping Next plays instantly.
+      unawaited(precacheNext());
     } catch (_) {
       if (state.videoId != videoId) return;
       state = state.copyWith(relatedFailed: true);
@@ -558,6 +590,13 @@ class PlayerController extends Notifier<PlayerUiState>
     final item = videos.removeAt(oldIndex);
     videos.insert(newIndex, item);
     state = state.copyWith(relatedVideos: videos);
+    // The "next" video may have changed — refresh the precache so
+    // tapping Next stays instant.
+    _precachedVideoId = null;
+    _precachedDetails = null;
+    _precachedStreams = null;
+    _precachedSegments = null;
+    unawaited(precacheNext());
   }
 
   /// Returns a video id to play for "Next", making sure Up Next is
@@ -582,6 +621,39 @@ class PlayerController extends Notifier<PlayerUiState>
       }
     } catch (_) {}
     return null;
+  }
+
+  /// Pre-fetches the Up Next video's details + streams in the background
+  /// so tapping Next (⏭️) plays instantly instead of waiting on network
+  /// calls. Best-effort: failures are swallowed and Next simply does a
+  /// normal load. Only does extractor HTTP calls — the player and current
+  /// playback are never touched.
+  Future<void> precacheNext() async {
+    if (_precacheInFlight) return;
+    if (state.status != PlayerStatus.ready) return;
+    final currentId = state.videoId;
+    if (currentId == null || state.relatedVideos.isEmpty) return;
+    final nextId = state.relatedVideos.first.id;
+    if (nextId == currentId) return;
+    if (nextId == _precachedVideoId && _precachedStreams != null) return;
+
+    _precacheInFlight = true;
+    try {
+      final details = await _extractor.getVideoDetails(nextId);
+      final streams = await _extractor.getPlaybackStreams(nextId);
+      final segments = await _sponsorBlock.getSegments(nextId);
+      // Discard if the user navigated to a different video while we
+      // were fetching — the precache would be stale.
+      if (state.videoId != currentId) return;
+      _precachedVideoId = nextId;
+      _precachedDetails = details;
+      _precachedStreams = streams;
+      _precachedSegments = segments;
+    } catch (_) {
+      // Best effort — Next falls back to a normal load.
+    } finally {
+      _precacheInFlight = false;
+    }
   }
 
   /// Switches to a different quality, preserving the current position
