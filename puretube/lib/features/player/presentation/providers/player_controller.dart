@@ -13,6 +13,7 @@ import '../../../../core/di/providers.dart';
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/services/pip_service.dart';
 import '../../../../core/services/sponsorblock_service.dart';
+import '../../../../core/services/lyrics_service.dart';
 import '../../../../core/services/watch_category_tracker.dart';
 import '../../../../core/services/youtube_extractor_service.dart';
 import '../../../settings/presentation/providers/quality_providers.dart';
@@ -43,6 +44,8 @@ class PlayerUiState {
   final MuxedQuality? currentQuality;
   final List<VideoDetails> relatedVideos;
   final bool relatedFailed;
+  final LyricsResult? lyricsResult;
+  final bool lyricsLoading;
 
   const PlayerUiState({
     this.status = PlayerStatus.idle,
@@ -65,6 +68,8 @@ class PlayerUiState {
     this.currentQuality,
     this.relatedVideos = const [],
     this.relatedFailed = false,
+    this.lyricsResult,
+    this.lyricsLoading = false,
   });
 
   PlayerUiState copyWith({
@@ -90,6 +95,9 @@ class PlayerUiState {
     MuxedQuality? currentQuality,
     List<VideoDetails>? relatedVideos,
     bool? relatedFailed,
+    LyricsResult? lyricsResult,
+    bool? lyricsLoading,
+    bool clearLyrics = false,
   }) {
     return PlayerUiState(
       status: status ?? this.status,
@@ -117,6 +125,9 @@ class PlayerUiState {
       currentQuality: currentQuality ?? this.currentQuality,
       relatedVideos: relatedVideos ?? this.relatedVideos,
       relatedFailed: relatedFailed ?? this.relatedFailed,
+      lyricsResult:
+          clearLyrics ? null : (lyricsResult ?? this.lyricsResult),
+      lyricsLoading: lyricsLoading ?? this.lyricsLoading,
     );
   }
 }
@@ -218,6 +229,14 @@ class PlayerController extends Notifier<PlayerUiState>
   /// a reorder, or a settings change makes it stale.
   final Map<String, PrecachedData> _precache = {};
   int _precacheToken = 0;
+
+  /// Auto-generated lyrics cache, keyed by video id — shared by the
+  /// AI Lyrics cards in both video and audio mode, so switching back
+  /// to a track shows its lyrics instantly.
+  /// [_lyricsToken] cancels an in-flight lyrics fetch when the user
+  /// navigates to another video.
+  final Map<String, LyricsResult> _lyricsCache = {};
+  int _lyricsToken = 0;
   bool _navigatingHistory = false;
 
   @override
@@ -300,6 +319,8 @@ class PlayerController extends Notifier<PlayerUiState>
     _cancelSleepTimer();
     // Navigating away cancels any in-flight pre-load pass.
     _precacheToken++;
+    // Navigating away also cancels any in-flight lyrics auto-fetch.
+    _lyricsToken++;
     await _handler.player.stop();
 
     // Record in playback history (unless this load IS a history
@@ -425,6 +446,11 @@ class PlayerController extends Notifier<PlayerUiState>
       // Track the watch category for personalized suggestions
       // (Up Next + home feed).
       unawaited(WatchCategoryTracker.record(video.title));
+      // Auto-generate lyrics for the AI Lyrics cards (both modes) —
+      // no user tap needed. Cached per video id; cancelled on
+      // navigation by [_lyricsToken].
+      unawaited(_autoFetchLyrics(videoId,
+          title: video.title, author: video.author));
     } on PureTubeException catch (e) {
       state = state.copyWith(
           status: PlayerStatus.error, errorMessage: e.message);
@@ -748,6 +774,89 @@ class PlayerController extends Notifier<PlayerUiState>
     _precacheToken++; // cancel any in-flight pass
     _precache.clear();
     unawaited(precacheUpcoming());
+  }
+
+  // ---------------- Auto-generated lyrics ----------------
+
+  /// Fetches lyrics for the just-loaded video in the background so the
+  /// AI Lyrics cards (video + audio mode) show a loading state first and
+  /// the lyrics when ready — no user tap needed.
+  ///
+  /// Source order (user requirement):
+  /// 1. YouTube's own captions/transcript (free, YouTube's own AI) —
+  ///    for music videos the transcript IS essentially the lyrics.
+  /// 2. lyrics.ovh (free API)
+  /// 3. Pollinations AI (free, no key)
+  /// 4. Gemini (advanced — only when the user set an API key in Settings)
+  ///
+  /// Results are cached per video id (max 50 entries) and shared between
+  /// both modes. In-flight fetches are cancelled by [_lyricsToken] on
+  /// navigation.
+  Future<void> _autoFetchLyrics(String videoId,
+      {required String title, required String author}) async {
+    final token = ++_lyricsToken;
+    final cached = _lyricsCache[videoId];
+    if (cached != null) {
+      if (state.videoId == videoId) {
+        state = state.copyWith(
+            lyricsResult: cached, lyricsLoading: false);
+      }
+      return;
+    }
+    if (state.videoId == videoId) {
+      state = state.copyWith(clearLyrics: true, lyricsLoading: true);
+    }
+    try {
+      LyricsResult result;
+      // 1. YouTube's own captions (free AI transcript) — primary source.
+      final transcript =
+          await _extractor.getCaptionTranscript(videoId);
+      if (token != _lyricsToken) return; // user moved on
+      if (transcript != null && transcript.trim().isNotEmpty) {
+        result = LyricsResult(
+          lyrics: transcript.trim(),
+          artist: author,
+          title: title,
+          found: true,
+        );
+      } else {
+        // 2-4. lyrics.ovh -> Pollinations -> Gemini (key from Settings).
+        final prefs = await SharedPreferences.getInstance();
+        if (token != _lyricsToken) return;
+        final apiKey = prefs.getString('gemini_api_key');
+        final service = LyricsService(geminiApiKey: apiKey);
+        try {
+          result = await service.getLyricsAuto(
+              videoTitle: title, channelName: author);
+        } finally {
+          service.dispose();
+        }
+      }
+      if (token != _lyricsToken) return;
+      if (_lyricsCache.length >= 50) {
+        _lyricsCache.remove(_lyricsCache.keys.first);
+      }
+      _lyricsCache[videoId] = result;
+      if (state.videoId == videoId) {
+        state = state.copyWith(
+            lyricsResult: result, lyricsLoading: false);
+      }
+    } catch (_) {
+      if (token != _lyricsToken) return;
+      if (state.videoId == videoId) {
+        state = state.copyWith(lyricsLoading: false);
+      }
+    }
+  }
+
+  /// Manual retry from the AI Lyrics card (clears the cache entry so
+  /// the fetch runs again).
+  void retryLyrics() {
+    final v = state.video;
+    final id = state.videoId;
+    if (v == null || id == null) return;
+    _lyricsCache.remove(id);
+    unawaited(_autoFetchLyrics(id, title: v.title, author: v.author));
   }
 
   // ---------------- Stream quality preferences ----------------
