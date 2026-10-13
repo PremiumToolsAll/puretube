@@ -81,10 +81,14 @@ class ContinueWatchingCard extends ConsumerWidget {
             child: Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: const Color(0xFF16211C),
+                color: Theme.of(context)
+                    .colorScheme
+                    .surfaceContainer,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                    color: const Color(0xFF10B981)
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
                         .withValues(alpha: 0.35)),
               ),
               child: Row(
@@ -101,12 +105,16 @@ class ContinueWatchingCard extends ConsumerWidget {
                           placeholder: (_, __) => Container(
                             width: 128,
                             height: 72,
-                            color: const Color(0xFF16211C),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainer,
                           ),
                           errorWidget: (_, __, ___) => Container(
                             width: 128,
                             height: 72,
-                            color: const Color(0xFF16211C),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainer,
                             child: const Icon(
                                 Icons.broken_image,
                                 color: Colors.grey),
@@ -128,8 +136,10 @@ class ContinueWatchingCard extends ConsumerWidget {
                             backgroundColor:
                                 Colors.white.withValues(alpha: 0.2),
                             valueColor:
-                                const AlwaysStoppedAnimation(
-                                    Color(0xFF10B981)),
+                                AlwaysStoppedAnimation(
+                                    Theme.of(context)
+                                        .colorScheme
+                                        .primary),
                           ),
                         ),
                       ),
@@ -148,16 +158,20 @@ class ContinueWatchingCard extends ConsumerWidget {
                       crossAxisAlignment:
                           CrossAxisAlignment.start,
                       children: [
-                        const Row(
+                        Row(
                           children: [
                             Icon(Icons.history,
                                 size: 14,
-                                color: Color(0xFF10B981)),
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .primary),
                             SizedBox(width: 4),
                             Text(
                               'Continue watching',
                               style: TextStyle(
-                                  color: Color(0xFF10B981),
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .primary,
                                   fontSize: 12,
                                   fontWeight:
                                       FontWeight.w600),
