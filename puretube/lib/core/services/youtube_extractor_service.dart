@@ -73,6 +73,19 @@ class YoutubeExtractorService {
   final YoutubeExplode _yt;
   final Connectivity _connectivity;
 
+  /// Throttle: minimum delay between YouTube requests to avoid IP blocking.
+  DateTime _lastRequest = DateTime.fromMillisecondsSinceEpoch(0);
+  static const _minRequestGap = Duration(milliseconds: 800);
+
+  Future<void> _throttle() async {
+    final now = DateTime.now();
+    final elapsed = now.difference(_lastRequest);
+    if (elapsed < _minRequestGap) {
+      await Future.delayed(_minRequestGap - elapsed);
+    }
+    _lastRequest = DateTime.now();
+  }
+
   /// Short codec display name: "avc1.640028" -> "avc", "av01.0.08M.08"
   /// -> "av1", "mp4a.40.2" -> "mp4a".
   static String _shortCodec(String codec) {
@@ -104,10 +117,12 @@ class YoutubeExtractorService {
   /// first attempt doesn't silently kill playback.
   Future<StreamManifest> _getManifestWithAgeBypass(String videoId) async {
     try {
+      await _throttle();
       return await _yt.videos.streamsClient
           .getManifest(videoId)
           .timeout(const Duration(seconds: 30));
     } on VideoUnplayableException {
+      await _throttle();
       return await _yt.videos.streamsClient
           .getManifest(videoId, ytClients: [YoutubeApiClient.tv])
           .timeout(const Duration(seconds: 30));
@@ -117,6 +132,7 @@ class YoutubeExtractorService {
   Future<VideoDetails> getVideoDetails(String videoId) async {
     await _requireNetwork();
     try {
+      await _throttle();
       final video =
           await _yt.videos.get(videoId).timeout(const Duration(seconds: 25));
       return VideoDetails.fromExplode(video);
@@ -338,6 +354,7 @@ class YoutubeExtractorService {
       {int limit = 25}) async {
     await _requireNetwork();
     try {
+      await _throttle();
       final results = await _yt.search
           .search(query)
           .timeout(const Duration(seconds: 25));
@@ -361,6 +378,7 @@ class YoutubeExtractorService {
       {int limit = 25}) async {
     await _requireNetwork();
     try {
+      await _throttle();
       final results = await _yt.search
           .search(query)
           .timeout(const Duration(seconds: 25));
