@@ -91,7 +91,7 @@ class PipedService {
   /// Returns muxed + audio-only URLs from Piped's proxied streams,
   /// shaped exactly like the direct extractor's [PlaybackStreams].
   Future<PlaybackStreams> getPlaybackStreams(String videoId,
-      {int maxMuxedHeight = 720}) async {
+      {int maxMuxedHeight = 720, bool preferBestAudio = true}) async {
     final json = await _getJson('/streams/$videoId');
 
     final videoStreams = (json['videoStreams'] as List?)
@@ -120,13 +120,13 @@ class PipedService {
     }
 
     final bestMuxed = muxedPick.first;
-    final bestAudio = audio.first;
+    final audioPick = preferBestAudio ? audio.first : audio.last;
     return PlaybackStreams(
       videoId: videoId,
       muxedUrl: _streamUrl(bestMuxed),
       muxedHeight: _heightOf(bestMuxed),
-      audioOnlyUrl: _streamUrl(bestAudio),
-      audioBitrate: _bitrateOf(bestAudio),
+      audioOnlyUrl: _streamUrl(audioPick),
+      audioBitrate: _bitrateOf(audioPick),
       fetchedAt: DateTime.now(),
     );
   }
