@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shimmer/shimmer.dart';
 
 import '../../../../core/services/lyrics_service.dart';
+import '../../../settings/presentation/screens/settings_screen.dart';
 
 /// Beautiful WILLOW-themed lyrics bottom sheet.
 ///
 /// Fetches lyrics from the free lyrics.ovh API using the current video's
-/// title and channel name. Shows a shimmer loading state, the lyrics in
+/// title and channel name, with key-free Pollinations AI and optional
+/// Gemini AI fallbacks. Shows a shimmer loading state, the lyrics in
 /// a readable scrollable view, or a friendly "not available" message with
 /// a retry button.
-class LyricsSheet extends StatefulWidget {
+class LyricsSheet extends ConsumerStatefulWidget {
   final String videoTitle;
   final String channelName;
   final String thumbnailUrl;
@@ -47,11 +50,11 @@ class LyricsSheet extends StatefulWidget {
   }
 
   @override
-  State<LyricsSheet> createState() => _LyricsSheetState();
+  ConsumerState<LyricsSheet> createState() => _LyricsSheetState();
 }
 
-class _LyricsSheetState extends State<LyricsSheet> {
-  final _service = LyricsService();
+class _LyricsSheetState extends ConsumerState<LyricsSheet> {
+  LyricsService? _service;
   LyricsResult? _result;
   bool _loading = true;
   int _attemptCount = 0;
@@ -67,7 +70,10 @@ class _LyricsSheetState extends State<LyricsSheet> {
       _loading = true;
       _result = null;
     });
-    final result = await _service.getLyrics(
+    _service?.dispose();
+    final apiKey = ref.read(geminiApiKeyProvider);
+    _service = LyricsService(geminiApiKey: apiKey);
+    final result = await _service!.getLyrics(
       videoTitle: widget.videoTitle,
       channelName: widget.channelName,
     );
@@ -86,7 +92,7 @@ class _LyricsSheetState extends State<LyricsSheet> {
 
   @override
   void dispose() {
-    _service.dispose();
+    _service?.dispose();
     super.dispose();
   }
 
