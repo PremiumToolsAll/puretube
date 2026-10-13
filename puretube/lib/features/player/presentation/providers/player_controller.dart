@@ -410,17 +410,22 @@ class PlayerController extends Notifier<PlayerUiState>
         streams = hit.streams;
         segments = hit.segments;
       } else {
-        video = await _extractor.getVideoDetails(videoId);
+        // Fast path: fetch details, streams, and sponsor segments in
+        // parallel instead of sequentially — cuts load time significantly.
         if (wantDash) {
           // Fetch the DASH option list and the audio track in parallel,
           // then build a DASH-backed PlaybackStreams.
           final results = await Future.wait([
+            _extractor.getVideoDetails(videoId),
             _extractor.getQualityOptions(videoId),
             _extractor.getPlaybackStreams(videoId,
                 preferBestAudio: !worstAudio),
+            _sponsorBlock.getSegments(videoId),
           ]);
-          final options = results[0] as List<MuxedQuality>;
-          final base = results[1] as PlaybackStreams;
+          video = results[0] as VideoDetails;
+          final options = results[1] as List<MuxedQuality>;
+          final base = results[2] as PlaybackStreams;
+          segments = results[3] as List<SponsorSegment>;
           final dash = _pickDashOption(options, targetHeight);
           if (dash != null) {
             streams = PlaybackStreams(
@@ -437,13 +442,19 @@ class PlayerController extends Notifier<PlayerUiState>
             streams = base;
           }
         } else {
-          streams = await _extractor.getPlaybackStreams(
-            videoId,
-            maxMuxedHeight: targetHeight ?? 720,
-            preferBestAudio: !worstAudio,
-          );
+          final results = await Future.wait([
+            _extractor.getVideoDetails(videoId),
+            _extractor.getPlaybackStreams(
+              videoId,
+              maxMuxedHeight: targetHeight ?? 720,
+              preferBestAudio: !worstAudio,
+            ),
+            _sponsorBlock.getSegments(videoId),
+          ]);
+          video = results[0] as VideoDetails;
+          streams = results[1] as PlaybackStreams;
+          segments = results[2] as List<SponsorSegment>;
         }
-        segments = await _sponsorBlock.getSegments(videoId);
       }
 
       // audio_service fetches artUri natively for the notification/lockscreen
@@ -856,20 +867,20 @@ class PlayerController extends Notifier<PlayerUiState>
     final token = ++_precacheToken;
     for (final id in ids) {
       try {
-        final details = await _extractor.getVideoDetails(id);
-        if (token != _precacheToken || state.videoId != currentId) return;
-        final streams = await _extractor.getPlaybackStreams(
-          id,
-          maxMuxedHeight: targetHeight ?? 720,
-          preferBestAudio: !worstAudio,
-        );
-        if (token != _precacheToken || state.videoId != currentId) return;
-        final segments = await _sponsorBlock.getSegments(id);
+        final results = await Future.wait([
+          _extractor.getVideoDetails(id),
+          _extractor.getPlaybackStreams(
+            id,
+            maxMuxedHeight: targetHeight ?? 720,
+            preferBestAudio: !worstAudio,
+          ),
+          _sponsorBlock.getSegments(id),
+        ]);
         if (token != _precacheToken || state.videoId != currentId) return;
         _precache[id] = PrecachedData(
-          details: details,
-          streams: streams,
-          segments: segments,
+          details: results[0] as VideoDetails,
+          streams: results[1] as PlaybackStreams,
+          segments: results[2] as List<SponsorSegment>,
         );
       } catch (_) {
         // Best effort per video — Next falls back to a normal load.
