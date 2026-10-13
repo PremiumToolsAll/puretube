@@ -122,10 +122,6 @@ Future<void> saveGeminiApiKey(String? key) async {
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
-  static const _accent = Color(0xFF10B981);
-  static const _accentLight = Color(0xFF34D399);
-  static const _bg = Color(0xFF0C110E);
-  static const _card = Color(0xFF16211C);
 
   /// Real app version from pubspec (via package_info_plus), fetched once.
   static final Future<PackageInfo> _packageInfoFuture =
@@ -147,10 +143,13 @@ class SettingsScreen extends ConsumerWidget {
 
   void _showThemeDialog(BuildContext context, WidgetRef ref,
       AppThemeOption current) {
+    final accent = Theme.of(context).colorScheme.primary;
+    final accentLight = Theme.of(context).colorScheme.secondary;
+    final card = Theme.of(context).colorScheme.surfaceContainer;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF16211C),
+        backgroundColor: card,
         title: const Text('Theme',
             style: TextStyle(color: Colors.white)),
         content: SizedBox(
@@ -176,7 +175,7 @@ class SettingsScreen extends ConsumerWidget {
                         color: Colors.white24),
                   ),
                 ),
-                activeColor: _accent,
+                activeColor: accent,
                 onChanged: (v) async {
                   if (v != null) {
                     await saveThemeOption(ref, v);
@@ -190,8 +189,8 @@ class SettingsScreen extends ConsumerWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel',
-                style: TextStyle(color: _accentLight)),
+            child: Text('Cancel',
+                style: TextStyle(color: accentLight)),
           ),
         ],
       ),
@@ -200,12 +199,14 @@ class SettingsScreen extends ConsumerWidget {
 
   void _showLanguageDialog(
       BuildContext context, WidgetRef ref, Locale? current) {
+    final accent = Theme.of(context).colorScheme.primary;
+    final card = Theme.of(context).colorScheme.surfaceContainer;
     Locale? picked = current;
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
-          backgroundColor: const Color(0xFF16211C),
+          backgroundColor: card,
           title: const Text('Language',
               style: TextStyle(color: Colors.white)),
           content: Column(
@@ -222,7 +223,7 @@ class SettingsScreen extends ConsumerWidget {
                   title: Text(entry.value,
                       style:
                           const TextStyle(color: Colors.white)),
-                  activeColor: _accent,
+                  activeColor: accent,
                   onChanged: (v) =>
                       setState(() => picked = v == null ? null : Locale(v)),
                 ),
@@ -239,8 +240,8 @@ class SettingsScreen extends ConsumerWidget {
                 await _saveLocale(picked?.languageCode);
                 if (ctx.mounted) Navigator.pop(ctx);
               },
-              child: const Text('Apply',
-                  style: TextStyle(color: _accent)),
+              child: Text('Apply',
+                  style: TextStyle(color: accent)),
             ),
           ],
         ),
@@ -251,12 +252,14 @@ class SettingsScreen extends ConsumerWidget {
   /// Double-tap seek interval picker (YouTube parity: 5/10/15/20/30/60s).
   void _showDoubleTapDialog(
       BuildContext context, WidgetRef ref, int current) {
+    final accent = Theme.of(context).colorScheme.primary;
+    final card = Theme.of(context).colorScheme.surfaceContainer;
     int picked = current;
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
-          backgroundColor: const Color(0xFF16211C),
+          backgroundColor: card,
           title: const Text('Double-tap to seek',
               style: TextStyle(color: Colors.white)),
           content: Column(
@@ -269,7 +272,7 @@ class SettingsScreen extends ConsumerWidget {
                   title: Text('$s seconds',
                       style:
                           const TextStyle(color: Colors.white)),
-                  activeColor: _accent,
+                  activeColor: accent,
                   onChanged: (v) =>
                       setState(() => picked = v ?? 10),
                 ),
@@ -287,8 +290,8 @@ class SettingsScreen extends ConsumerWidget {
                 await saveDoubleTapSeconds(picked);
                 if (ctx.mounted) Navigator.pop(ctx);
               },
-              child: const Text('Apply',
-                  style: TextStyle(color: _accent)),
+              child: Text('Apply',
+                  style: TextStyle(color: accent)),
             ),
           ],
         ),
@@ -299,10 +302,13 @@ class SettingsScreen extends ConsumerWidget {
   void _showGeminiKeyDialog(
       BuildContext context, WidgetRef ref, String current) {
     final controller = TextEditingController(text: current);
+    final accent = Theme.of(context).colorScheme.primary;
+    final accentLight = Theme.of(context).colorScheme.secondary;
+    final card = Theme.of(context).colorScheme.surfaceContainer;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF16211C),
+        backgroundColor: card,
         title: const Text('Gemini API Key',
             style: TextStyle(color: Colors.white)),
         content: Column(
@@ -319,14 +325,14 @@ class SettingsScreen extends ConsumerWidget {
               controller: controller,
               obscureText: true,
               style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'Paste API key',
-                hintStyle: TextStyle(color: Colors.white38),
-                enabledBorder: OutlineInputBorder(
+                hintStyle: const TextStyle(color: Colors.white38),
+                enabledBorder: const OutlineInputBorder(
                   borderSide: BorderSide(color: Colors.white24),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: _accent),
+                  borderSide: BorderSide(color: accent),
                 ),
               ),
             ),
@@ -354,8 +360,8 @@ class SettingsScreen extends ConsumerWidget {
               await saveGeminiApiKey(key.isEmpty ? null : key);
               if (ctx.mounted) Navigator.pop(ctx);
             },
-            child: const Text('Save',
-                style: TextStyle(color: _accent)),
+            child: Text('Save',
+                style: TextStyle(color: accent)),
           ),
         ],
       ),
@@ -364,10 +370,12 @@ class SettingsScreen extends ConsumerWidget {
 
   Future<void> _confirmClearHistory(
       BuildContext context, WidgetRef ref) async {
+    final card = Theme.of(context).colorScheme.surfaceContainer;
+    final accent = Theme.of(context).colorScheme.primary;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF16211C),
+        backgroundColor: card,
         title: const Text('Clear watch history?',
             style: TextStyle(color: Colors.white)),
         content: const Text(
@@ -444,6 +452,9 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   void _showAbout(BuildContext context) async {
+    final accent = Theme.of(context).colorScheme.primary;
+    final accentLight = Theme.of(context).colorScheme.secondary;
+    final card = Theme.of(context).colorScheme.surfaceContainer;
     PackageInfo? info;
     try {
       info = await _packageInfoFuture;
@@ -454,10 +465,10 @@ class SettingsScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: _card,
-        title: const Text('PureTube',
+        backgroundColor: card,
+        title: Text('PureTube',
             style: TextStyle(
-                color: _accent, fontWeight: FontWeight.bold)),
+                color: accent, fontWeight: FontWeight.bold)),
         content: Text(
           '$versionLine\n\nA lightweight YouTube client.\nStreams load directly from YouTube — '
           'no middleman servers.',
@@ -466,8 +477,8 @@ class SettingsScreen extends ConsumerWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close',
-                style: TextStyle(color: _accent)),
+            child: Text('Close',
+                style: TextStyle(color: accent)),
           ),
         ],
       ),
@@ -475,12 +486,12 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   /// Small uppercase section header for a premium grouped look.
-  Widget _sectionHeader(String title) => Padding(
+  Widget _sectionHeader(BuildContext context, String title) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 20, 16, 6),
         child: Text(
           title.toUpperCase(),
-          style: const TextStyle(
-            color: _accentLight,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.secondary,
             fontSize: 12,
             fontWeight: FontWeight.bold,
             letterSpacing: 1.4,
@@ -489,22 +500,27 @@ class SettingsScreen extends ConsumerWidget {
       );
 
   /// WILLOW card used for grouped rows.
-  Widget _settingsCard({required List<Widget> children}) {
+  Widget _settingsCard(BuildContext context,
+      {required List<Widget> children}) {
+    final card = Theme.of(context).colorScheme.surfaceContainer;
+    final accent = Theme.of(context).colorScheme.primary;
     final separated = <Widget>[];
     for (var i = 0; i < children.length; i++) {
       separated.add(children[i]);
       if (i < children.length - 1) {
-        separated.add(const Divider(
-            color: Color(0xFF1B2A22), height: 1, indent: 56));
+        separated.add(Divider(
+            color: Theme.of(context).colorScheme.outlineVariant,
+            height: 1,
+            indent: 56));
       }
     }
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: _card,
+        color: card,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-            color: _accent.withValues(alpha: 0.18)),
+            color: accent.withValues(alpha: 0.18)),
       ),
       child: Column(
           mainAxisSize: MainAxisSize.min, children: separated),
@@ -514,10 +530,14 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final locale = ref.watch(localeProvider);
+    final accent = Theme.of(context).colorScheme.primary;
+    final accentLight = Theme.of(context).colorScheme.secondary;
+    final bg = Theme.of(context).scaffoldBackgroundColor;
+    final card = Theme.of(context).colorScheme.surfaceContainer;
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: bg,
       appBar: AppBar(
-        backgroundColor: _bg,
+        backgroundColor: bg,
         title: const Text('Settings',
             style: TextStyle(
                 color: Colors.white,
@@ -539,14 +559,14 @@ class SettingsScreen extends ConsumerWidget {
                     const EdgeInsets.fromLTRB(12, 12, 12, 4),
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: _card,
+                  color: card,
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(
-                      color: _accent.withValues(alpha: 0.25)),
+                      color: accent.withValues(alpha: 0.25)),
                   boxShadow: [
                     BoxShadow(
                       color:
-                          _accent.withValues(alpha: 0.08),
+                          accent.withValues(alpha: 0.08),
                       blurRadius: 16,
                       offset: const Offset(0, 4),
                     ),
@@ -558,8 +578,8 @@ class SettingsScreen extends ConsumerWidget {
                       width: 52,
                       height: 52,
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [_accent, _accentLight],
+                        gradient: LinearGradient(
+                          colors: [accent, accentLight],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
@@ -567,7 +587,7 @@ class SettingsScreen extends ConsumerWidget {
                             BorderRadius.circular(14),
                         boxShadow: [
                           BoxShadow(
-                            color: _accent.withValues(
+                            color: accent.withValues(
                                 alpha: 0.35),
                             blurRadius: 12,
                           ),
@@ -588,8 +608,8 @@ class SettingsScreen extends ConsumerWidget {
                                 fontWeight: FontWeight.bold)),
                         const SizedBox(height: 2),
                         Text(versionText,
-                            style: const TextStyle(
-                                color: _accentLight,
+                            style: TextStyle(
+                                color: accentLight,
                                 fontSize: 13)),
                       ],
                     ),
@@ -598,15 +618,15 @@ class SettingsScreen extends ConsumerWidget {
               );
             },
           ),
-          _sectionHeader('Appearance'),
-          _settingsCard(children: [
+          _sectionHeader(context, 'Appearance'),
+          _settingsCard(context, children: [
             Consumer(
               builder: (context, ref, _) {
                 final current =
                     ref.watch(themeOptionProvider);
                 return ListTile(
-                  leading: const Icon(Icons.palette_outlined,
-                      color: _accentLight),
+                  leading: Icon(Icons.palette_outlined,
+                      color: accentLight),
                   title: const Text('Theme',
                       style: TextStyle(color: Colors.white)),
                   subtitle: Text(current.label,
@@ -620,11 +640,11 @@ class SettingsScreen extends ConsumerWidget {
               },
             ),
           ]),
-          _sectionHeader('General'),
-          _settingsCard(children: [
+          _sectionHeader(context, 'General'),
+          _settingsCard(context, children: [
             ListTile(
-              leading: const Icon(Icons.language,
-                  color: _accentLight),
+              leading: Icon(Icons.language,
+                  color: accentLight),
               title: const Text('Language',
                   style: TextStyle(color: Colors.white)),
               subtitle: Text(_localeLabel(locale),
@@ -640,9 +660,9 @@ class SettingsScreen extends ConsumerWidget {
                 final secs =
                     ref.watch(doubleTapSecondsProvider);
                 return ListTile(
-                  leading: const Icon(
+                  leading: Icon(
                       Icons.touch_app_outlined,
-                      color: _accentLight),
+                      color: accentLight),
                   title: const Text('Double-tap to seek',
                       style: TextStyle(color: Colors.white)),
                   subtitle: Text('$secs seconds',
@@ -659,17 +679,17 @@ class SettingsScreen extends ConsumerWidget {
               builder: (context, ref, _) {
                 final skip = ref.watch(skipSponsorsProvider);
                 return SwitchListTile(
-                  secondary: const Icon(Icons.block_outlined,
-                      color: _accentLight),
+                  secondary: Icon(Icons.block_outlined,
+                      color: accentLight),
                   title: const Text('Skip sponsors',
                       style: TextStyle(color: Colors.white)),
                   subtitle: const Text(
                       'Auto-skip sponsored segments',
                       style: TextStyle(color: Colors.grey)),
                   value: skip,
-                  activeThumbColor: _accent,
+                  activeThumbColor: accent,
                   activeTrackColor:
-                      _accent.withValues(alpha: 0.35),
+                      accent.withValues(alpha: 0.35),
                   onChanged: (v) async {
                     ref
                         .read(skipSponsorsProvider.notifier)
@@ -692,8 +712,8 @@ class SettingsScreen extends ConsumerWidget {
                 final isSet =
                     apiKey != null && apiKey.isNotEmpty;
                 return ListTile(
-                  leading: const Icon(Icons.auto_awesome_outlined,
-                      color: _accentLight),
+                  leading: Icon(Icons.auto_awesome_outlined,
+                      color: accentLight),
                   title: const Text('Gemini API Key',
                       style: TextStyle(color: Colors.white)),
                   subtitle: Text(
@@ -710,11 +730,11 @@ class SettingsScreen extends ConsumerWidget {
               },
             ),
           ]),
-          _sectionHeader('Library'),
-          _settingsCard(children: [
+          _sectionHeader(context, 'Library'),
+          _settingsCard(context, children: [
             ListTile(
-              leading: const Icon(Icons.history,
-                  color: _accentLight),
+              leading: Icon(Icons.history,
+                  color: accentLight),
               title: const Text('Clear watch history',
                   style: TextStyle(color: Colors.white)),
               onTap: () =>
@@ -723,9 +743,9 @@ class SettingsScreen extends ConsumerWidget {
             FutureBuilder<String>(
               future: _cacheSize(),
               builder: (context, snap) => ListTile(
-                leading: const Icon(
+                leading: Icon(
                     Icons.cleaning_services_outlined,
-                    color: _accentLight),
+                    color: accentLight),
                 title: const Text('Clear cache',
                     style: TextStyle(color: Colors.white)),
                 subtitle: Text('Cached images & temp files'
@@ -736,13 +756,13 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
           ]),
-          _sectionHeader('About'),
-          _settingsCard(children: [
+          _sectionHeader(context, 'About'),
+          _settingsCard(context, children: [
             FutureBuilder<PackageInfo>(
               future: _packageInfoFuture,
               builder: (context, snap) => ListTile(
-                leading: const Icon(Icons.info_outline,
-                    color: _accentLight),
+                leading: Icon(Icons.info_outline,
+                    color: accentLight),
                 title: const Text('About',
                     style: TextStyle(color: Colors.white)),
                 subtitle: Text(
@@ -755,8 +775,8 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
           ]),
-          _sectionHeader('Diagnostics'),
-          _settingsCard(children: [
+          _sectionHeader(context, 'Diagnostics'),
+          _settingsCard(context, children: [
             // Background playback diagnostic.
             ListTile(
               leading: Icon(
@@ -764,7 +784,7 @@ class SettingsScreen extends ConsumerWidget {
                       ? Icons.check_circle
                       : Icons.error,
                   color: audioServiceReady
-                      ? _accent
+                      ? accent
                       : Colors.redAccent),
               title: const Text('Background service',
                   style: TextStyle(color: Colors.white)),
