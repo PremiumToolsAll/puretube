@@ -2972,14 +2972,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   height: 72,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white,
+                    color: _emerald.withValues(alpha: 0.92),
                     border: Border.all(
-                      color: Colors.white,
+                      color:
+                          _emeraldLight.withValues(alpha: 0.55),
                       width: 2,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.white.withValues(alpha: 0.25),
+                        color:
+                            _emerald.withValues(alpha: 0.40),
                         blurRadius: 24,
                         spreadRadius: 3,
                       ),
@@ -2988,7 +2990,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   child: Icon(
                     playing ? Icons.pause : Icons.play_arrow,
                     key: ValueKey<bool>(playing),
-                    color: Colors.black,
+                    color: Colors.white,
                     size: 36,
                   ),
                 ),
