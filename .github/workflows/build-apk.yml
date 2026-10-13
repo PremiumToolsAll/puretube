@@ -1,7 +1,5 @@
 name: Build PureTube APK
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
