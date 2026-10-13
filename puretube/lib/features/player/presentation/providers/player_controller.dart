@@ -32,6 +32,8 @@ class PlayerUiState {
   final bool audioOnly;
   final double speed;
   final Duration? sleepRemaining;
+  final Duration? sleepTotal;
+  final bool sleepEndOfVideo;
   final List<SponsorSegment> sponsorSegments;
   final bool skipSponsors;
   final bool pipSupported;
@@ -52,6 +54,8 @@ class PlayerUiState {
     this.audioOnly = false,
     this.speed = 1.0,
     this.sleepRemaining,
+    this.sleepTotal,
+    this.sleepEndOfVideo = false,
     this.sponsorSegments = const [],
     this.skipSponsors = true,
     this.pipSupported = false,
@@ -73,6 +77,9 @@ class PlayerUiState {
     bool? audioOnly,
     double? speed,
     Duration? sleepRemaining,
+    Duration? sleepTotal,
+    bool? sleepEndOfVideo,
+    bool clearSleep = false,
     List<SponsorSegment>? sponsorSegments,
     bool? skipSponsors,
     bool? pipSupported,
@@ -94,6 +101,11 @@ class PlayerUiState {
       audioOnly: audioOnly ?? this.audioOnly,
       speed: speed ?? this.speed,
       sleepRemaining: sleepRemaining,
+      sleepTotal:
+          clearSleep ? null : (sleepTotal ?? this.sleepTotal),
+      sleepEndOfVideo: clearSleep
+          ? false
+          : (sleepEndOfVideo ?? this.sleepEndOfVideo),
       sponsorSegments: sponsorSegments ?? this.sponsorSegments,
       skipSponsors: skipSponsors ?? this.skipSponsors,
       pipSupported: pipSupported ?? this.pipSupported,
@@ -1049,16 +1061,26 @@ class PlayerController extends Notifier<PlayerUiState>
   /// Hive key for the persisted sleep-timer end time (epoch millis),
   /// so the timer survives app backgrounding.
   static const _kSleepEndsAtKey = 'sleep_ends_at_ms';
+  static const _kSleepTotalMsKey = 'sleep_total_ms';
+  static const _kSleepEndOfVideoKey = 'sleep_end_of_video';
 
-  void startSleepTimer(Duration duration) {
+  void startSleepTimer(Duration duration, {bool endOfVideo = false}) {
     _cancelSleepTimer();
     _sleepEndsAt = DateTime.now().add(duration);
-    state = state.copyWith(sleepRemaining: duration);
+    state = state.copyWith(
+      sleepRemaining: duration,
+      sleepTotal: duration,
+      sleepEndOfVideo: endOfVideo,
+    );
     // Persist the end time — the Dart timer keeps running while the
     // audio foreground service holds the process alive in background.
+    // The original total + end-of-video flag are persisted too so the
+    // sleep timer sheet can show the right option as selected.
     try {
-      Hive.box(HiveBoxes.playerPrefs)
-          .put(_kSleepEndsAtKey, _sleepEndsAt!.millisecondsSinceEpoch);
+      final box = Hive.box(HiveBoxes.playerPrefs);
+      box.put(_kSleepEndsAtKey, _sleepEndsAt!.millisecondsSinceEpoch);
+      box.put(_kSleepTotalMsKey, duration.inMilliseconds);
+      box.put(_kSleepEndOfVideoKey, endOfVideo);
     } catch (_) {}
     _armSleepCountdown();
   }
@@ -1069,19 +1091,19 @@ class PlayerController extends Notifier<PlayerUiState>
     final total = _handler.player.state.duration;
     final pos = _handler.player.state.position;
     if (total <= Duration.zero || pos >= total) return false;
-    startSleepTimer(total - pos);
+    startSleepTimer(total - pos, endOfVideo: true);
     return true;
   }
 
   void cancelSleepTimer() {
     _cancelSleepTimer();
-    state = state.copyWith(sleepRemaining: null);
+    state = state.copyWith(sleepRemaining: null, clearSleep: true);
   }
 
   void _finishSleepTimer() {
     _cancelSleepTimer();
     unawaited(_handler.pause());
-    state = state.copyWith(sleepRemaining: null);
+    state = state.copyWith(sleepRemaining: null, clearSleep: true);
   }
 
   void _armSleepCountdown() {
@@ -1103,7 +1125,10 @@ class PlayerController extends Notifier<PlayerUiState>
     _sleepCountdown = null;
     _sleepEndsAt = null;
     try {
-      Hive.box(HiveBoxes.playerPrefs).delete(_kSleepEndsAtKey);
+      final box = Hive.box(HiveBoxes.playerPrefs);
+      box.delete(_kSleepEndsAtKey);
+      box.delete(_kSleepTotalMsKey);
+      box.delete(_kSleepEndOfVideoKey);
     } catch (_) {}
   }
 
@@ -1118,10 +1143,20 @@ class PlayerController extends Notifier<PlayerUiState>
       final left = endsAt.difference(DateTime.now());
       if (left <= Duration.zero) {
         box.delete(_kSleepEndsAtKey);
+        box.delete(_kSleepTotalMsKey);
+        box.delete(_kSleepEndOfVideoKey);
         return;
       }
+      final totalMs = box.get(_kSleepTotalMsKey) as int?;
+      final endOfVideo = box.get(_kSleepEndOfVideoKey) as bool? ?? false;
       _sleepEndsAt = endsAt;
-      state = state.copyWith(sleepRemaining: left);
+      state = state.copyWith(
+        sleepRemaining: left,
+        sleepTotal: totalMs != null
+            ? Duration(milliseconds: totalMs)
+            : left,
+        sleepEndOfVideo: endOfVideo,
+      );
       _armSleepCountdown();
     } catch (_) {}
   }
