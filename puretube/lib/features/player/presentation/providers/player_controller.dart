@@ -214,6 +214,10 @@ class PlayerController extends Notifier<PlayerUiState>
   StreamSubscription<bool>? _completedSub;
   bool _autoplayBusy = false;
 
+  /// Ids played this session — Next/autoplay never offer them again,
+  /// so tapping Next always moves forward to something new.
+  final Set<String> _playedIds = {};
+
   /// When a sleep timer finishes (pauses playback), suppress autoplay for
   /// a short window — covers the race where media_kit's `completed`
   /// fires just after the timer paused at end-of-video.
@@ -354,7 +358,15 @@ class PlayerController extends Notifier<PlayerUiState>
     final previousAudioOnly = state.audioOnly;
     final keepAudioOnly = previousAudioOnly || _prefAudioOnly;
     _recoveryAttempts = 0;
-    _cancelSleepTimer();
+    // The sleep timer is wall-clock based and must SURVIVE track changes —
+    // it is cancelled only by explicit cancel, timer finish, stop(), or
+    // dispose. Never cancel it here.
+    // Never replay: remember this video and drop it from Up Next, so
+    // Next/autoplay always move forward to something new.
+    _playedIds.add(videoId);
+    if (_playedIds.length > 300) _playedIds.remove(_playedIds.first);
+    final freshRelated =
+        state.relatedVideos.where((v) => v.id != videoId).toList();
     // New video: clear any stale sleep-finish suppression and the
     // autoplay re-entry guard.
     _sleepFinishedAt = null;
@@ -381,6 +393,12 @@ class PlayerController extends Notifier<PlayerUiState>
       audioOnly: keepAudioOnly,
       // Keep the autoplay preference across video loads.
       autoplay: _autoplay,
+      // The sleep timer survives track changes (wall-clock based).
+      sleepRemaining: state.sleepRemaining,
+      sleepTotal: state.sleepTotal,
+      sleepEndOfVideo: state.sleepEndOfVideo,
+      // The just-started video is out of Up Next from now on.
+      relatedVideos: freshRelated,
     );
 
     try {
@@ -754,9 +772,14 @@ class PlayerController extends Notifier<PlayerUiState>
           authorHint: authorHint,
           boostCategories: boost);
       if (state.videoId != videoId) return;
+      // Never offer already-played videos (or the current one) again —
+      // this keeps Next/autoplay moving forward forever.
+      final fresh = videos
+          .where((v) => v.id != videoId && !_playedIds.contains(v.id))
+          .toList();
       state = state.copyWith(
-        relatedVideos: videos,
-        relatedFailed: videos.isEmpty,
+        relatedVideos: fresh,
+        relatedFailed: fresh.isEmpty,
       );
       // Up Next is known now — pre-fetch upcoming videos' streams so
       // tapping Next plays instantly.
@@ -814,13 +837,22 @@ class PlayerController extends Notifier<PlayerUiState>
   }
 
   Future<String?> _ensureNextVideoIdInner() async {
-    if (state.relatedVideos.isNotEmpty) {
-      return state.relatedVideos.first.id;
+    // First unplayed, non-current video — never the one already playing
+    // or anything played earlier this session.
+    String? pickNext() {
+      for (final v in state.relatedVideos) {
+        if (v.id != state.videoId && !_playedIds.contains(v.id)) {
+          return v.id;
+        }
+      }
+      return null;
     }
+
+    final first = pickNext();
+    if (first != null) return first;
     await retryRelated();
-    if (state.relatedVideos.isNotEmpty) {
-      return state.relatedVideos.first.id;
-    }
+    final second = pickNext();
+    if (second != null) return second;
     // Last resort: search YouTube directly for the current title.
     final v = state.video;
     if (v == null) return null;
@@ -829,7 +861,9 @@ class PlayerController extends Notifier<PlayerUiState>
           .searchVideos(v.title, limit: 10)
           .timeout(const Duration(seconds: 15));
       for (final r in results) {
-        if (r.id != state.videoId) return r.id;
+        if (r.id != state.videoId && !_playedIds.contains(r.id)) {
+          return r.id;
+        }
       }
     } catch (_) {}
     return null;
