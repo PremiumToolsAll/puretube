@@ -26,15 +26,20 @@ class _AiLyricsCardState extends ConsumerState<AiLyricsCard> {
   bool _expanded = true;
 
   /// Defensive filter: reject AI refusal / copyright / placeholder
-  /// responses even if the service let one through.
+  /// responses even if the service let one through. Handles
+  /// straight/curly apostrophes.
   bool _isRefusal(String text) {
-    final upper = text.toUpperCase();
-    return upper.contains("I'M SORRY") ||
-        upper.contains('I CAN\'T PROVIDE') ||
-        upper.contains('CANNOT PROVIDE') ||
-        upper.contains('COPYRIGHT') ||
-        upper.contains('NOT_FOUND') ||
-        upper.contains('AS AN AI');
+    var norm = text.toUpperCase();
+    norm = norm.replaceAll('\u2019', "'"); // ’ -> '
+    norm = norm.replaceAll('\u2018', "'"); // ‘ -> '
+    norm = norm.replaceAll(RegExp(r'\s+'), ' ');
+    if (norm.contains('NOT_FOUND')) return true;
+    if (norm.contains('SORRY') && norm.contains('PROVIDE')) return true;
+    if (norm.contains('CANNOT PROVIDE')) return true;
+    if (norm.contains('UNABLE TO PROVIDE')) return true;
+    if (norm.contains('COPYRIGHT')) return true;
+    if (norm.contains('AS AN AI')) return true;
+    return false;
   }
 
   @override
