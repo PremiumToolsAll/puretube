@@ -231,18 +231,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               itemCount: _categories.length,
               separatorBuilder: (_, __) =>
                   const SizedBox(width: 8),
-              itemBuilder: (ctx, i) => ActionChip(
-                backgroundColor: const Color(0xFF16211C),
-                side: const BorderSide(
-                    color: Color(0xFF10B981), width: 0.5),
-                label: Text(_categories[i],
-                    style: const TextStyle(
-                        color: Colors.white70)),
-                onPressed: () {
-                  _searchController.text = _categories[i];
-                  _search(_categories[i]);
-                },
-              ),
+              itemBuilder: (ctx, i) {
+                final selected =
+                    _searchController.text == _categories[i];
+                return ActionChip(
+                  backgroundColor: selected
+                      ? const Color(0xFF10B981)
+                      : const Color(0xFF16211C),
+                  side: BorderSide(
+                      color: selected
+                          ? const Color(0xFF10B981)
+                          : const Color(0xFF2D4A3E),
+                      width: selected ? 1.5 : 0.5),
+                  label: Text(_categories[i],
+                      style: TextStyle(
+                          color: selected
+                              ? Colors.black
+                              : Colors.white70,
+                          fontWeight: selected
+                              ? FontWeight.bold
+                              : FontWeight.normal)),
+                  onPressed: () {
+                    _searchController.text = _categories[i];
+                    _search(_categories[i]);
+                  },
+                );
+              },
             ),
           ),
           const SizedBox(height: 4),
