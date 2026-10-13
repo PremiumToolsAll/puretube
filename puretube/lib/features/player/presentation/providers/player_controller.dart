@@ -421,7 +421,7 @@ class PlayerController extends Notifier<PlayerUiState>
           ]);
           final options = results[0] as List<MuxedQuality>;
           final base = results[1] as PlaybackStreams;
-          final dash = _pickDashOption(options, targetHeight!);
+          final dash = _pickDashOption(options, targetHeight);
           if (dash != null) {
             streams = PlaybackStreams(
               videoId: videoId,
