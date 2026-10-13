@@ -47,6 +47,10 @@ class PlayerUiState {
   final LyricsResult? lyricsResult;
   final bool lyricsLoading;
 
+  /// Autoplay: when ON, completing a video automatically starts the
+  /// next Up Next video (both video and audio mode).
+  final bool autoplay;
+
   const PlayerUiState({
     this.status = PlayerStatus.idle,
     this.videoId,
@@ -70,6 +74,7 @@ class PlayerUiState {
     this.relatedFailed = false,
     this.lyricsResult,
     this.lyricsLoading = false,
+    this.autoplay = true,
   });
 
   PlayerUiState copyWith({
@@ -98,6 +103,7 @@ class PlayerUiState {
     LyricsResult? lyricsResult,
     bool? lyricsLoading,
     bool clearLyrics = false,
+    bool? autoplay,
   }) {
     return PlayerUiState(
       status: status ?? this.status,
@@ -128,6 +134,7 @@ class PlayerUiState {
       lyricsResult:
           clearLyrics ? null : (lyricsResult ?? this.lyricsResult),
       lyricsLoading: lyricsLoading ?? this.lyricsLoading,
+      autoplay: autoplay ?? this.autoplay,
     );
   }
 }
@@ -196,6 +203,21 @@ class PlayerController extends Notifier<PlayerUiState>
   bool _prefAudioOnly = false;
   static const _kAudioOnlyKey = 'audio_only';
 
+  /// Autoplay preference (Hive, default ON). When a video/track completes
+  /// and this is true, the next Up Next item starts automatically — in
+  /// both video and audio mode, since both share one media_kit Player.
+  bool _autoplay = true;
+  static const _kAutoplayKey = 'autoplay';
+
+  /// Completion → playNext handoff guards.
+  StreamSubscription<bool>? _completedSub;
+  bool _autoplayBusy = false;
+
+  /// When a sleep timer finishes (pauses playback), suppress autoplay for
+  /// a short window — covers the race where media_kit's `completed`
+  /// fires just after the timer paused at end-of-video.
+  DateTime? _sleepFinishedAt;
+
   /// "Continue watching" keys (Hive player_prefs box): the last played
   /// video + position, so the home screen can offer resume after an
   /// app restart — like original YouTube.
@@ -253,6 +275,15 @@ class PlayerController extends Notifier<PlayerUiState>
       _maybePersistLastVideo(pos);
     });
     _errorSub = _handler.player.stream.error.listen(_onPlayerError);
+    // Natural playback completion → autoplay the next Up Next item.
+    // Both video and audio mode share this one media_kit Player, so a
+    // single listener covers both.
+    try {
+      _completedSub =
+          _handler.player.stream.completed.listen((_) {
+        _onPlaybackCompleted();
+      });
+    } catch (_) {}
 
     // Wire notification skip buttons to the playback history / Up Next.
     _handler.onSkipToNext = () async {
@@ -273,6 +304,7 @@ class PlayerController extends Notifier<PlayerUiState>
       _pipSub?.cancel();
       _positionSub?.cancel();
       _errorSub?.cancel();
+      _completedSub?.cancel();
       _cancelSleepTimer();
     });
 
@@ -317,6 +349,10 @@ class PlayerController extends Notifier<PlayerUiState>
     final keepAudioOnly = previousAudioOnly || _prefAudioOnly;
     _recoveryAttempts = 0;
     _cancelSleepTimer();
+    // New video: clear any stale sleep-finish suppression and the
+    // autoplay re-entry guard.
+    _sleepFinishedAt = null;
+    _autoplayBusy = false;
     // Navigating away cancels any in-flight pre-load pass.
     _precacheToken++;
     // Navigating away also cancels any in-flight lyrics auto-fetch.
@@ -337,6 +373,8 @@ class PlayerController extends Notifier<PlayerUiState>
       skipSponsors: previousSkip,
       // Restore the persisted audio-only mode on fresh app starts.
       audioOnly: keepAudioOnly,
+      // Keep the autoplay preference across video loads.
+      autoplay: _autoplay,
     );
 
     try {
@@ -476,7 +514,8 @@ class PlayerController extends Notifier<PlayerUiState>
     _cancelSleepTimer();
     _recoveryAttempts = 0;
     await _handler.stop();
-    state = const PlayerUiState();
+    // Full reset, but keep the user's autoplay preference.
+    state = PlayerUiState(autoplay: _autoplay);
     _history.clear();
     _historyIndex = -1;
   }
@@ -540,6 +579,45 @@ class PlayerController extends Notifier<PlayerUiState>
     if (nextId == null) return null;
     await loadVideo(nextId);
     return nextId;
+  }
+
+  /// Fired by media_kit's `stream.completed` when the current media
+  /// finishes playing naturally. Starts the next Up Next item when
+  /// autoplay is ON — in both video and audio mode (one shared player).
+  ///
+  /// Guards:
+  /// - Autoplay OFF → do nothing.
+  /// - "End of video" sleep timer active → stop here (timer wins).
+  /// - A sleep timer just finished pausing → suppress briefly to cover
+  ///   the completed-vs-timer race at end-of-video.
+  /// - Re-entry guard so one completion advances exactly one item, and
+  ///   the video id must still match when we act (stale events ignored).
+  void _onPlaybackCompleted() {
+    if (!_autoplay) return;
+    if (state.status != PlayerStatus.ready) return;
+    if (state.sleepEndOfVideo) return;
+    final finishedAt = _sleepFinishedAt;
+    if (finishedAt != null &&
+        DateTime.now().difference(finishedAt) <
+            const Duration(seconds: 10)) {
+      return;
+    }
+    if (_autoplayBusy) return;
+    if (state.videoId == null) return;
+    _autoplayBusy = true;
+    unawaited(playNext().whenComplete(() {
+      _autoplayBusy = false;
+    }));
+  }
+
+  /// Sets the autoplay preference, persists it, and updates the UI.
+  Future<void> setAutoplay(bool value) async {
+    if (_autoplay == value && state.autoplay == value) return;
+    _autoplay = value;
+    state = state.copyWith(autoplay: value);
+    try {
+      await Hive.box(HiveBoxes.playerPrefs).put(_kAutoplayKey, value);
+    } catch (_) {}
   }
 
   // ---------------- transport ----------------
@@ -1211,6 +1289,10 @@ class PlayerController extends Notifier<PlayerUiState>
 
   void _finishSleepTimer() {
     _cancelSleepTimer();
+    // Mark the finish time so a `completed` event racing the timer at
+    // end-of-video doesn't trigger autoplay right after the timer
+    // deliberately stopped playback.
+    _sleepFinishedAt = DateTime.now();
     unawaited(_handler.pause());
     state = state.copyWith(sleepRemaining: null, clearSleep: true);
   }
@@ -1293,11 +1375,16 @@ class PlayerController extends Notifier<PlayerUiState>
   Future<void> _loadPlayerPrefs() async {
     try {
       // Dynamic box: stores plain values (bool), unlike the Map boxes.
+      final box = Hive.box(HiveBoxes.playerPrefs);
       _prefAudioOnly =
-          Hive.box(HiveBoxes.playerPrefs).get(_kAudioOnlyKey) as bool? ??
-              false;
+          box.get(_kAudioOnlyKey) as bool? ?? false;
+      // Autoplay (default ON) — pushed to state so the Up Next toggle
+      // reflects the persisted value.
+      _autoplay = box.get(_kAutoplayKey) as bool? ?? true;
+      state = state.copyWith(autoplay: _autoplay);
     } catch (_) {
       _prefAudioOnly = false;
+      _autoplay = true;
     }
   }
 
