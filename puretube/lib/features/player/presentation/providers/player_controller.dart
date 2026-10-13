@@ -115,7 +115,12 @@ class PlayerUiState {
       isInPip: isInPip ?? this.isInPip,
       audioOnly: audioOnly ?? this.audioOnly,
       speed: speed ?? this.speed,
-      sleepRemaining: sleepRemaining,
+      // Preserve the countdown across copyWith calls that don't touch
+      // the timer (e.g. loadVideo's ready-state update) — otherwise the
+      // timer badge flickers off and back on every track change.
+      // clearSleep still clears it (cancel/finish paths).
+      sleepRemaining:
+          clearSleep ? null : (sleepRemaining ?? this.sleepRemaining),
       sleepTotal:
           clearSleep ? null : (sleepTotal ?? this.sleepTotal),
       sleepEndOfVideo: clearSleep
