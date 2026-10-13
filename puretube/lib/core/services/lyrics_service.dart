@@ -29,13 +29,21 @@ class LyricsResult {
 /// Best-effort only: never throws, returns [LyricsResult.notFound] when
 /// the API has no lyrics, the network fails, or parsing fails. Must
 /// never break playback.
+///
+/// Fallback order (all best-effort):
+/// 1. lyrics.ovh (free, no key)
+/// 2. Pollinations AI (free, no key)
+/// 3. Gemini AI (only when [geminiApiKey] is set in Settings)
 class LyricsService {
-  LyricsService({http.Client? client})
-      : _client = client ?? http.Client();
+  LyricsService({http.Client? client, String? geminiApiKey})
+      : _client = client ?? http.Client(),
+        _geminiApiKey = geminiApiKey;
 
   static const _base = 'https://api.lyrics.ovh/v1';
+  static const _pollinationsBase = 'https://text.pollinations.ai';
 
   final http.Client _client;
+  final String? _geminiApiKey;
 
   /// Tries several artist/title combinations derived from the YouTube
   /// [videoTitle] and [channelName], returning the first successful
@@ -44,7 +52,10 @@ class LyricsService {
     required String videoTitle,
     required String channelName,
   }) async {
-    for (final attempt in _buildAttempts(videoTitle, channelName)) {
+    final attempts = _buildAttempts(videoTitle, channelName);
+
+    // 1. lyrics.ovh (free, no key): try all artist/title combinations.
+    for (final attempt in attempts) {
       final lyrics = await _fetch(attempt.artist, attempt.title);
       if (lyrics != null) {
         return LyricsResult(
@@ -55,10 +66,105 @@ class LyricsService {
         );
       }
     }
+
+    // 2 & 3. AI fallbacks: use the most likely artist/title pair.
+    if (attempts.isNotEmpty) {
+      final best = attempts.first;
+      final aiLyrics = await _fetchFromAi(best.artist, best.title);
+      if (aiLyrics != null) {
+        return LyricsResult(
+          lyrics: aiLyrics,
+          artist: best.artist,
+          title: best.title,
+          found: true,
+        );
+      }
+    }
+
     return LyricsResult.notFound(
       artist: _cleanArtist(channelName),
       title: _cleanTitle(videoTitle),
     );
+  }
+
+  /// AI fallback chain: Pollinations (key-free) first, then Gemini
+  /// (only when an API key was provided). Returns null when neither
+  /// knows the lyrics.
+  Future<String?> _fetchFromAi(String artist, String title) async {
+    final fromPollinations = await _fetchFromPollinations(artist, title);
+    if (fromPollinations != null) return fromPollinations;
+    return _fetchFromGemini(artist, title);
+  }
+
+  /// Free, no-API-key AI text generation. Plain-text response.
+  Future<String?> _fetchFromPollinations(
+      String artist, String title) async {
+    if (artist.isEmpty || title.isEmpty) return null;
+    final prompt =
+        "Provide the full lyrics for the song '$title' by '$artist'. "
+        "If you don't know the lyrics, respond with exactly 'NOT_FOUND'.";
+    final uri = Uri.parse(
+        '$_pollinationsBase/${Uri.encodeComponent(prompt)}');
+    try {
+      final res =
+          await _client.get(uri).timeout(const Duration(seconds: 30));
+      if (res.statusCode != 200) return null;
+      final text = res.body.trim();
+      if (text.isEmpty) return null;
+      if (text.toUpperCase().contains('NOT_FOUND')) return null;
+      return text;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Gemini AI lyrics generation. Skipped entirely when no API key set.
+  Future<String?> _fetchFromGemini(String artist, String title) async {
+    final key = _geminiApiKey;
+    if (key == null || key.isEmpty) return null;
+    if (artist.isEmpty || title.isEmpty) return null;
+    final uri = Uri.parse(
+        'https://generativelanguage.googleapis.com/v1beta/models/'
+        'gemini-2.0-flash:generateContent?key=$key');
+    final body = jsonEncode({
+      'contents': [
+        {
+          'parts': [
+            {
+              'text':
+                  "Provide the full lyrics for the song '$title' by "
+                      "'$artist'. If you don't know the lyrics, respond "
+                      "with exactly 'NOT_FOUND'."
+            }
+          ]
+        }
+      ]
+    });
+    try {
+      final res = await _client
+          .post(uri,
+              headers: {'Content-Type': 'application/json'},
+              body: body)
+          .timeout(const Duration(seconds: 30));
+      if (res.statusCode != 200) return null;
+      final Map<String, dynamic> data =
+          jsonDecode(res.body) as Map<String, dynamic>;
+      final candidates = data['candidates'] as List<dynamic>?;
+      if (candidates == null || candidates.isEmpty) return null;
+      final content =
+          (candidates.first as Map<String, dynamic>)['content']
+              as Map<String, dynamic>?;
+      final parts = content?['parts'] as List<dynamic>?;
+      if (parts == null || parts.isEmpty) return null;
+      final text =
+          ((parts.first as Map<String, dynamic>)['text'] as String?)
+              ?.trim();
+      if (text == null || text.isEmpty) return null;
+      if (text.toUpperCase().contains('NOT_FOUND')) return null;
+      return text;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<String?> _fetch(String artist, String title) async {
