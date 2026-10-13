@@ -684,7 +684,7 @@ class YoutubeExtractorService {
   /// matching the user's frequent categories surface at the top.
   /// Returns an empty list (never throws) only if every strategy fails.
   Future<List<VideoDetails>> getRelatedVideos(String videoId,
-      {int limit = 12,
+      {int limit = 30,
       String? titleHint,
       String? authorHint,
       List<String> boostCategories = const []}) async {
