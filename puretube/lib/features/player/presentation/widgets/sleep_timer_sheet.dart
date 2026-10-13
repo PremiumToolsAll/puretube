@@ -15,9 +15,6 @@ import '../providers/player_controller.dart';
 class SleepTimerSheet extends ConsumerWidget {
   const SleepTimerSheet({super.key});
 
-  static const _bg = Color(0xFF0C110E);
-  static const _card = Color(0xFF16211C);
-  static const _accent = Color(0xFF10B981);
 
   static Future<void> show(BuildContext context) {
     return showModalBottomSheet(
@@ -37,11 +34,15 @@ class SleepTimerSheet extends ConsumerWidget {
     final videoLeft =
         playerState.duration - playerState.position;
 
+    final bg = Theme.of(context).scaffoldBackgroundColor;
+    final card = Theme.of(context).colorScheme.surfaceContainer;
+    final accent = Theme.of(context).colorScheme.primary;
     return Container(
-      decoration: const BoxDecoration(
-        color: _bg,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border(top: BorderSide(color: _accent, width: 1.5)),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius:
+            const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border(top: BorderSide(color: accent, width: 1.5)),
       ),
       child: SafeArea(
         child: Column(
@@ -61,7 +62,7 @@ class SleepTimerSheet extends ConsumerWidget {
                   const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
               child: Row(
                 children: [
-                  const Icon(Icons.bedtime, color: _accent, size: 24),
+                  Icon(Icons.bedtime, color: accent, size: 24),
                   const SizedBox(width: 12),
                   const Text(
                     'Sleep timer',
@@ -77,15 +78,15 @@ class SleepTimerSheet extends ConsumerWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: _accent.withValues(alpha: 0.15),
+                        color: accent.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                            color: _accent.withValues(alpha: 0.4)),
+                            color: accent.withValues(alpha: 0.4)),
                       ),
                       child: Text(
                         '⏾ ${formatDuration(remaining)} left',
-                        style: const TextStyle(
-                            color: _accent, fontSize: 12),
+                        style: TextStyle(
+                            color: accent, fontSize: 12),
                       ),
                     ),
                 ],
@@ -199,6 +200,7 @@ class SleepTimerSheet extends ConsumerWidget {
     required bool selected,
     required VoidCallback onTap,
   }) {
+    final accent = Theme.of(context).colorScheme.primary;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -209,7 +211,7 @@ class SleepTimerSheet extends ConsumerWidget {
           child: Row(
             children: [
               Icon(icon,
-                  color: selected ? _accent : Colors.white70,
+                  color: selected ? accent : Colors.white70,
                   size: 22),
               const SizedBox(width: 16),
               Expanded(
@@ -217,7 +219,7 @@ class SleepTimerSheet extends ConsumerWidget {
                   label,
                   style: TextStyle(
                     color:
-                        selected ? _accent : Colors.white,
+                        selected ? accent : Colors.white,
                     fontSize: 16,
                     fontWeight: selected
                         ? FontWeight.bold
@@ -226,8 +228,8 @@ class SleepTimerSheet extends ConsumerWidget {
                 ),
               ),
               if (selected)
-                const Icon(Icons.check,
-                    color: _accent, size: 22),
+                Icon(Icons.check,
+                    color: accent, size: 22),
             ],
           ),
         ),
@@ -237,13 +239,15 @@ class SleepTimerSheet extends ConsumerWidget {
 
   void _showCustomDialog(BuildContext context, WidgetRef ref) {
     final ctrl = TextEditingController();
+    final card = Theme.of(context).colorScheme.surfaceContainer;
+    final accent = Theme.of(context).colorScheme.primary;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: _card,
+        backgroundColor: card,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
-          side: const BorderSide(color: _accent, width: 1),
+          side: BorderSide(color: accent, width: 1),
         ),
         title: const Text('Custom timer',
             style: TextStyle(color: Colors.white)),
@@ -252,15 +256,15 @@ class SleepTimerSheet extends ConsumerWidget {
           keyboardType: TextInputType.number,
           autofocus: true,
           style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: 'Minutes (e.g. 25)',
-            hintStyle: TextStyle(color: Colors.white38),
+            hintStyle: const TextStyle(color: Colors.white38),
             enabledBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: _accent),
+              borderSide: BorderSide(color: accent),
             ),
             focusedBorder: UnderlineInputBorder(
               borderSide:
-                  BorderSide(color: _accent, width: 2),
+                  BorderSide(color: accent, width: 2),
             ),
           ),
           onSubmitted: (_) =>
@@ -275,9 +279,9 @@ class SleepTimerSheet extends ConsumerWidget {
           TextButton(
             onPressed: () =>
                 _submitCustom(ctx, ref, ctrl),
-            child: const Text('Set',
+            child: Text('Set',
                 style: TextStyle(
-                    color: _accent,
+                    color: accent,
                     fontWeight: FontWeight.bold)),
           ),
         ],
