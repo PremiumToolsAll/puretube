@@ -28,6 +28,7 @@ class _PureTubeAppState extends ConsumerState<PureTubeApp> {
     loadSavedDoubleTapSeconds(ref);
     loadSavedSkipSponsors(ref);
     loadSavedThemeOption(ref);
+    loadSavedGeminiApiKey(ref);
   }
 
   Future<void> _checkOnboarding() async {
