@@ -32,8 +32,13 @@ class StreamClient {
   ///
   /// See [YoutubeApiClient] for all the possible clients that can be set using the [ytClients] parameter.
   /// If [ytClients] is null the library automatically manages the clients, otherwise only the clients provided are used.
-  /// Currently by default the  [YoutubeApiClient.visionos] client is used,
+  /// Currently by default the  [YoutubeApiClient.androidSdkless] client is used,
   /// and if a js solver is provided the [YoutubeApiClient.safari] is used additionally.
+  ///
+  /// NOTE (2026-10-14): visionos was tried as the default to fix DASH 403s
+  /// (upstream #386) but its manifests carry no muxed streams, so every
+  /// video failed with "No playable streams". Reverted to androidSdkless
+  /// (720p muxed works). The visionos profile stays defined for testing.
   ///
   ///
   /// Note: if using any android client youtube often prevents downloading the same stream multiple times or downloading more than one stream from the same manifest.
@@ -65,7 +70,7 @@ class StreamClient {
         'ytClients cannot be an empty list');
 
     videoId = VideoId.fromString(videoId);
-    final clients = ytClients ?? [YoutubeApiClient.visionos];
+    final clients = ytClients ?? [YoutubeApiClient.androidSdkless];
 
     if (_jsChallengeSolver != null && ytClients == null) {
       clients.add(YoutubeApiClient.safari);
