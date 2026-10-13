@@ -111,7 +111,13 @@ class LyricsService {
       if (res.statusCode != 200) return null;
       final text = res.body.trim();
       if (text.isEmpty) return null;
-      if (text.toUpperCase().contains('NOT_FOUND')) return null;
+      final upper = text.toUpperCase();
+      if (upper.contains('NOT_FOUND')) return null;
+      // AI refusal messages for copyrighted lyrics.
+      if (upper.contains("I'M SORRY") ||
+          upper.contains("I CAN'T PROVIDE") ||
+          upper.contains("CANNOT PROVIDE") ||
+          upper.contains("COPYRIGHT")) return null;
       return text;
     } catch (_) {
       return null;
@@ -160,7 +166,12 @@ class LyricsService {
           ((parts.first as Map<String, dynamic>)['text'] as String?)
               ?.trim();
       if (text == null || text.isEmpty) return null;
-      if (text.toUpperCase().contains('NOT_FOUND')) return null;
+      final upper = text.toUpperCase();
+      if (upper.contains('NOT_FOUND')) return null;
+      if (upper.contains("I'M SORRY") ||
+          upper.contains("I CAN'T PROVIDE") ||
+          upper.contains("CANNOT PROVIDE") ||
+          upper.contains("COPYRIGHT")) return null;
       return text;
     } catch (_) {
       return null;
@@ -226,6 +237,21 @@ class LyricsService {
   /// (Official Video), [Official Audio], | Artist Name, ft./feat., etc.
   String _cleanTitle(String title) {
     var t = title;
+    // Take only the part before " - " or " | " if the rest looks like
+    // artist info (e.g. "Kaho Na Kaho - 8K/ | Emraan Hashmi...").
+    final dashIdx = t.indexOf(' - ');
+    final pipeIdx = t.indexOf(' | ');
+    var cutIdx = -1;
+    if (dashIdx > 0 && pipeIdx > 0) {
+      cutIdx = dashIdx < pipeIdx ? dashIdx : pipeIdx;
+    } else if (dashIdx > 0) {
+      cutIdx = dashIdx;
+    } else if (pipeIdx > 0) {
+      cutIdx = pipeIdx;
+    }
+    if (cutIdx > 3) {
+      t = t.substring(0, cutIdx);
+    }
     // Remove bracketed suffixes like (Official Video), [4K], (Lyric Video).
     t = t.replaceAll(RegExp(r'\s*[\(\[][^\)\]]*[\)\]]'), '');
     // Remove trailing "| Channel" / "- Channel" / "• Channel" bits.
