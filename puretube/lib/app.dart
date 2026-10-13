@@ -26,6 +26,7 @@ class _PureTubeAppState extends ConsumerState<PureTubeApp> {
     _checkOnboarding();
     loadSavedLocale(ref);
     loadSavedDoubleTapSeconds(ref);
+    loadSavedPreloadCount(ref);
     loadSavedSkipSponsors(ref);
     loadSavedThemeOption(ref);
     loadSavedGeminiApiKey(ref);
