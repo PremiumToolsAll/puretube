@@ -424,8 +424,10 @@ class SettingsScreen extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Optional. Enables Gemini AI as an extra lyrics fallback. '
-              'Without a key, the free AI fallback is used instead.',
+              'Advanced — optional. Without a key, lyrics use free '
+              'sources (YouTube captions, lyrics.ovh, Pollinations). '
+              'With a key, Gemini AI is added as the premium fallback '
+              'for better AI lyrics & summaries.',
               style: TextStyle(color: Colors.grey, fontSize: 12),
             ),
             const SizedBox(height: 12),
@@ -875,12 +877,12 @@ class SettingsScreen extends ConsumerWidget {
                 return ListTile(
                   leading: Icon(Icons.auto_awesome_outlined,
                       color: accentLight),
-                  title: const Text('Gemini API Key',
+                  title: const Text('Gemini API Key (Advanced)',
                       style: TextStyle(color: Colors.white)),
                   subtitle: Text(
                       isSet
-                          ? 'Set — AI lyrics enabled'
-                          : 'Not set — free AI fallback used',
+                          ? 'Set — better AI lyrics & summaries'
+                          : 'Advanced — for better AI lyrics & summaries',
                       style:
                           const TextStyle(color: Colors.grey)),
                   trailing: const Icon(Icons.chevron_right,
