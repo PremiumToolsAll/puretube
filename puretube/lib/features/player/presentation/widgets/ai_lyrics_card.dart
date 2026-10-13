@@ -56,6 +56,12 @@ class _AiLyricsCardState extends ConsumerState<AiLyricsCard> {
         ? rawLyrics.trim()
         : null;
 
+    // When there's nothing to show (not loading, no lyrics), render
+    // nothing — no empty bordered box / stray line.
+    if (!loading && lyrics == null) {
+      return const SizedBox.shrink();
+    }
+
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
