@@ -26,7 +26,7 @@ class ShortsPlayerWidget extends ConsumerStatefulWidget {
 
 class _ShortsPlayerWidgetState
     extends ConsumerState<ShortsPlayerWidget> {
-  static const _accent = Color(0xFF10B981);
+  Color get _accent => Theme.of(context).colorScheme.primary;
   Player? _player;
   VideoController? _videoController;
   bool _playing = true;
@@ -135,7 +135,7 @@ class _ShortsPlayerWidgetState
         else
           Container(color: Colors.black),
         if (_loading)
-          const Center(
+          Center(
               child: CircularProgressIndicator(
                   color: _accent)),
         // Play icon when paused.
