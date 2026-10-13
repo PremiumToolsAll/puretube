@@ -2232,15 +2232,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               ),
             ),
             const SizedBox(height: 10),
-            // AI Lyrics card (audio mode): expandable lyrics below the
-            // controls, scrollable so long lyrics never overflow.
-            // Auto-fetched by the controller when the track loads.
-            const Expanded(
-              child: SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: AiLyricsCard(),
-              ),
-            ),
+            // Spacer pushes the bottom tabs down; lyrics live inside
+            // the LYRICS button's bottom sheet (no separate card).
+            const Expanded(child: SizedBox.shrink()),
             // Bottom tabs: QUEUE | LYRICS | TIMER
             Padding(
               padding: const EdgeInsets.only(bottom: 18),
