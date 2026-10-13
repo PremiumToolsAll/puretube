@@ -6,6 +6,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import '../error/exceptions.dart';
 import '../../features/player/domain/entities/playback_models.dart';
+import 'piped_service.dart';
 import 'watch_category_tracker.dart';
 
 /// All YouTube contact goes through here. Everything else in the app
@@ -59,19 +60,42 @@ class SearchSession {
   SearchSession._(this._list, this.firstPage);
 
   // ignore: prefer_final_fields - reassigned on each nextPage()
-  VideoSearchList _list;
+  //
+  // Null when this session came from the Piped fallback, which has no
+  // further pages; [fetchMoreSearchResults] then returns an empty list.
+  VideoSearchList? _list;
 
   /// Videos from the first page.
   final List<VideoDetails> firstPage;
 }
 
 class YoutubeExtractorService {
-  YoutubeExtractorService({YoutubeExplode? client, Connectivity? connectivity})
+  YoutubeExtractorService(
+      {YoutubeExplode? client,
+      Connectivity? connectivity,
+      PipedService? piped})
       : _yt = client ?? YoutubeExplode(),
-        _connectivity = connectivity ?? Connectivity();
+        _connectivity = connectivity ?? Connectivity(),
+        _piped = piped ?? PipedService();
 
   final YoutubeExplode _yt;
   final Connectivity _connectivity;
+
+  /// Piped proxy fallback used when YouTube rate-limits the device IP.
+  final PipedService _piped;
+
+  /// True when [e] looks like YouTube throttling the device IP
+  /// (RequestLimitExceededException / HTTP 429). Those failures are worth
+  /// retrying through the Piped proxy instead of surfacing an error.
+  static bool _isRateLimitError(Object e) {
+    if (e is RequestLimitExceededException) return true;
+    final msg = e.toString().toLowerCase();
+    return msg.contains('requestlimitexceeded') ||
+        msg.contains('rate limit') ||
+        msg.contains('ratelimit') ||
+        msg.contains('http 429') ||
+        msg.contains('too many requests');
+  }
 
   /// Throttle: minimum delay between YouTube requests to avoid IP blocking.
   DateTime _lastRequest = DateTime.fromMillisecondsSinceEpoch(0);
@@ -144,6 +168,13 @@ class YoutubeExtractorService {
     } on PureTubeException {
       rethrow;
     } catch (e) {
+      if (_isRateLimitError(e)) {
+        try {
+          return await _piped.getVideoDetails(videoId);
+        } catch (_) {
+          // Fall through to the original error below.
+        }
+      }
       throw ExtractorException('Could not load video details: ${_friendlyError(e)}');
     }
   }
@@ -191,6 +222,14 @@ class YoutubeExtractorService {
     } on PureTubeException {
       rethrow;
     } catch (e) {
+      if (_isRateLimitError(e)) {
+        try {
+          return await _piped.getPlaybackStreams(videoId,
+              maxMuxedHeight: maxMuxedHeight);
+        } catch (_) {
+          // Fall through to the original error below.
+        }
+      }
       throw ExtractorException('Could not extract streams: $e');
     }
   }
@@ -368,6 +407,13 @@ class YoutubeExtractorService {
     } on PureTubeException {
       rethrow;
     } catch (e) {
+      if (_isRateLimitError(e)) {
+        try {
+          return await _piped.searchVideos(query, limit: limit);
+        } catch (_) {
+          // Fall through to the original error below.
+        }
+      }
       throw ExtractorException('Search failed: ${_friendlyError(e)}');
     }
   }
@@ -393,6 +439,16 @@ class YoutubeExtractorService {
     } on PureTubeException {
       rethrow;
     } catch (e) {
+      if (_isRateLimitError(e)) {
+        try {
+          final videos = await _piped.searchVideos(query, limit: limit);
+          // Piped has no paging; the session carries a null list and
+          // fetchMoreSearchResults returns an empty list for it.
+          return SearchSession._(null, videos);
+        } catch (_) {
+          // Fall through to the original error below.
+        }
+      }
       throw ExtractorException('Search failed: ${_friendlyError(e)}');
     }
   }
@@ -403,9 +459,12 @@ class YoutubeExtractorService {
       SearchSession session,
       {int limit = 25}) async {
     try {
-      final next = await session._list
+      // Null when the session came from the Piped fallback: no more pages.
+      final list = session._list;
+      if (list == null) return const [];
+      final next = await list
           .nextPage()
-          ?.timeout(const Duration(seconds: 25));
+          .timeout(const Duration(seconds: 25));
       if (next == null) return const [];
       session._list = next;
       return next
@@ -422,7 +481,10 @@ class YoutubeExtractorService {
     }
   }
 
-  void dispose() => _yt.close();
+  void dispose() {
+    _yt.close();
+    _piped.dispose();
+  }
 
   /// Lists subtitle/caption tracks for a video. Returns empty list
   /// when the video has no captions (never throws).
