@@ -8,6 +8,7 @@ import 'core/theme/theme_provider.dart';
 import 'features/home/presentation/screens/home_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/player/presentation/widgets/popup_player.dart';
+import 'features/settings/presentation/providers/quality_providers.dart';
 import 'features/settings/presentation/screens/settings_screen.dart';
 
 class PureTubeApp extends ConsumerStatefulWidget {
@@ -27,6 +28,7 @@ class _PureTubeAppState extends ConsumerState<PureTubeApp> {
     loadSavedLocale(ref);
     loadSavedDoubleTapSeconds(ref);
     loadSavedPreloadCount(ref);
+    loadSavedQualitySettings(ref);
     loadSavedSkipSponsors(ref);
     loadSavedThemeOption(ref);
     loadSavedGeminiApiKey(ref);
