@@ -15,6 +15,7 @@ class PipedService {
   PipedService({http.Client? client}) : _client = client ?? http.Client();
 
   static const List<String> instances = [
+    'https://pipedapi.ducks.party',
     'https://pipedapi.kavin.rocks',
     'https://pipedapi.adminforge.de',
     'https://pipedapi.reallyaweso.me',
