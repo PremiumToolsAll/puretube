@@ -77,7 +77,7 @@ class _HistoryTab extends ConsumerWidget {
     return ListView.separated(
       itemCount: history.length,
       separatorBuilder: (_, __) =>
-          const Divider(height: 1, color: Color(0xFF16211C)),
+          Divider(height: 1, color: Theme.of(context).colorScheme.surfaceContainer),
       itemBuilder: (ctx, i) {
         final e = history[i];
         final resume = e.positionSecs > 10
@@ -105,7 +105,7 @@ class _HistoryTab extends ConsumerWidget {
                 height: 54,
                 fit: BoxFit.cover,
                 errorWidget: (_, __, ___) =>
-                    Container(color: const Color(0xFF16211C)),
+                    Container(color: Theme.of(context).colorScheme.surfaceContainer),
               ),
             ),
             title: Text(e.title,
@@ -147,7 +147,7 @@ class _PlaylistsTab extends ConsumerWidget {
     return ListView.separated(
       itemCount: playlists.length,
       separatorBuilder: (_, __) =>
-          const Divider(height: 1, color: Color(0xFF16211C)),
+          Divider(height: 1, color: Theme.of(context).colorScheme.surfaceContainer),
       itemBuilder: (ctx, i) {
         final p = playlists[i];
         return Dismissible(
@@ -168,7 +168,7 @@ class _PlaylistsTab extends ConsumerWidget {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: const Color(0xFF16211C),
+                color: Theme.of(context).colorScheme.surfaceContainer,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Icon(Icons.playlist_play,
