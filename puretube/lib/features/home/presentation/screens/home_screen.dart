@@ -133,14 +133,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
           IconButton(
-            tooltip: 'Playlists',
-            icon: const Icon(Icons.playlist_play),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                  builder: (_) => const PlaylistsScreen()),
-            ),
-          ),
-          IconButton(
             tooltip: 'Settings',
             icon: const Icon(Icons.settings_outlined),
             onPressed: () => Navigator.of(context).push(
