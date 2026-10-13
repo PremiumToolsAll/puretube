@@ -17,6 +17,7 @@ import '../../../../core/services/lyrics_service.dart';
 import '../../../../core/services/watch_category_tracker.dart';
 import '../../../../core/services/youtube_extractor_service.dart';
 import '../../../settings/presentation/providers/quality_providers.dart';
+import 'popup_visibility.dart';
 import '../../data/services/audio_player_handler.dart';
 import '../../domain/entities/playback_models.dart';
 import '../../../library/presentation/providers/library_providers.dart';
@@ -269,6 +270,11 @@ class PlayerController extends Notifier<PlayerUiState>
 
     _pipSub = _pip.onPipChanged.listen((inPip) {
       state = state.copyWith(isInPip: inPip);
+      if (inPip) {
+        // Native PiP owns the window now: drop the in-app floating popup
+        // so the video never renders twice.
+        ref.read(popupVisibleProvider.notifier).state = false;
+      }
     });
     _positionSub = _handler.player.stream.position.listen((pos) {
       _maybeSkipSponsor(pos);
@@ -440,12 +446,20 @@ class PlayerController extends Notifier<PlayerUiState>
         segments = await _sponsorBlock.getSegments(videoId);
       }
 
+      // audio_service fetches artUri natively for the notification/lockscreen
+      // artwork. Only hand it a real http(s) URL — an empty or malformed
+      // Uri makes the notification's artwork loader fail and can leave
+      // the notification art-less or stale.
+      final artUri = Uri.tryParse(video.thumbnailUrl);
       await _handler.loadMedia(
         mediaItem: MediaItem(
           id: video.id,
           title: video.title,
           artist: video.author,
-          artUri: Uri.tryParse(video.thumbnailUrl),
+          artUri: (artUri != null &&
+                  (artUri.scheme == 'http' || artUri.scheme == 'https'))
+              ? artUri
+              : null,
           duration: video.duration,
         ),
         streamUrl: streams.muxedUrl,
@@ -693,6 +707,9 @@ class PlayerController extends Notifier<PlayerUiState>
       if (state.videoId != id || options.isEmpty) return;
       final anchor =
           initialHeight ?? state.currentQuality?.height;
+      // getQualityOptions sorts height desc, then fps desc, so the
+      // auto default (options.first) is the top height at its highest
+      // fps, and an anchor height resolves to its highest-fps variant.
       final current = anchor == null
           ? options.first
           : options.firstWhere(
@@ -976,19 +993,25 @@ class PlayerController extends Notifier<PlayerUiState>
       'worst';
 
   /// Best DASH option at exactly [targetHeight], else the closest DASH
-  /// option below it. Null when no DASH stream qualifies.
+  /// option below it, preferring the higher fps variant on ties. Null
+  /// when no DASH stream qualifies.
   MuxedQuality? _pickDashOption(
       List<MuxedQuality> options, int targetHeight) {
     MuxedQuality? best;
     for (final q in options) {
       if (!q.isDash || q.height > targetHeight) continue;
-      if (best == null || q.height > best.height) best = q;
+      if (best == null ||
+          q.height > best.height ||
+          (q.height == best.height && q.fps > best.fps)) {
+        best = q;
+      }
     }
     return best;
   }
 
   /// Closest option at-or-below [targetHeight], preferring muxed over
-  /// DASH on ties. Falls back to the lowest available option.
+  /// DASH on ties and the higher fps variant within the same kind.
+  /// Falls back to the lowest available option.
   MuxedQuality? _pickClosestOption(
       List<MuxedQuality> options, int targetHeight) {
     if (options.isEmpty) return null;
@@ -997,7 +1020,9 @@ class PlayerController extends Notifier<PlayerUiState>
       if (q.height > targetHeight) continue;
       if (best == null ||
           q.height > best.height ||
-          (q.height == best.height && best.isDash && !q.isDash)) {
+          (q.height == best.height &&
+              ((best.isDash && !q.isDash) ||
+                  (best.isDash == q.isDash && q.fps > best.fps)))) {
         best = q;
       }
     }
@@ -1058,7 +1083,11 @@ class PlayerController extends Notifier<PlayerUiState>
       return;
     }
     if (state.audioOnly) return; // quality applies to video mode only
-    if (state.currentQuality?.height == quality.height) return;
+    // Full-struct equality (height + fps + urls): picking the exact
+    // stream already playing is a no-op, but switching between fps
+    // variants of the same height (720p30 -> 720p60) must NOT be
+    // skipped — the old height-only check blocked that.
+    if (state.currentQuality == quality) return;
     final previous = state.currentQuality;
     final token = ++_qualitySwitchToken;
     var target = quality;
@@ -1105,7 +1134,11 @@ class PlayerController extends Notifier<PlayerUiState>
             final match = fresh
                 .where((q) => q.height == quality.height && q.isDash);
             if (match.isNotEmpty) {
-              target = match.first;
+              // Retry the same fps variant when it still exists (the
+              // list is sorted fps-desc, so first is the best
+              // fallback).
+              target = match.firstWhere((q) => q.fps == quality.fps,
+                  orElse: () => match.first);
               // Keep the quality menu in sync with the fresh URLs.
               state = state.copyWith(availableQualities: fresh);
               await _handler.switchStream(target.url,
@@ -1206,8 +1239,15 @@ class PlayerController extends Notifier<PlayerUiState>
           final match = fresh
               .where((q) => q.height == previous.height && q.isDash);
           if (match.isNotEmpty) {
-            prevUrl = match.first.url;
-            prevAudio = match.first.audioUrl;
+            // Restore the same fps variant when it still exists;
+            // the list is sorted fps-desc so the first entry is the
+            // best fallback otherwise.
+            final same = match.firstWhere(
+              (q) => q.fps == previous.fps,
+              orElse: () => match.first,
+            );
+            prevUrl = same.url;
+            prevAudio = same.audioUrl;
           }
         } catch (_) {}
       }
@@ -1220,6 +1260,7 @@ class PlayerController extends Notifier<PlayerUiState>
         bitrateKbps: previous.bitrateKbps,
         fps: previous.fps,
         codec: previous.codec,
+        isHdr: previous.isHdr,
       );
       final s = state.streams;
       state = state.copyWith(
@@ -1559,13 +1600,20 @@ class PlayerController extends Notifier<PlayerUiState>
         try {
           final options =
               await _extractor.getQualityOptions(state.videoId!);
-          for (final q in options) {
-            if (q.height == wantedHeight) {
-              muxedUrl = q.url;
-              muxedHeight = q.height;
-              preservedQuality = q;
-              break;
-            }
+          // Preserve the user's exact (height, fps) variant when it
+          // still exists; muxed-only (a DASH match would lose audio).
+          // The list is sorted fps-desc, so the first height match is
+          // the best fallback.
+          final wantedFps = state.currentQuality?.fps;
+          final atHeight = options
+              .where((q) => q.height == wantedHeight && !q.isDash)
+              .toList();
+          if (atHeight.isNotEmpty) {
+            final q = atHeight.firstWhere((e) => e.fps == wantedFps,
+                orElse: () => atHeight.first);
+            muxedUrl = q.url;
+            muxedHeight = q.height;
+            preservedQuality = q;
           }
         } catch (_) {}
       }
