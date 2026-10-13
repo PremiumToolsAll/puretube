@@ -37,7 +37,6 @@ class SleepTimerSheet extends ConsumerWidget {
         playerState.duration - playerState.position;
 
     final bg = Theme.of(context).scaffoldBackgroundColor;
-    final card = Theme.of(context).colorScheme.surfaceContainer;
     final accent = Theme.of(context).colorScheme.primary;
     return Container(
       decoration: BoxDecoration(
