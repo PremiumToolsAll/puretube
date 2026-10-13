@@ -2378,8 +2378,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   void _showQueueSheet() {
-    final videos =
-        ref.read(playerControllerProvider).relatedVideos;
     showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(
@@ -2392,52 +2390,75 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       fontWeight: FontWeight.bold)),
             ),
             Flexible(
-              child: videos.isEmpty
-                  ? const Padding(
+              child: Consumer(
+                builder: (context, ref, _) {
+                  final videos = ref
+                      .watch(playerControllerProvider)
+                      .relatedVideos;
+                  if (videos.isEmpty) {
+                    return const Padding(
                       padding: EdgeInsets.all(24),
                       child: Text('Queue is empty',
                           style:
                               TextStyle(color: Colors.grey)),
-                    )
-                  : ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: videos.length,
-                      itemBuilder: (c, i) {
-                        final v = videos[i];
-                        return ListTile(
-                          leading: ClipRRect(
-                            borderRadius:
-                                BorderRadius.circular(6),
-                            child: CachedNetworkImage(
-                              imageUrl: v.thumbnailUrl,
-                              width: 72,
-                              height: 48,
-                              fit: BoxFit.cover,
-                            ),
+                    );
+                  }
+                  return ReorderableListView.builder(
+                    shrinkWrap: true,
+                    itemCount: videos.length,
+                    onReorderItem: (oldIndex, newIndex) {
+                      ref
+                          .read(playerControllerProvider
+                              .notifier)
+                          .reorderQueue(oldIndex, newIndex);
+                    },
+                    itemBuilder: (c, i) {
+                      final v = videos[i];
+                      return ListTile(
+                        key: ValueKey(v.id),
+                        leading: ClipRRect(
+                          borderRadius:
+                              BorderRadius.circular(6),
+                          child: CachedNetworkImage(
+                            imageUrl: v.thumbnailUrl,
+                            width: 72,
+                            height: 48,
+                            fit: BoxFit.cover,
                           ),
-                          title: Text(v.title,
-                              maxLines: 2,
-                              overflow:
-                                  TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontSize: 13)),
-                          subtitle: Text(v.author,
-                              style: const TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 11)),
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            Navigator.of(context)
-                                .pushReplacement(
-                              MaterialPageRoute(
-                                builder: (_) => PlayerScreen(
-                                    videoId: v.id),
-                              ),
-                            );
-                          },
-                        );
-                      },
-                    ),
+                        ),
+                        title: Text(v.title,
+                            maxLines: 2,
+                            overflow:
+                                TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 13)),
+                        subtitle: Text(v.author,
+                            style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 11)),
+                        trailing: ReorderableDragStartListener(
+                          index: i,
+                          child: Icon(
+                            Icons.drag_handle,
+                            color: _accent.withValues(
+                                alpha: 0.8),
+                          ),
+                        ),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          Navigator.of(context)
+                              .pushReplacement(
+                            MaterialPageRoute(
+                              builder: (_) => PlayerScreen(
+                                  videoId: v.id),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  );
+                },
+              ),
             ),
           ],
         ),
