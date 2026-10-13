@@ -20,12 +20,10 @@ import '../../../../features/library/presentation/providers/library_providers.da
 import '../../../../features/library/presentation/screens/downloads_screen.dart';
 import '../../../../features/library/presentation/screens/playlists_screen.dart'
     show showSaveToPlaylistSheet;
-import '../../../ai/ai_summary_section.dart';
 import '../widgets/ai_lyrics_card.dart';
 import '../../../channel/presentation/screens/channel_screen.dart';
 import '../../domain/entities/playback_models.dart';
 import '../providers/player_controller.dart';
-import '../widgets/live_chat_widget.dart';
 import '../widgets/lyrics_sheet.dart';
 import '../providers/popup_visibility.dart';
 import '../widgets/sleep_timer_sheet.dart';
@@ -3350,15 +3348,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           ],
           if (video.id.isNotEmpty)
             const _UpNextSection(),
-          const SizedBox(height: 16),
-          AiSummarySection(
-            title: video.title,
-            author: video.author,
-            description: video.description,
-          ),
-          const SizedBox(height: 16),
-          const LiveChatWidget(
-              videoId: '', showUnavailable: true),
         ],
       ),
     );
