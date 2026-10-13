@@ -252,7 +252,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                               ? FontWeight.bold
                               : FontWeight.normal)),
                   onPressed: () {
-                    _searchController.text = _categories[i];
+                    setState(() {
+                      _searchController.text = _categories[i];
+                    });
                     _search(_categories[i]);
                   },
                 );
