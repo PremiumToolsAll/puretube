@@ -644,7 +644,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         ref.read(playerControllerProvider).relatedVideos;
     if (related.isNotEmpty) {
       // Load in the same screen: keeps fullscreen, fit mode, controls.
-      notifier.loadVideo(related.first.id);
+      // playNext() picks the first unplayed video — never the current
+      // one or anything played earlier, so Next never loops.
+      unawaited(notifier.playNext());
       _restartHideTimer();
       return;
     }
