@@ -13,6 +13,8 @@ import '../../../player/presentation/providers/player_controller.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/theme_provider.dart';
 import '../../../../main.dart';
+import '../providers/quality_providers.dart';
+import '../widgets/quality_settings_sheet.dart';
 
 /// null = follow the system language.
 final localeProvider = StateProvider<Locale?>((ref) => null);
@@ -742,6 +744,36 @@ class SettingsScreen extends ConsumerWidget {
                       color: Colors.grey),
                   onTap: () =>
                       _showThemeDialog(context, ref, current),
+                );
+              },
+            ),
+          ]),
+          _sectionHeader(context, 'Audio and video'),
+          _settingsCard(context, children: [
+            Consumer(
+              builder: (context, ref, _) {
+                final wifiV =
+                    ref.watch(wifiVideoQualityProvider);
+                final mobV =
+                    ref.watch(mobileVideoQualityProvider);
+                final wifiA =
+                    ref.watch(wifiAudioQualityProvider);
+                final mobA =
+                    ref.watch(mobileAudioQualityProvider);
+                return ListTile(
+                  leading: Icon(Icons.hd_outlined,
+                      color: accentLight),
+                  title: const Text('Stream quality',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: Text(
+                      'Wi-Fi: ${qualityValueLabel(wifiV)} / ${qualityValueLabel(wifiA)} • '
+                      'Mobile: ${qualityValueLabel(mobV)} / ${qualityValueLabel(mobA)}',
+                      style:
+                          const TextStyle(color: Colors.grey)),
+                  trailing: const Icon(Icons.chevron_right,
+                      color: Colors.grey),
+                  onTap: () =>
+                      QualitySettingsSheet.show(context),
                 );
               },
             ),
