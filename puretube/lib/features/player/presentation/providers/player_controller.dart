@@ -257,6 +257,7 @@ class PlayerController extends Notifier<PlayerUiState>
     final previousSpeed = state.speed;
     final previousSkip = state.skipSponsors;
     final previousAudioOnly = state.audioOnly;
+    final keepAudioOnly = previousAudioOnly || _prefAudioOnly;
     _recoveryAttempts = 0;
     _cancelSleepTimer();
     await _handler.player.stop();
@@ -268,10 +269,13 @@ class PlayerController extends Notifier<PlayerUiState>
     state = PlayerUiState(
       status: PlayerStatus.loading,
       videoId: videoId,
+      // Audio mode: keep the previous track's artwork/title visible while
+      // the new track loads (YouTube Music style — no full-screen spinner).
+      video: keepAudioOnly ? state.video : null,
       speed: previousSpeed,
       skipSponsors: previousSkip,
       // Restore the persisted audio-only mode on fresh app starts.
-      audioOnly: previousAudioOnly || _prefAudioOnly,
+      audioOnly: keepAudioOnly,
     );
 
     try {
