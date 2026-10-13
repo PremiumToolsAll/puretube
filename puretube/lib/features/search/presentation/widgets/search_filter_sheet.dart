@@ -94,8 +94,12 @@ class _SearchFilterSheetState
                   onPressed: () =>
                       Navigator.pop(context, _f),
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: _accent),
-                  child: const Text('Apply'),
+                      backgroundColor: _accent,
+                      foregroundColor: Colors.black),
+                  child: const Text('Apply',
+                      style: TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.bold)),
                 ),
               ],
             ),
