@@ -2241,7 +2241,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             // Large empty space below (user wants the row well lifted up
             // in audio mode for a clean, beautiful look).
             Padding(
-              padding: const EdgeInsets.only(bottom: 140),
+              padding: const EdgeInsets.only(bottom: 170),
               child: Row(
                 mainAxisAlignment:
                     MainAxisAlignment.spaceEvenly,
