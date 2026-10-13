@@ -3834,6 +3834,10 @@ class _DescriptionSheetState
                 ],
               ),
               const SizedBox(height: 16),
+              // AI Lyrics (video mode): auto-generated when the video
+              // loads; shares the controller's lyrics cache with audio
+              // mode.
+              const AiLyricsCard(),
               const SizedBox(height: 16),
               Row(
                 children: [
