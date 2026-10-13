@@ -140,6 +140,7 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
                       ),
                       StreamBuilder<bool>(
                         stream: player.stream.playing,
+                        initialData: player.state.playing,
                         builder: (context, snap) {
                           final playing = snap.data ?? false;
                           return Row(
