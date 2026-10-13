@@ -176,13 +176,7 @@ class LyricsService {
       if (res.statusCode != 200) return null;
       final text = res.body.trim();
       if (text.isEmpty) return null;
-      final upper = text.toUpperCase();
-      if (upper.contains('NOT_FOUND')) return null;
-      // AI refusal messages for copyrighted lyrics.
-      if (upper.contains("I'M SORRY") ||
-          upper.contains("I CAN'T PROVIDE") ||
-          upper.contains("CANNOT PROVIDE") ||
-          upper.contains("COPYRIGHT")) return null;
+      if (_isRefusal(text)) return null;
       return text;
     } catch (_) {
       return null;
@@ -231,12 +225,7 @@ class LyricsService {
           ((parts.first as Map<String, dynamic>)['text'] as String?)
               ?.trim();
       if (text == null || text.isEmpty) return null;
-      final upper = text.toUpperCase();
-      if (upper.contains('NOT_FOUND')) return null;
-      if (upper.contains("I'M SORRY") ||
-          upper.contains("I CAN'T PROVIDE") ||
-          upper.contains("CANNOT PROVIDE") ||
-          upper.contains("COPYRIGHT")) return null;
+      if (_isRefusal(text)) return null;
       return text;
     } catch (_) {
       return null;
@@ -367,6 +356,25 @@ class LyricsService {
   }
 
   void dispose() => _client.close();
+
+  /// Returns true if [text] looks like an AI refusal or copyright
+  /// notice rather than actual lyrics. Handles straight/curly
+  /// apostrophes and common phrasing variants.
+  bool _isRefusal(String text) {
+    // Normalize: uppercase, curly quotes -> straight, collapse whitespace.
+    var norm = text.toUpperCase();
+    norm = norm.replaceAll('\u2019', "'"); // ’ -> '
+    norm = norm.replaceAll('\u2018', "'"); // ‘ -> '
+    norm = norm.replaceAll(RegExp(r'\s+'), ' ');
+    if (norm.contains('NOT_FOUND')) return true;
+    // "I'm sorry, but I can't provide that." and variants.
+    if (norm.contains('SORRY') && norm.contains('PROVIDE')) return true;
+    if (norm.contains('CANNOT PROVIDE')) return true;
+    if (norm.contains('UNABLE TO PROVIDE')) return true;
+    if (norm.contains('COPYRIGHT')) return true;
+    if (norm.contains('AS AN AI')) return true;
+    return false;
+  }
 }
 
 class _Attempt {
