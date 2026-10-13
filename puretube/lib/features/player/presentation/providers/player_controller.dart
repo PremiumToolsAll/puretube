@@ -789,8 +789,20 @@ class PlayerController extends Notifier<PlayerUiState>
   /// Returns a video id to play for "Next", making sure Up Next is
   /// loaded first. Retries the related-videos fetch, then falls back
   /// to a direct keyword search, so Next almost always finds a video.
-  /// Returns null only if every attempt fails.
+  /// Returns null only if every attempt fails. Has an overall timeout
+  /// so the UI never hangs on a slow network.
   Future<String?> ensureNextVideoId() async {
+    try {
+      return await _ensureNextVideoIdInner()
+          .timeout(const Duration(seconds: 25));
+    } on TimeoutException {
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> _ensureNextVideoIdInner() async {
     if (state.relatedVideos.isNotEmpty) {
       return state.relatedVideos.first.id;
     }
@@ -802,7 +814,9 @@ class PlayerController extends Notifier<PlayerUiState>
     final v = state.video;
     if (v == null) return null;
     try {
-      final results = await _extractor.searchVideos(v.title, limit: 10);
+      final results = await _extractor
+          .searchVideos(v.title, limit: 10)
+          .timeout(const Duration(seconds: 15));
       for (final r in results) {
         if (r.id != state.videoId) return r.id;
       }
