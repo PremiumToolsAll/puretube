@@ -27,7 +27,7 @@ import '../../domain/entities/playback_models.dart';
 import '../providers/player_controller.dart';
 import '../widgets/live_chat_widget.dart';
 import '../widgets/lyrics_sheet.dart';
-import '../widgets/popup_player.dart';
+import '../providers/popup_visibility.dart';
 import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/subtitle_sheet.dart';
 import '../../../../features/settings/presentation/screens/settings_screen.dart'
@@ -1261,7 +1261,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   final q = qualities[i];
                   final selected = current != null &&
                       current.height == q.height &&
-                      current.isDash == q.isDash;
+                      current.isDash == q.isDash &&
+                      current.fps == q.fps;
                   final detail = q.detailLine;
                   return InkWell(
                     onTap: () {
@@ -1327,6 +1328,30 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                                         child: Text('DASH',
                                             style: TextStyle(
                                                 color: _accent,
+                                                fontSize: 11,
+                                                fontWeight:
+                                                    FontWeight.bold)),
+                                      ),
+                                    ],
+                                    if (q.isHdr) ...[
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets
+                                            .symmetric(
+                                                horizontal: 8,
+                                                vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.purple
+                                              .withValues(
+                                                  alpha: 0.25),
+                                          borderRadius:
+                                              BorderRadius.circular(
+                                                  4),
+                                        ),
+                                        child: const Text('HDR',
+                                            style: TextStyle(
+                                                color: Colors
+                                                    .purpleAccent,
                                                 fontSize: 11,
                                                 fontWeight:
                                                     FontWeight.bold)),
@@ -2921,7 +2946,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   Widget _buildTopBar(PlayerUiState uiState) {
     final qualityLabel = uiState.currentQuality != null
-        ? '${uiState.currentQuality!.height}p'
+        ? uiState.currentQuality!.resolutionLabel
         : (uiState.streams != null
             ? '${uiState.streams!.muxedHeight}p'
             : 'Auto');
@@ -3505,13 +3530,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               if (uiState.pipSupported) {
                 notifier.enterPip();
               } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                        'Picture-in-picture is not supported on this device.'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
+                // No native PiP on this device: fall back to the in-app
+                // floating window (same flow as the "Popup player"
+                // menu item — leave the fullscreen player first so the
+                // window floats over the previous screen).
+                Navigator.pop(context);
+                ref
+                    .read(popupVisibleProvider.notifier)
+                    .state = true;
               }
             },
           ),
