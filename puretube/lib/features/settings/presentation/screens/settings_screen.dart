@@ -10,6 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../library/presentation/providers/library_providers.dart';
 import '../../../player/presentation/providers/player_controller.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/theme_provider.dart';
 import '../../../../main.dart';
 
 /// null = follow the system language.
@@ -115,6 +117,59 @@ class SettingsScreen extends ConsumerWidget {
       default:
         return 'English';
     }
+  }
+
+  void _showThemeDialog(BuildContext context, WidgetRef ref,
+      AppThemeOption current) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF16211C),
+        title: const Text('Theme',
+            style: TextStyle(color: Colors.white)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: AppThemeOption.values.length,
+            itemBuilder: (ctx, i) {
+              final option = AppThemeOption.values[i];
+              return RadioListTile<AppThemeOption>(
+                value: option,
+                groupValue: current,
+                title: Text(option.label,
+                    style:
+                        const TextStyle(color: Colors.white)),
+                secondary: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: option.accent,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                        color: Colors.white24),
+                  ),
+                ),
+                activeColor: _accent,
+                onChanged: (v) async {
+                  if (v != null) {
+                    await saveThemeOption(ref, v);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  }
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel',
+                style: TextStyle(color: _accentLight)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showLanguageDialog(
@@ -451,6 +506,28 @@ class SettingsScreen extends ConsumerWidget {
               );
             },
           ),
+          _sectionHeader('Appearance'),
+          _settingsCard(children: [
+            Consumer(
+              builder: (context, ref, _) {
+                final current =
+                    ref.watch(themeOptionProvider);
+                return ListTile(
+                  leading: const Icon(Icons.palette_outlined,
+                      color: _accentLight),
+                  title: const Text('Theme',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: Text(current.label,
+                      style:
+                          const TextStyle(color: Colors.grey)),
+                  trailing: const Icon(Icons.chevron_right,
+                      color: Colors.grey),
+                  onTap: () =>
+                      _showThemeDialog(context, ref, current),
+                );
+              },
+            ),
+          ]),
           _sectionHeader('General'),
           _settingsCard(children: [
             ListTile(
