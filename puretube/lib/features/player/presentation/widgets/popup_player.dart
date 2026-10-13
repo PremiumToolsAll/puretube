@@ -49,7 +49,7 @@ class _PopupPlayerWindow extends ConsumerStatefulWidget {
 
 class _PopupPlayerWindowState
     extends ConsumerState<_PopupPlayerWindow> {
-  static const _gold = Color(0xFFD4A574);
+  Color get _gold => Theme.of(context).colorScheme.primary;
 
   VideoController? _videoController;
   Offset? _offset; // null => centered default
@@ -356,7 +356,7 @@ class _PopupSettingsSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ui = ref.watch(playerControllerProvider);
     final notifier = ref.read(playerControllerProvider.notifier);
-    const gold = Color(0xFFD4A574);
+    final gold = Theme.of(context).colorScheme.primary;
 
     Widget sectionTitle(String text) => Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
@@ -400,7 +400,7 @@ class _PopupSettingsSheet extends ConsumerWidget {
                   style: const TextStyle(color: Colors.white),
                 ),
                 trailing: selected
-                    ? const Icon(Icons.check,
+                    ? Icon(Icons.check,
                         color: gold, size: 20)
                     : null,
                 onTap: () {
