@@ -2238,7 +2238,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             // Bottom tabs: QUEUE | LYRICS | TIMER
             // Generous empty space below (user wants the row lifted up).
             Padding(
-              padding: const EdgeInsets.only(bottom: 64),
+              padding: const EdgeInsets.only(bottom: 96),
               child: Row(
                 mainAxisAlignment:
                     MainAxisAlignment.spaceEvenly,
