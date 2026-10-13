@@ -792,6 +792,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       await SystemChrome.setPreferredOrientations(
           [DeviceOrientation.portraitUp]);
     }
+    // Apply the fullscreen / no-fullscreen quality preference.
+    try {
+      ref
+          .read(playerControllerProvider.notifier)
+          .applyFullscreenQuality(_isFullscreen);
+    } catch (_) {}
     _restartHideTimer();
   }
 
@@ -2066,6 +2072,49 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 ],
               ),
             ),
+            // Sleep timer countdown badge — visible only while a timer is
+            // active. Tapping opens the sleep timer sheet.
+            if (uiState.sleepRemaining != null)
+              Center(
+                child: Padding(
+                  padding:
+                      const EdgeInsets.only(top: 6, bottom: 2),
+                  child: PressScale(
+                    onTap: _showSleepSheet,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        borderRadius:
+                            BorderRadius.circular(20),
+                        color:
+                            _gold.withValues(alpha: 0.12),
+                        border: Border.all(
+                          color:
+                              _gold.withValues(alpha: 0.45),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.timer_outlined,
+                              color: _gold, size: 14),
+                          const SizedBox(width: 6),
+                          Text(
+                            '${formatDuration(uiState.sleepRemaining)} left',
+                            style: TextStyle(
+                              color: _gold,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             // SONORA: large album art, 24px rounded corners, strong shadow.
             // Swipe left/right on the artwork to change tracks
             // (YouTube Music style) — only the artwork/title crossfade,
@@ -2371,8 +2420,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       thumbnailUrl: video.thumbnailUrl,
                     );
                   }),
-                  _audioTab(Icons.timer_outlined, 'TIMER',
-                      _showSleepSheet),
+                  _sleepTimerAudioTab(),
                 ],
               ),
             ),
@@ -2448,6 +2496,70 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         ),
       ),
     );
+  }
+
+  /// TIMER pill that shows the live sleep-timer countdown (e.g. "44:47")
+  /// when a timer is set, and "TIMER" otherwise. Tapping still opens the
+  /// sleep-timer sheet. The countdown uses the active theme color.
+  Widget _sleepTimerAudioTab() {
+    return InkWell(
+      onTap: _showSleepSheet,
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: 22, vertical: 11),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          color: Colors.white.withValues(alpha: 0.04),
+          border: Border.all(
+            color: _gold.withValues(alpha: 0.45),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.timer_outlined, color: _gold, size: 20),
+            const SizedBox(width: 8),
+            Consumer(
+              builder: (context, ref, _) {
+                final remaining = ref.watch(
+                  playerControllerProvider
+                      .select((s) => s.sleepRemaining),
+                );
+                if (remaining == null) {
+                  return Text('TIMER',
+                      style: TextStyle(
+                          color:
+                              Colors.white.withValues(alpha: 0.9),
+                          fontSize: 11,
+                          letterSpacing: 1.6,
+                          fontWeight: FontWeight.w600));
+                }
+                return Text(
+                  _formatSleepRemaining(remaining),
+                  style: TextStyle(
+                      color: _emerald,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Formats a sleep-timer countdown as m:ss (or h:mm:ss past an hour).
+  String _formatSleepRemaining(Duration d) {
+    final total = d.inSeconds.clamp(0, 99 * 3600 + 59 * 60 + 59);
+    final h = total ~/ 3600;
+    final m = (total % 3600) ~/ 60;
+    final s = total % 60;
+    if (h > 0) {
+      return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '$m:${s.toString().padLeft(2, '0')}';
   }
 
   void _cycleRepeatMode() {
@@ -2802,13 +2914,33 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           if (uiState.sleepRemaining != null)
             PressScale(
               onTap: _showSleepSheet,
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(
-                  '⏾ ${formatDuration(uiState.sleepRemaining)}',
-                  style: TextStyle(
-                      color: _accent, fontSize: 12),
+              child: Container(
+                margin:
+                    const EdgeInsets.symmetric(horizontal: 4),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  color: _accent.withValues(alpha: 0.14),
+                  border: Border.all(
+                    color: _accent.withValues(alpha: 0.45),
+                    width: 1,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.timer_outlined,
+                        color: _accent, size: 12),
+                    const SizedBox(width: 4),
+                    Text(
+                      formatDuration(uiState.sleepRemaining),
+                      style: TextStyle(
+                          color: _accent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ],
                 ),
               ),
             ),
