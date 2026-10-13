@@ -16,7 +16,7 @@ class CommunityTab extends StatefulWidget {
 }
 
 class _CommunityTabState extends State<CommunityTab> {
-  static const _accent = Color(0xFF6200EA);
+  Color get _accent => Theme.of(context).colorScheme.primary;
   bool _loading = true;
 
   @override
@@ -35,7 +35,7 @@ class _CommunityTabState extends State<CommunityTab> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(
+      return Center(
           child: CircularProgressIndicator(
               color: _accent));
     }
