@@ -9,7 +9,7 @@ import '../providers/search_provider.dart';
 import '../../../player/presentation/widgets/mini_player_bar.dart';
 import '../widgets/continue_watching_card.dart';
 import '../widgets/video_card.dart';
-import '../../../player/presentation/widgets/popup_player.dart';
+import '../../../player/presentation/providers/popup_visibility.dart';
 import '../../../library/presentation/screens/downloads_screen.dart';
 import '../../../library/presentation/screens/history_screen.dart';
 import '../../../library/presentation/screens/playlists_screen.dart';
