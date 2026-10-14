@@ -97,6 +97,56 @@ class YoutubeExtractorService {
         msg.contains('too many requests');
   }
 
+  /// Timestamp until which direct YouTube requests are skipped: the last
+  /// attempt was rate-limited (HTTP 429), so hammering YouTube again would
+  /// only extend the IP block. While blocked, every call goes straight to
+  /// the Piped proxy, letting the IP cool down.
+  DateTime _youtubeBlockedUntil =
+      DateTime.fromMillisecondsSinceEpoch(0);
+  static const _blockCooldown = Duration(minutes: 15);
+
+  bool get _youtubeBlocked =>
+      DateTime.now().isBefore(_youtubeBlockedUntil);
+
+  void _markYouTubeBlocked() {
+    _youtubeBlockedUntil = DateTime.now().add(_blockCooldown);
+  }
+
+  /// Piped fallback for video details. Throws a friendly error when the
+  /// proxy is unreachable too (instead of leaking the raw exception).
+  Future<VideoDetails> _pipedVideoDetails(String videoId) async {
+    try {
+      return await _piped.getVideoDetails(videoId);
+    } catch (_) {
+      throw ExtractorException(
+          'YouTube সাময়িকভাবে block করেছে আর বিকল্প সার্ভারেও পৌঁছানো যাচ্ছে না। কিছুক্ষণ পরে আবার চেষ্টা করো।');
+    }
+  }
+
+  /// Piped fallback for playback streams (same friendly-error contract).
+  Future<PlaybackStreams> _pipedStreams(String videoId,
+      {int maxMuxedHeight = 720, bool preferBestAudio = true}) async {
+    try {
+      return await _piped.getPlaybackStreams(videoId,
+          maxMuxedHeight: maxMuxedHeight,
+          preferBestAudio: preferBestAudio);
+    } catch (_) {
+      throw ExtractorException(
+          'YouTube সাময়িকভাবে block করেছে আর বিকল্প সার্ভারেও পৌঁছানো যাচ্ছে না। কিছুক্ষণ পরে আবার চেষ্টা করো।');
+    }
+  }
+
+  /// Piped fallback for search (same friendly-error contract).
+  Future<List<VideoDetails>> _pipedSearch(String query,
+      {int limit = 25}) async {
+    try {
+      return await _piped.searchVideos(query, limit: limit);
+    } catch (_) {
+      throw ExtractorException(
+          'YouTube সাময়িকভাবে block করেছে আর বিকল্প সার্ভারেও পৌঁছানো যাচ্ছে না। কিছুক্ষণ পরে আবার চেষ্টা করো।');
+    }
+  }
+
   /// Throttle: minimum delay between YouTube requests to avoid IP blocking.
   DateTime _lastRequest = DateTime.fromMillisecondsSinceEpoch(0);
   static const _minRequestGap = Duration(milliseconds: 800);
@@ -163,6 +213,8 @@ class YoutubeExtractorService {
 
   Future<VideoDetails> getVideoDetails(String videoId) async {
     await _requireNetwork();
+    // Circuit breaker: don't hammer a blocked IP — go straight to Piped.
+    if (_youtubeBlocked) return _pipedVideoDetails(videoId);
     try {
       await _throttle();
       final video =
@@ -177,11 +229,8 @@ class YoutubeExtractorService {
       rethrow;
     } catch (e) {
       if (_isRateLimitError(e)) {
-        try {
-          return await _piped.getVideoDetails(videoId);
-        } catch (_) {
-          // Fall through to the original error below.
-        }
+        _markYouTubeBlocked();
+        return _pipedVideoDetails(videoId);
       }
       throw ExtractorException('Could not load video details: ${_friendlyError(e)}');
     }
@@ -199,6 +248,12 @@ class YoutubeExtractorService {
     bool preferBestAudio = true,
   }) async {
     await _requireNetwork();
+    // Circuit breaker: don't hammer a blocked IP — go straight to Piped.
+    if (_youtubeBlocked) {
+      return _pipedStreams(videoId,
+          maxMuxedHeight: maxMuxedHeight,
+          preferBestAudio: preferBestAudio);
+    }
     try {
       final manifest = await _getManifestWithAgeBypass(videoId);
 
@@ -236,13 +291,10 @@ class YoutubeExtractorService {
       rethrow;
     } catch (e) {
       if (_isRateLimitError(e)) {
-        try {
-          return await _piped.getPlaybackStreams(videoId,
-              maxMuxedHeight: maxMuxedHeight,
-              preferBestAudio: preferBestAudio);
-        } catch (_) {
-          // Fall through to the original error below.
-        }
+        _markYouTubeBlocked();
+        return _pipedStreams(videoId,
+            maxMuxedHeight: maxMuxedHeight,
+            preferBestAudio: preferBestAudio);
       }
       throw ExtractorException('Could not extract streams: $e');
     }
@@ -429,6 +481,8 @@ class YoutubeExtractorService {
   Future<List<VideoDetails>> searchVideos(String query,
       {int limit = 25}) async {
     await _requireNetwork();
+    // Circuit breaker: don't hammer a blocked IP — go straight to Piped.
+    if (_youtubeBlocked) return _pipedSearch(query, limit: limit);
     try {
       await _throttle();
       final results = await _yt.search
@@ -453,11 +507,8 @@ class YoutubeExtractorService {
       rethrow;
     } catch (e) {
       if (_isRateLimitError(e)) {
-        try {
-          return await _piped.searchVideos(query, limit: limit);
-        } catch (_) {
-          // Fall through to the original error below.
-        }
+        _markYouTubeBlocked();
+        return _pipedSearch(query, limit: limit);
       }
       throw ExtractorException('Search failed: ${_friendlyError(e)}');
     }
@@ -468,6 +519,13 @@ class YoutubeExtractorService {
   Future<SearchSession> startPagedSearch(String query,
       {int limit = 25}) async {
     await _requireNetwork();
+    // Circuit breaker: don't hammer a blocked IP — go straight to Piped.
+    if (_youtubeBlocked) {
+      final videos = await _pipedSearch(query, limit: limit);
+      // Piped has no paging; the session carries a null list and
+      // fetchMoreSearchResults returns an empty list for it.
+      return SearchSession._(null, videos);
+    }
     try {
       await _throttle();
       final results = await _yt.search
@@ -497,14 +555,11 @@ class YoutubeExtractorService {
       rethrow;
     } catch (e) {
       if (_isRateLimitError(e)) {
-        try {
-          final videos = await _piped.searchVideos(query, limit: limit);
-          // Piped has no paging; the session carries a null list and
-          // fetchMoreSearchResults returns an empty list for it.
-          return SearchSession._(null, videos);
-        } catch (_) {
-          // Fall through to the original error below.
-        }
+        _markYouTubeBlocked();
+        final videos = await _pipedSearch(query, limit: limit);
+        // Piped has no paging; the session carries a null list and
+        // fetchMoreSearchResults returns an empty list for it.
+        return SearchSession._(null, videos);
       }
       throw ExtractorException('Search failed: ${_friendlyError(e)}');
     }

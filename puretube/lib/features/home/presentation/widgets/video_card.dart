@@ -82,12 +82,18 @@ class VideoCard extends StatelessWidget {
             style:
                 const TextStyle(color: Colors.grey, fontSize: 11),
           ),
-          Text(
-            '${formatCount(video.viewCount)} views • ${timeAgo(video.uploadDate)}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style:
-                const TextStyle(color: Colors.grey, fontSize: 11),
+          Builder(
+            builder: (context) {
+              final ago = timeAgo(video.uploadDate);
+              return Text(
+                '${formatCount(video.viewCount)} views'
+                '${ago.isNotEmpty ? ' • $ago' : ''}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: Colors.grey, fontSize: 11),
+              );
+            },
           ),
         ],
       ),

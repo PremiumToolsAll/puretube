@@ -14,13 +14,12 @@ import '../../features/player/domain/entities/playback_models.dart';
 class PipedService {
   PipedService({http.Client? client}) : _client = client ?? http.Client();
 
+  /// Verified working 2026-10-14 (others returned 301/502/526/timeout).
+  /// Kept short: [_getJson] races every instance, so dead entries only
+  /// waste requests.
   static const List<String> instances = [
     'https://pipedapi.ducks.party',
-    'https://pipedapi.kavin.rocks',
-    'https://pipedapi.adminforge.de',
-    'https://pipedapi.reallyaweso.me',
-    'https://pipedapi.leptons.xyz',
-    'https://pipedapi.r4fo.com',
+    'https://api.piped.private.coffee',
   ];
 
   final http.Client _client;
@@ -170,6 +169,40 @@ class PipedService {
     return Duration(seconds: seconds.round());
   }
 
+  /// Piped reports upload dates as relative strings ("7 hours ago",
+  /// "Streamed 3 days ago"); convert to an absolute DateTime.
+  static DateTime? _parseUploadedDate(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    var s = raw.trim().toLowerCase();
+    if (s.startsWith('streamed ')) {
+      s = s.substring('streamed '.length).trim();
+    }
+    final now = DateTime.now();
+    if (s == 'just now' || s == 'moments ago') return now;
+    final m = RegExp(
+            r'(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago')
+        .firstMatch(s);
+    if (m == null) return null;
+    final n = int.tryParse(m.group(1)!) ?? 0;
+    switch (m.group(2)) {
+      case 'second':
+        return now.subtract(Duration(seconds: n));
+      case 'minute':
+        return now.subtract(Duration(minutes: n));
+      case 'hour':
+        return now.subtract(Duration(hours: n));
+      case 'day':
+        return now.subtract(Duration(days: n));
+      case 'week':
+        return now.subtract(Duration(days: n * 7));
+      case 'month':
+        return now.subtract(Duration(days: n * 30));
+      case 'year':
+        return now.subtract(Duration(days: n * 365));
+    }
+    return null;
+  }
+
   static VideoDetails _searchItemToDetails(Map<String, dynamic> item) {
     final id = _videoIdFromWatchUrl(item['url']?.toString() ?? '') ?? '';
     return VideoDetails(
@@ -181,7 +214,7 @@ class PipedService {
       thumbnailUrl: item['thumbnailUrl']?.toString() ?? '',
       viewCount: (item['views'] as num?)?.toInt(),
       likeCount: null,
-      uploadDate: null,
+      uploadDate: _parseUploadedDate(item['uploadedDate']?.toString()),
       description: '',
     );
   }
