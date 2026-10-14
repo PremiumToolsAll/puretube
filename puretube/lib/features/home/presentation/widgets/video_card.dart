@@ -76,7 +76,14 @@ class VideoCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '${video.author} • ${formatCount(video.viewCount)} views • ${timeAgo(video.uploadDate)}',
+            video.author,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style:
+                const TextStyle(color: Colors.grey, fontSize: 11),
+          ),
+          Text(
+            '${formatCount(video.viewCount)} views • ${timeAgo(video.uploadDate)}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style:
