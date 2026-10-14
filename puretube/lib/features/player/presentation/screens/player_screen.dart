@@ -2233,36 +2233,32 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 10),
-            // Spacer pushes the bottom tabs down; lyrics live inside
-            // the LYRICS button's bottom sheet (no separate card).
-            const Expanded(child: SizedBox.shrink()),
-            // Bottom tabs: QUEUE | LYRICS | TIMER
-            // Large empty space below (user wants the row well lifted up
-            // in audio mode for a clean, beautiful look).
-            Padding(
-              padding: const EdgeInsets.only(bottom: 210),
-              child: Row(
-                mainAxisAlignment:
-                    MainAxisAlignment.spaceEvenly,
-                children: [
-                  _audioTab(
-                      Icons.queue_music, 'QUEUE', _showQueueSheet),
-                  _audioTab(Icons.lyrics_outlined, 'LYRICS', () {
-                    final video =
-                        ref.read(playerControllerProvider).video;
-                    if (video == null) return;
-                    LyricsSheet.show(
-                      context,
-                      videoTitle: video.title,
-                      channelName: video.author,
-                      thumbnailUrl: video.thumbnailUrl,
-                    );
-                  }),
-                  _sleepTimerAudioTab(),
-                ],
-              ),
+            // Floating action row (user design): QUEUE | LYRICS | TIMER
+            // sit lifted with generous empty space BOTH above and below,
+            // so the buttons breathe instead of hugging the bottom edge.
+            // Lyrics live inside the LYRICS button's bottom sheet.
+            const Expanded(flex: 3, child: SizedBox.shrink()),
+            Row(
+              mainAxisAlignment:
+                  MainAxisAlignment.spaceEvenly,
+              children: [
+                _audioTab(
+                    Icons.queue_music, 'QUEUE', _showQueueSheet),
+                _audioTab(Icons.lyrics_outlined, 'LYRICS', () {
+                  final video =
+                      ref.read(playerControllerProvider).video;
+                  if (video == null) return;
+                  LyricsSheet.show(
+                    context,
+                    videoTitle: video.title,
+                    channelName: video.author,
+                    thumbnailUrl: video.thumbnailUrl,
+                  );
+                }),
+                _sleepTimerAudioTab(),
+              ],
             ),
+            const Expanded(flex: 2, child: SizedBox.shrink()),
           ],
         ),
       ],
