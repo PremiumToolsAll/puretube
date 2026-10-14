@@ -3491,26 +3491,55 @@ class _UpNextSectionState
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: CachedNetworkImage(
-                      imageUrl: v.thumbnailUrl,
-                      width: 120,
-                      height: 68,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) => Container(
-                        width: 120,
-                        height: 68,
-                        color: const Color(0xFF1A1A1A),
+                  Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: CachedNetworkImage(
+                          imageUrl: v.thumbnailUrl,
+                          width: 120,
+                          height: 68,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) => Container(
+                            width: 120,
+                            height: 68,
+                            color: const Color(0xFF1A1A1A),
+                          ),
+                          errorWidget: (_, __, ___) => Container(
+                            width: 120,
+                            height: 68,
+                            color: const Color(0xFF1A1A1A),
+                            child: const Icon(Icons.broken_image,
+                                color: Colors.grey, size: 20),
+                          ),
+                        ),
                       ),
-                      errorWidget: (_, __, ___) => Container(
-                        width: 120,
-                        height: 68,
-                        color: const Color(0xFF1A1A1A),
-                        child: const Icon(Icons.broken_image,
-                            color: Colors.grey, size: 20),
-                      ),
-                    ),
+                      // Duration badge (YouTube-style, bottom-right).
+                      if ((v.duration ?? Duration.zero) >
+                          Duration.zero)
+                        Positioned(
+                          right: 4,
+                          bottom: 4,
+                          child: Container(
+                            padding:
+                                const EdgeInsets.symmetric(
+                                    horizontal: 5,
+                                    vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.black87,
+                              borderRadius:
+                                  BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              formatDuration(v.duration),
+                              style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(width: 10),
                   Expanded(
