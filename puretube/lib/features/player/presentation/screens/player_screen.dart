@@ -2497,15 +2497,45 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       final v = videos[i];
                       return ListTile(
                         key: ValueKey(v.id),
-                        leading: ClipRRect(
-                          borderRadius:
-                              BorderRadius.circular(6),
-                          child: CachedNetworkImage(
-                            imageUrl: v.thumbnailUrl,
-                            width: 72,
-                            height: 48,
-                            fit: BoxFit.cover,
-                          ),
+                        leading: Stack(
+                          children: [
+                            ClipRRect(
+                              borderRadius:
+                                  BorderRadius.circular(6),
+                              child: CachedNetworkImage(
+                                imageUrl: v.thumbnailUrl,
+                                width: 72,
+                                height: 48,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            if ((v.duration ?? Duration.zero) >
+                                Duration.zero)
+                              Positioned(
+                                right: 2,
+                                bottom: 2,
+                                child: Container(
+                                  padding: const EdgeInsets
+                                      .symmetric(
+                                          horizontal: 4,
+                                          vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black87,
+                                    borderRadius:
+                                        BorderRadius.circular(
+                                            3),
+                                  ),
+                                  child: Text(
+                                    formatDuration(v.duration),
+                                    style: const TextStyle(
+                                        fontSize: 9,
+                                        color: Colors.white,
+                                        fontWeight:
+                                            FontWeight.w500),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                         title: Text(v.title,
                             maxLines: 2,
