@@ -440,6 +440,14 @@ class YoutubeExtractorService {
           .map(VideoDetails.fromExplode)
           .toList();
     } on TimeoutException {
+      // A timeout on a slow/rate-limited network never recovers by
+      // re-running the same YouTube request — try Piped first, so Retry
+      // actually has a chance to load instead of timing out again.
+      try {
+        return await _piped.searchVideos(query, limit: limit);
+      } catch (_) {
+        // Fall through to the timeout error below.
+      }
       throw ExtractorException('Search timed out. Retry.');
     } on PureTubeException {
       rethrow;
@@ -472,6 +480,18 @@ class YoutubeExtractorService {
           .toList();
       return SearchSession._(results, videos);
     } on TimeoutException {
+      // A timeout on a slow/rate-limited network never recovers by
+      // re-running the same YouTube request — try Piped first, so Retry
+      // actually has a chance to load instead of timing out again.
+      try {
+        final pipedVideos =
+            await _piped.searchVideos(query, limit: limit);
+        // Piped has no paging; the session carries a null list and
+        // fetchMoreSearchResults returns an empty list for it.
+        return SearchSession._(null, pipedVideos);
+      } catch (_) {
+        // Fall through to the timeout error below.
+      }
       throw ExtractorException('Search timed out. Retry.');
     } on PureTubeException {
       rethrow;
