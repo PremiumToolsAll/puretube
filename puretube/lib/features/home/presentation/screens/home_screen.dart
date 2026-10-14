@@ -7,6 +7,7 @@ import '../../../search/presentation/widgets/search_filter_sheet.dart';
 import '../../../shorts/presentation/screens/shorts_screen.dart';
 import '../providers/search_provider.dart';
 import '../../../player/presentation/widgets/mini_player_bar.dart';
+import '../widgets/continue_watching_popup.dart';
 import '../widgets/video_card.dart';
 import '../../../player/presentation/providers/popup_visibility.dart';
 import '../../../library/presentation/screens/downloads_screen.dart';
@@ -140,10 +141,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
             child: Row(
               children: [
                 Expanded(
@@ -277,6 +280,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   .refreshFeed(),
               child: _buildResults(search),
             ),
+          ),
+        ],
+          ),
+          // Continue-watching popup floats at the bottom (YouTube-style).
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: ContinueWatchingPopup(),
           ),
         ],
       ),
