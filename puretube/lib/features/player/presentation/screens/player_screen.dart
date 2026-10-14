@@ -2319,7 +2319,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       borderRadius: BorderRadius.circular(24),
       child: Container(
         padding: const EdgeInsets.symmetric(
-            horizontal: 22, vertical: 11),
+            horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
           color: Colors.white.withValues(alpha: 0.04),
@@ -2354,7 +2354,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       borderRadius: BorderRadius.circular(24),
       child: Container(
         padding: const EdgeInsets.symmetric(
-            horizontal: 22, vertical: 11),
+            horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
           color: Colors.white.withValues(alpha: 0.04),
