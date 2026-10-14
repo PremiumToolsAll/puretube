@@ -1770,24 +1770,38 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     // Audio (music) mode: Spotify-style player with the gold theme.
     // Playback is owned by PureTubeAudioHandler (audio_service), so it
     // keeps playing in the background even if this screen is popped.
+    // System back shrinks to the popup player (YouTube-style).
     if (uiState.audioOnly && uiState.video != null) {
-      return Scaffold(
-        backgroundColor: Colors.black,
-        body: SafeArea(
-            child:
-                _buildAudioMode(uiState, player, notifier)),
+      return PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _shrinkToPopup();
+        },
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: SafeArea(
+              child:
+                  _buildAudioMode(uiState, player, notifier)),
+        ),
       );
     }
 
-    return Scaffold(
-      backgroundColor: _willowBg,
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildVideoArea(uiState, player),
-            Expanded(child: _buildMeta(uiState, notifier)),
-          ],
+    // System back shrinks to the popup player (YouTube-style).
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _shrinkToPopup();
+      },
+      child: Scaffold(
+        backgroundColor: _willowBg,
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildVideoArea(uiState, player),
+              Expanded(child: _buildMeta(uiState, notifier)),
+            ],
+          ),
         ),
       ),
     );
@@ -1853,7 +1867,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     icon: const Icon(Icons.keyboard_arrow_down,
                         color: Colors.white, size: 32),
                     // Audio keeps playing in the background.
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: _shrinkToPopup,
                   ),
                   Expanded(
                     child: Column(
@@ -2428,6 +2442,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     ));
   }
 
+  /// Back during playback shrinks to the floating popup player
+  /// (YouTube-style) instead of just closing. Tapping the popup
+  /// reopens this fullscreen player.
+  void _shrinkToPopup() {
+    final uiState = ref.read(playerControllerProvider);
+    if (uiState.status == PlayerStatus.ready &&
+        uiState.video != null) {
+      ref.read(popupVisibleProvider.notifier).state = true;
+    }
+    if (mounted) Navigator.of(context).pop();
+  }
+
   void _showQueueSheet() {
     showModalBottomSheet(
       context: context,
@@ -2805,7 +2831,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           PressIconButton(
             tooltip: 'Close',
             // Back keeps audio playing in the background (mini player).
-            onPressed: () => Navigator.pop(context),
+            onPressed: _shrinkToPopup,
             icon:
                 const Icon(Icons.close, color: Colors.white),
           ),
