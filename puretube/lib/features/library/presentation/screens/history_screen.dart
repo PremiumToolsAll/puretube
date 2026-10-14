@@ -97,16 +97,43 @@ class _HistoryTab extends ConsumerWidget {
               .read(historyControllerProvider.notifier)
               .remove(e.videoId),
           child: ListTile(
-            leading: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: CachedNetworkImage(
-                imageUrl: e.thumbnailUrl,
-                width: 96,
-                height: 54,
-                fit: BoxFit.cover,
-                errorWidget: (_, __, ___) =>
-                    Container(color: Theme.of(context).colorScheme.surfaceContainer),
-              ),
+            leading: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: CachedNetworkImage(
+                    imageUrl: e.thumbnailUrl,
+                    width: 96,
+                    height: 54,
+                    fit: BoxFit.cover,
+                    errorWidget: (_, __, ___) => Container(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainer),
+                  ),
+                ),
+                if ((e.durationSecs ?? 0) > 0)
+                  Positioned(
+                    right: 3,
+                    bottom: 3,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: Text(
+                        formatDuration(Duration(
+                            seconds: e.durationSecs!)),
+                        style: const TextStyle(
+                            fontSize: 10,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             title: Text(e.title,
                 maxLines: 2,
