@@ -11,3 +11,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// `PureTubeAudioHandler` (via `mediaKitPlayerProvider`) — it never creates
 /// its own player. All buttons drive `playerControllerProvider`.
 final popupVisibleProvider = StateProvider<bool>((ref) => false);
+
+/// True while the fullscreen [PlayerScreen] is on the navigation stack.
+/// The root corner mini player hides itself while this is true so it never
+/// floats over the fullscreen player.
+final fullPlayerOpenProvider = StateProvider<bool>((ref) => false);

@@ -1,66 +1,86 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:hive_ce_flutter/hive_flutter.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../../../../core/database/hive_setup.dart';
 import '../../../../core/di/providers.dart';
 import '../../../../core/widgets/press_scale.dart';
 import '../providers/player_controller.dart';
 import '../providers/popup_visibility.dart';
 import '../screens/player_screen.dart';
-import 'sleep_timer_sheet.dart';
-import 'subtitle_sheet.dart';
 
-/// Root-level host for the floating popup player. Mount once above the
-/// [Navigator] (e.g. in `MaterialApp.builder`) so the popup floats over
-/// every screen while playback continues.
+/// Unified tiny corner mini player (YouTube-style).
+///
+/// ONE widget, bottom corner, two states — nothing else:
+/// * **Live**: Back during playback shrinks the video here (small, bottom
+///   corner). Tap expands back to the fullscreen player without
+///   restarting; the X stops playback.
+/// * **Continue watching**: when nothing is playing but a saved resume
+///   position exists, the same corner window shows the thumbnail +
+///   progress. Tap resumes from the exact saved position.
+///
+/// Mount once above the [Navigator] (e.g. in `MaterialApp.builder`) so it
+/// floats over every screen. Hidden while the fullscreen [PlayerScreen] is
+/// open.
 class PopupPlayerHost extends ConsumerWidget {
   const PopupPlayerHost({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final visible = ref.watch(popupVisibleProvider);
+    if (ref.watch(fullPlayerOpenProvider)) {
+      return const SizedBox.shrink();
+    }
     final uiState = ref.watch(playerControllerProvider);
-    final ready = uiState.status == PlayerStatus.ready &&
+    final live = ref.watch(popupVisibleProvider) &&
+        uiState.status == PlayerStatus.ready &&
         uiState.video != null;
-    if (!visible || !ready) return const SizedBox.shrink();
-    return const _PopupPlayerWindow();
+    if (live) return const _LiveCornerPlayer();
+    return const _ResumeCornerPlayer();
   }
 }
 
-/// Draggable floating video window matching the target design:
-/// gear (top-left), X (top-right), expand (center),
-/// headphone (bottom-left), play/pause (bottom-center),
-/// next (bottom-right), minimize chevron below the window.
-class _PopupPlayerWindow extends ConsumerStatefulWidget {
-  const _PopupPlayerWindow();
+/// Shared geometry for the corner window.
+class _Corner {
+  static const double width = 200;
+  static const double height = width * 9 / 16; // 112.5
+  static const double margin = 12;
 
-  @override
-  ConsumerState<_PopupPlayerWindow> createState() =>
-      _PopupPlayerWindowState();
+  static Offset defaultOffset(Size size) => Offset(
+        size.width - width - margin,
+        // Parked above the bottom nav bar.
+        size.height - height - 96,
+      );
+
+  static Offset clampOffset(Offset o, Size size) => Offset(
+        o.dx.clamp(0.0, size.width - width),
+        o.dy.clamp(0.0, size.height - height - 40),
+      );
 }
 
-class _PopupPlayerWindowState
-    extends ConsumerState<_PopupPlayerWindow> {
-  Color get _gold => Theme.of(context).colorScheme.primary;
+/// Small floating window with the live video while playback continues
+/// after Back. Draggable; tap expands; X stops.
+class _LiveCornerPlayer extends ConsumerStatefulWidget {
+  const _LiveCornerPlayer();
 
+  @override
+  ConsumerState<_LiveCornerPlayer> createState() =>
+      _LiveCornerPlayerState();
+}
+
+class _LiveCornerPlayerState
+    extends ConsumerState<_LiveCornerPlayer> {
   VideoController? _videoController;
-  Offset? _offset; // null => centered default
+  Offset? _offset;
 
   @override
   void initState() {
     super.initState();
-    // Attach a second view onto the SAME shared player instance.
+    // Second view onto the SAME shared player instance.
     _videoController =
         VideoController(ref.read(mediaKitPlayerProvider));
-  }
-
-  @override
-  void dispose() {
-    // NOTE: VideoController in this media_kit_video version has no
-    // dispose(); PlayerScreen doesn't dispose its controller either.
-    // The shared Player itself lives in PureTubeAudioHandler.
-    super.dispose();
   }
 
   void _hide() =>
@@ -85,25 +105,6 @@ class _PopupPlayerWindowState
     _hide();
   }
 
-  void _playNext() {
-    final uiState = ref.read(playerControllerProvider);
-    final next = uiState.relatedVideos
-        .where((v) => v.id != uiState.videoId)
-        .firstOrNull;
-    if (next == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No next video found'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-      return;
-    }
-    // Load inside the popup — no navigation, position starts fresh
-    // for the new video while the window stays put.
-    ref.read(playerControllerProvider.notifier).loadVideo(next.id);
-  }
-
   @override
   Widget build(BuildContext context) {
     final uiState = ref.watch(playerControllerProvider);
@@ -113,377 +114,316 @@ class _PopupPlayerWindowState
     final player = ref.watch(mediaKitPlayerProvider);
 
     final size = MediaQuery.of(context).size;
-    final winW = (size.width - 48).clamp(200.0, 480.0);
-    final winH = winW * 9 / 16;
-    final defaultOffset = Offset(
-      (size.width - winW) / 2,
-      size.height * 0.32,
-    );
-    final offset = _offset ?? defaultOffset;
+    final offset =
+        _Corner.clampOffset(_offset ?? _Corner.defaultOffset(size), size);
 
     return Positioned(
       left: offset.dx,
       top: offset.dy,
       child: GestureDetector(
-        onPanUpdate: (d) {
-          final next = offset + d.delta;
-          setState(() {
-            _offset = Offset(
-              next.dx.clamp(0.0, size.width - winW),
-              next.dy
-                  .clamp(0.0, size.height - winH - 120),
-            );
-          });
-        },
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: winW,
-              height: winH,
+        onPanUpdate: (d) => setState(() {
+          _offset = _Corner.clampOffset(offset + d.delta, size);
+        }),
+        onTap: _expand,
+        child: Container(
+          width: _Corner.width,
+          height: _Corner.height,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.55),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (uiState.audioOnly)
+                  CachedNetworkImage(
+                    imageUrl: video.thumbnailUrl,
+                    fit: BoxFit.cover,
+                    errorWidget: (_, __, ___) =>
+                        Container(color: Colors.black),
+                  )
+                else if (_videoController != null)
+                  Video(
+                    controller: _videoController!,
+                    controls: NoVideoControls,
+                    fit: BoxFit.cover,
+                  )
+                else
+                  Container(color: Colors.black),
+                // Readability scrim.
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.center,
+                      colors: [Colors.black45, Colors.transparent],
+                    ),
+                  ),
+                ),
+                // Center play/pause.
+                Center(
+                  child: StreamBuilder<bool>(
+                    stream: player.stream.playing,
+                    initialData: player.state.playing,
+                    builder: (context, snap) {
+                      final playing = snap.data ?? false;
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.25),
+                          ),
+                        ),
+                        child: PressIconButton(
+                          tooltip: playing ? 'Pause' : 'Play',
+                          onPressed: notifier.togglePlayPause,
+                          icon: Icon(
+                            playing
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                            color: Colors.white,
+                            size: 34,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                // Top-right close.
+                Positioned(
+                  top: 2,
+                  right: 2,
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    child: PressIconButton(
+                      tooltip: 'Close',
+                      onPressed: _close,
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+                ),
+                // Live progress line at the bottom.
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: _LiveProgressLine(player: player),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The same corner window for "continue watching": saved thumbnail +
+/// progress. Tap resumes from the exact saved position.
+class _ResumeCornerPlayer extends ConsumerStatefulWidget {
+  const _ResumeCornerPlayer();
+
+  @override
+  ConsumerState<_ResumeCornerPlayer> createState() =>
+      _ResumeCornerPlayerState();
+}
+
+class _ResumeCornerPlayerState
+    extends ConsumerState<_ResumeCornerPlayer> {
+  static const _watchKeys = [
+    PlayerController.kLastVideoId,
+    PlayerController.kLastVideoTitle,
+    PlayerController.kLastVideoAuthor,
+    PlayerController.kLastVideoThumb,
+    PlayerController.kLastVideoDurationSecs,
+    PlayerController.kLastVideoPositionSecs,
+    PlayerController.kLastVideoAudioOnly,
+    PlayerController.kLastVideoUpdatedAt,
+  ];
+
+  Offset? _offset;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder(
+      valueListenable:
+          Hive.box(HiveBoxes.playerPrefs).listenable(keys: _watchKeys),
+      builder: (context, Box box, _) {
+        final id = box.get(PlayerController.kLastVideoId) as String?;
+        if (id == null || id.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final posSecs =
+            box.get(PlayerController.kLastVideoPositionSecs) as int? ?? 0;
+        final durSecs =
+            box.get(PlayerController.kLastVideoDurationSecs) as int? ?? 0;
+        // Skip barely-started or finished videos.
+        if (posSecs <= 5) return const SizedBox.shrink();
+        if (durSecs > 0 && posSecs >= durSecs - 10) {
+          return const SizedBox.shrink();
+        }
+        final player = ref.watch(playerControllerProvider);
+        // Don't show while this video is the active one.
+        if (player.videoId == id &&
+            (player.status == PlayerStatus.ready ||
+                player.status == PlayerStatus.loading)) {
+          return const SizedBox.shrink();
+        }
+        // Don't clash with the live mini player.
+        if (player.status == PlayerStatus.ready && player.video != null) {
+          return const SizedBox.shrink();
+        }
+
+        final thumb =
+            box.get(PlayerController.kLastVideoThumb) as String? ?? '';
+        final progress =
+            durSecs > 0 ? (posSecs / durSecs).clamp(0.0, 1.0) : 0.0;
+        final size = MediaQuery.of(context).size;
+        final offset = _Corner.clampOffset(
+            _offset ?? _Corner.defaultOffset(size), size);
+
+        return Positioned(
+          left: offset.dx,
+          top: offset.dy,
+          child: GestureDetector(
+            onPanUpdate: (d) => setState(() {
+              _offset = _Corner.clampOffset(offset + d.delta, size);
+            }),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => PlayerScreen(
+                  videoId: id,
+                  initialPosition: Duration(seconds: posSecs),
+                ),
+              ),
+            ),
+            child: Container(
+              width: _Corner.width,
+              height: _Corner.height,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.55),
-                    blurRadius: 24,
-                    offset: const Offset(0, 10),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
                   ),
                 ],
+                border: Border.all(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .primary
+                      .withValues(alpha: 0.35),
+                ),
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(12),
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    // Video (or album art in audio-only mode).
-                    if (uiState.audioOnly)
-                      CachedNetworkImage(
-                        imageUrl: video.thumbnailUrl,
-                        fit: BoxFit.cover,
-                        errorWidget: (_, __, ___) =>
-                            Container(color: Colors.black),
-                      )
-                    else if (_videoController != null)
-                      Video(
-                        controller: _videoController!,
-                        controls: NoVideoControls,
-                        fit: BoxFit.cover,
-                      )
-                    else
-                      Container(color: Colors.black),
-                    // Readability scrims.
-                    const DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.center,
-                          colors: [
-                            Colors.black54,
-                            Colors.transparent,
-                          ],
-                        ),
+                    CachedNetworkImage(
+                      imageUrl: thumb,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, __, ___) => Container(
+                        color: const Color(0xFF1E1E1E),
                       ),
                     ),
-                    const Align(
-                      alignment: Alignment.bottomCenter,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.center,
-                            colors: [
-                              Colors.black54,
-                              Colors.transparent,
-                            ],
+                    Container(color: Colors.black38),
+                    const Center(
+                      child: Icon(
+                        Icons.play_circle_fill_rounded,
+                        color: Colors.white,
+                        size: 44,
+                      ),
+                    ),
+                    Positioned(
+                      top: 2,
+                      right: 2,
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        child: PressIconButton(
+                          tooltip: 'Dismiss',
+                          onPressed: () async {
+                            try {
+                              await box.deleteAll(_watchKeys);
+                            } catch (_) {}
+                          },
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white,
+                            size: 18,
                           ),
                         ),
-                        child: SizedBox(
-                            width: double.infinity, height: 72),
                       ),
                     ),
-                    // Top-left: settings.
                     Positioned(
-                      top: 4,
-                      left: 4,
-                      child: _PopupIconButton(
-                        icon: Icons.settings,
-                        tooltip: 'Settings',
-                        onPressed: () =>
-                            _PopupSettingsSheet.show(context),
-                      ),
-                    ),
-                    // Top-right: close.
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: _PopupIconButton(
-                        icon: Icons.close,
-                        tooltip: 'Close',
-                        onPressed: _close,
-                      ),
-                    ),
-                    // Center: expand to fullscreen.
-                    Center(
-                      child: _PopupIconButton(
-                        icon: Icons.fullscreen,
-                        tooltip: 'Fullscreen',
-                        size: 40,
-                        onPressed: _expand,
-                      ),
-                    ),
-                    // Bottom-left: audio mode.
-                    Positioned(
-                      bottom: 6,
-                      left: 8,
-                      child: _PopupIconButton(
-                        icon: Icons.headphones,
-                        tooltip: uiState.audioOnly
-                            ? 'Video mode'
-                            : 'Audio mode',
-                        color: uiState.audioOnly
-                            ? _gold
-                            : Colors.white,
-                        onPressed:
-                            notifier.toggleAudioOnly,
-                      ),
-                    ),
-                    // Bottom-center: play/pause.
-                    Positioned(
-                      bottom: 2,
                       left: 0,
                       right: 0,
-                      child: Center(
-                        child: StreamBuilder<bool>(
-                          stream: player.stream.playing,
-                          builder: (context, snap) {
-                            final playing =
-                                snap.data ?? false;
-                            return _PopupIconButton(
-                              icon: playing
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
-                              tooltip: playing
-                                  ? 'Pause'
-                                  : 'Play',
-                              size: 44,
-                              onPressed:
-                                  notifier.togglePlayPause,
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-                    // Bottom-right: next.
-                    Positioned(
-                      bottom: 6,
-                      right: 8,
-                      child: _PopupIconButton(
-                        icon: Icons.skip_next,
-                        tooltip: 'Next',
-                        onPressed: _playNext,
+                      bottom: 0,
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 3,
+                        backgroundColor:
+                            Colors.white.withValues(alpha: 0.2),
+                        valueColor: AlwaysStoppedAnimation(
+                            Theme.of(context).colorScheme.primary),
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-            // Minimize chevron below the window.
-            _PopupIconButton(
-              icon: Icons.keyboard_arrow_up,
-              tooltip: 'Minimize',
-              onPressed: _hide,
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
 
-/// Round translucent icon button used across the popup window,
-/// with a 200ms ease-in-out press-scale effect.
-class _PopupIconButton extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onPressed;
-  final double size;
-  final Color color;
-
-  const _PopupIconButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onPressed,
-    this.size = 30,
-    this.color = Colors.white,
-  });
+/// Thin live progress line for the corner player.
+class _LiveProgressLine extends StatelessWidget {
+  final Player player;
+  const _LiveProgressLine({required this.player});
 
   @override
   Widget build(BuildContext context) {
-    return PressIconButton(
-      tooltip: tooltip,
-      onPressed: onPressed,
-      icon: Icon(icon, color: color, size: size),
-    );
-  }
-}
-
-/// Compact settings sheet for the popup: quality, speed, subtitles,
-/// sleep timer — all wired to the existing [PlayerController].
-class _PopupSettingsSheet extends ConsumerWidget {
-  const _PopupSettingsSheet();
-
-  static Future<void> show(BuildContext context) {
-    return showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF141414),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-            top: Radius.circular(20)),
-      ),
-      builder: (_) => const _PopupSettingsSheet(),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final ui = ref.watch(playerControllerProvider);
-    final notifier = ref.read(playerControllerProvider.notifier);
-    final gold = Theme.of(context).colorScheme.primary;
-
-    Widget sectionTitle(String text) => Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-          child: Text(
-            text,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.2,
-            ),
-          ),
+    return StreamBuilder<Duration>(
+      stream: player.stream.duration,
+      builder: (context, durSnap) {
+        final total = durSnap.data?.inMilliseconds ?? 0;
+        return StreamBuilder<Duration>(
+          stream: player.stream.position,
+          builder: (context, posSnap) {
+            final pos = posSnap.data?.inMilliseconds ?? 0;
+            return LinearProgressIndicator(
+              value:
+                  total > 0 ? (pos / total).clamp(0.0, 1.0) : 0,
+              minHeight: 2,
+              backgroundColor: Colors.white12,
+              color: Theme.of(context).colorScheme.primary,
+            );
+          },
         );
-
-    return SafeArea(
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 8),
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.white24,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            sectionTitle('QUALITY'),
-            ...ui.availableQualities.map((q) {
-              final selected =
-                  ui.currentQuality?.height == q.height &&
-                      ui.currentQuality?.isDash == q.isDash &&
-                      ui.currentQuality?.fps == q.fps;
-              return ListTile(
-                dense: true,
-                title: Text(
-                  q.isDash
-                      ? '${q.resolutionLabel} · DASH'
-                      : q.resolutionLabel,
-                  style: const TextStyle(color: Colors.white),
-                ),
-                trailing: selected
-                    ? Icon(Icons.check,
-                        color: gold, size: 20)
-                    : null,
-                onTap: () {
-                  Navigator.pop(context);
-                  notifier.setQuality(q);
-                },
-              );
-            }),
-            if (ui.availableQualities.isEmpty)
-              const ListTile(
-                dense: true,
-                title: Text('Loading qualities…',
-                    style:
-                        TextStyle(color: Colors.white54)),
-              ),
-            sectionTitle('SPEED'),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(
-                children: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
-                    .map((s) => Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 4),
-                          child: ChoiceChip(
-                            label: Text('${s}x'),
-                            selected: ui.speed == s,
-                            selectedColor:
-                                gold.withValues(alpha: 0.25),
-                            labelStyle: TextStyle(
-                              color: ui.speed == s
-                                  ? gold
-                                  : Colors.white70,
-                            ),
-                            onSelected: (_) {
-                              Navigator.pop(context);
-                              notifier.setSpeed(s);
-                            },
-                          ),
-                        ))
-                    .toList(),
-              ),
-            ),
-            sectionTitle('MORE'),
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.closed_caption,
-                  color: Colors.white70),
-              title: const Text('Subtitles',
-                  style: TextStyle(color: Colors.white)),
-              subtitle: Text(
-                ui.activeSubtitle?.language ?? 'Off',
-                style:
-                    const TextStyle(color: Colors.white54),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                SubtitleSheet.show(context);
-              },
-            ),
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.bedtime,
-                  color: Colors.white70),
-              title: const Text('Sleep timer',
-                  style: TextStyle(color: Colors.white)),
-              subtitle: Text(
-                ui.sleepRemaining != null
-                    ? 'Ends in ${ui.sleepRemaining!.inMinutes} min'
-                    : 'Off',
-                style:
-                    const TextStyle(color: Colors.white54),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _sleepOptions(context);
-              },
-            ),
-            const SizedBox(height: 12),
-          ],
-        ),
-      ),
+      },
     );
-  }
-
-  void _sleepOptions(BuildContext context) {
-    SleepTimerSheet.show(context);
   }
 }

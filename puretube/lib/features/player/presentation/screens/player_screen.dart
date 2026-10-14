@@ -455,6 +455,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _videoController = VideoController(ref.read(mediaKitPlayerProvider));
     // Fullscreen player takes over: hide the floating popup window.
     ref.read(popupVisibleProvider.notifier).state = false;
+    ref.read(fullPlayerOpenProvider.notifier).state = true;
     final st = ref.read(playerControllerProvider);
     if (st.videoId != widget.videoId ||
         st.status != PlayerStatus.ready) {
@@ -525,6 +526,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _videoSub?.close();
     _statusSub?.close();
     _errorMsgSub?.close();
+    ref.read(fullPlayerOpenProvider.notifier).state = false;
     // Persist resume position for history (creates entry if needed).
     final uiState = ref.read(playerControllerProvider);
     if (uiState.videoId != null) {
