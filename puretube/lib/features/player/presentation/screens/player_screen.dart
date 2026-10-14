@@ -1953,12 +1953,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             // Swipe left/right on the artwork to change tracks
             // (YouTube Music style) — only the artwork/title crossfade,
             // the controls stay visible and responsive.
+            // Height is capped so the column always keeps breathing room
+            // for the floating QUEUE/LYRICS/TIMER row below.
             Padding(
               padding:
                   const EdgeInsets.fromLTRB(40, 8, 40, 0),
-              child: AspectRatio(
-                aspectRatio: 1,
-                child: GestureDetector(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight:
+                      MediaQuery.of(context).size.height *
+                          0.32,
+                ),
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: GestureDetector(
                   onHorizontalDragEnd: (details) {
                     final v = details.primaryVelocity ?? 0;
                     if (v < -250) {
@@ -2057,6 +2065,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   ),
                 ),
               ),
+            ),
             ),
             // Title (28px w600, centered) + artist (grey).
             // Crossfades on track change — no jarring swap.
@@ -2259,6 +2268,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 _sleepTimerAudioTab(),
               ],
             ),
+            // Guaranteed minimum breathing room below the buttons.
+            const SizedBox(height: 28),
             const Expanded(flex: 2, child: SizedBox.shrink()),
           ],
         ),
