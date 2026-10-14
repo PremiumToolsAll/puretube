@@ -2060,9 +2060,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             ),
             // Title (28px w600, centered) + artist (grey).
             // Crossfades on track change — no jarring swap.
+            // Tight gap under the artwork (user design).
             Padding(
               padding:
-                  const EdgeInsets.fromLTRB(36, 20, 36, 0),
+                  const EdgeInsets.fromLTRB(36, 8, 36, 0),
               child: Center(
                 child: AnimatedSwitcher(
                   duration:
