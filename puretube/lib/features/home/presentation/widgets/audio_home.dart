@@ -1,263 +1,348 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../library/presentation/providers/library_providers.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../player/domain/entities/playback_models.dart';
 import '../../../player/presentation/providers/player_controller.dart';
 import '../../../player/presentation/screens/player_screen.dart';
 import '../providers/music_feed_provider.dart';
-import '../providers/search_provider.dart';
 
-/// Music-style home for audio mode: trending songs, recently played,
-/// and song-style search results. Tapping a song plays it audio-only.
-class AudioHome extends ConsumerWidget {
+/// Audio-mode home: endless songs (YouTube Music), trending rail on top,
+/// everything else in one scrollable song list. Tap a song → audio-only.
+class AudioHome extends ConsumerStatefulWidget {
   const AudioHome({super.key});
 
-  Future<void> _playSong(
-      WidgetRef ref, BuildContext context, String videoId) async {
+  @override
+  ConsumerState<AudioHome> createState() => _AudioHomeState();
+}
+
+class _AudioHomeState extends ConsumerState<AudioHome> {
+  final _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(musicFeedProvider.notifier).loadInitial();
+      }
+    });
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final max = _scrollController.position.maxScrollExtent;
+    final current = _scrollController.position.pixels;
+    if (max - current < 600) {
+      final searching = ref.read(audioSongSearchProvider).active;
+      if (searching) {
+        ref.read(audioSongSearchProvider.notifier).loadMore();
+      } else {
+        ref.read(musicFeedProvider.notifier).loadMore();
+      }
+    }
+  }
+
+  Future<void> _playSong(String videoId) async {
     await ref
         .read(playerControllerProvider.notifier)
         .playAudioOnly(videoId);
-    if (context.mounted) {
+    if (mounted) {
       Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => PlayerScreen(videoId: videoId)));
     }
   }
 
-  static String _fmtDur(Duration? d) {
-    if (d == null) return '';
-    final m = d.inMinutes;
-    final s = d.inSeconds % 60;
-    return '$m:${s.toString().padLeft(2, '0')}';
-  }
-
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final search = ref.watch(searchControllerProvider);
-    // An active search shows song-style results instead of the sections.
-    if (search.query.isNotEmpty) {
-      return _buildSearchResults(context, ref, search);
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final search = ref.watch(audioSongSearchProvider);
+
+    if (search.active) return _buildSearchResults(theme, search);
+
+    final feed = ref.watch(musicFeedProvider);
+    if (feed.loading && feed.songs.isEmpty) {
+      return const Center(
+          child: Padding(
+        padding: EdgeInsets.all(48),
+        child: CircularProgressIndicator(),
+      ));
     }
+    if (feed.error != null && feed.songs.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.music_off_outlined, size: 56),
+              const SizedBox(height: 12),
+              Text(feed.error!,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: () =>
+                    ref.read(musicFeedProvider.notifier).refresh(),
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final songs = feed.songs;
+    final trending = songs.take(15).toList();
+    final rest = songs.skip(15).toList();
+
     return RefreshIndicator(
-      color: Theme.of(context).colorScheme.primary,
-      backgroundColor:
-          Theme.of(context).colorScheme.surfaceContainer,
-      onRefresh: () => ref.refresh(musicFeedProvider.future),
-      child: ListView(
-        padding: const EdgeInsets.only(bottom: 24),
-        children: [
-          _sectionTitle(context, 'Trending songs'),
-          _trendingRow(context, ref),
-          _sectionTitle(context, 'Recently played'),
-          _recentlyPlayed(context, ref),
+      onRefresh: () =>
+          ref.read(musicFeedProvider.notifier).refresh(),
+      child: CustomScrollView(
+        controller: _scrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          if (trending.isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: _SectionHeader(
+                  title: 'Trending songs', theme: theme),
+            ),
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: 196,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12),
+                  itemCount: trending.length,
+                  itemBuilder: (c, i) => _ArtworkCard(
+                    song: trending[i],
+                    onTap: () => _playSong(trending[i].id),
+                  ),
+                ),
+              ),
+            ),
+          ],
+          SliverToBoxAdapter(
+            child: _SectionHeader(title: 'All songs', theme: theme),
+          ),
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (c, i) => _SongRow(
+                song: rest[i],
+                onTap: () => _playSong(rest[i].id),
+              ),
+              childCount: rest.length,
+            ),
+          ),
+          if (feed.loadingMore)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child:
+                    Center(child: CircularProgressIndicator()),
+              ),
+            )
+          else
+            const SliverToBoxAdapter(
+                child: SizedBox(height: 24)),
         ],
       ),
     );
   }
 
-  Widget _sectionTitle(BuildContext context, String text) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
-        child: Text(
-          text,
-          style: const TextStyle(
-              fontSize: 20, fontWeight: FontWeight.bold),
+  Widget _buildSearchResults(
+      ThemeData theme, AudioSearchState search) {
+    if (search.loading) {
+      return const Center(
+          child: Padding(
+        padding: EdgeInsets.all(48),
+        child: CircularProgressIndicator(),
+      ));
+    }
+    if (search.error != null && search.songs.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.search_off_outlined, size: 56),
+              const SizedBox(height: 12),
+              Text(search.error!,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium),
+            ],
+          ),
         ),
-      );
-
-  Widget _trendingRow(BuildContext context, WidgetRef ref) {
-    final feed = ref.watch(musicFeedProvider);
-    return feed.when(
-      loading: () => const SizedBox(
-        height: 170,
-        child: Center(child: CircularProgressIndicator()),
-      ),
-      error: (_, __) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Text('Could not load songs. Pull to retry.',
-            style: TextStyle(color: Colors.grey[500])),
-      ),
-      data: (songs) => SizedBox(
-        height: 178,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          itemCount: songs.length,
-          separatorBuilder: (_, __) =>
-              const SizedBox(width: 12),
-          itemBuilder: (ctx, i) {
-            final v = songs[i];
-            return GestureDetector(
-              onTap: () => _playSong(ref, context, v.id),
-              child: SizedBox(
-                width: 128,
-                child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                  children: [
-                    ClipRRect(
-                      borderRadius:
-                          BorderRadius.circular(12),
-                      child: CachedNetworkImage(
-                        imageUrl: v.thumbnailUrl,
-                        width: 128,
-                        height: 128,
-                        fit: BoxFit.cover,
-                        errorWidget: (_, __, ___) =>
-                            Container(
-                          width: 128,
-                          height: 128,
-                          color:
-                              const Color(0xFF1E1E1E),
-                          child: const Icon(
-                              Icons.music_note,
-                              color: Colors.grey),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      v.title,
-                      maxLines: 1,
-                      overflow:
-                          TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontWeight:
-                              FontWeight.w600,
-                          fontSize: 13),
-                    ),
-                    Text(
-                      v.author,
-                      maxLines: 1,
-                      overflow:
-                          TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          color: Colors.grey,
-                          fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _recentlyPlayed(
-      BuildContext context, WidgetRef ref) {
-    final history = ref.watch(historyControllerProvider);
-    if (history.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Text('Songs you play will show up here.',
-            style: TextStyle(color: Colors.grey[500])),
       );
     }
-    return Column(
-      children: [
-        for (final h in history.take(20))
-          _songRow(
-            context,
-            ref,
-            videoId: h.videoId,
-            title: h.title,
-            subtitle: h.author,
-            thumbUrl: h.thumbnailUrl,
-            duration: h.durationSecs != null
-                ? _fmtDur(
-                    Duration(seconds: h.durationSecs!))
-                : '',
+    final songs = search.songs;
+    return CustomScrollView(
+      controller: _scrollController,
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Text('${songs.length} songs',
+                style: theme.textTheme.bodySmall?.copyWith(
+                    color:
+                        theme.colorScheme.onSurfaceVariant)),
           ),
+        ),
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (c, i) => _SongRow(
+              song: songs[i],
+              onTap: () => _playSong(songs[i].id),
+            ),
+            childCount: songs.length,
+          ),
+        ),
+        if (search.loadingMore)
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child:
+                  Center(child: CircularProgressIndicator()),
+            ),
+          )
+        else
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
       ],
     );
   }
+}
 
-  Widget _buildSearchResults(
-      BuildContext context, WidgetRef ref, SearchState s) {
-    switch (s.status) {
-      case SearchStatus.loading:
-        return const Center(
-            child: CircularProgressIndicator());
-      case SearchStatus.error:
-        return Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(s.errorMessage ?? 'Search failed.',
-                textAlign: TextAlign.center,
-                style:
-                    const TextStyle(color: Colors.grey)),
-          ),
-        );
-      case SearchStatus.done:
-        if (s.results.isEmpty) {
-          return const Center(
-              child: Text('No songs found.',
-                  style:
-                      TextStyle(color: Colors.grey)));
-        }
-        return ListView(
-          padding: const EdgeInsets.only(bottom: 24),
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final ThemeData theme;
+
+  const _SectionHeader(
+      {required this.title, required this.theme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Text(title,
+          style: theme.textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.bold)),
+    );
+  }
+}
+
+class _ArtworkCard extends StatelessWidget {
+  final VideoDetails song;
+  final VoidCallback onTap;
+
+  const _ArtworkCard({required this.song, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 128,
+        margin: const EdgeInsets.only(right: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final v in s.results)
-              _songRow(
-                context,
-                ref,
-                videoId: v.id,
-                title: v.title,
-                subtitle: v.author,
-                thumbUrl: v.thumbnailUrl,
-                duration: _fmtDur(v.duration),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: AspectRatio(
+                aspectRatio: 1,
+                child: song.thumbnailUrl.isNotEmpty
+                    ? Image.network(song.thumbnailUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) =>
+                            _artFallback(theme))
+                    : _artFallback(theme),
               ),
+            ),
+            const SizedBox(height: 6),
+            Text(song.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+            Text(song.author,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                    color:
+                        theme.colorScheme.onSurfaceVariant)),
           ],
-        );
-      case SearchStatus.idle:
-        return const SizedBox.shrink();
-    }
+        ),
+      ),
+    );
   }
 
-  Widget _songRow(
-    BuildContext context,
-    WidgetRef ref, {
-    required String videoId,
-    required String title,
-    required String subtitle,
-    required String thumbUrl,
-    required String duration,
-  }) =>
-      ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: CachedNetworkImage(
-            imageUrl: thumbUrl,
-            width: 56,
-            height: 56,
-            fit: BoxFit.cover,
-            errorWidget: (_, __, ___) => Container(
-              width: 56,
-              height: 56,
-              color: const Color(0xFF1E1E1E),
-              child: const Icon(Icons.music_note,
-                  color: Colors.grey),
-            ),
-          ),
-        ),
-        title: Text(title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style:
-                const TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text(subtitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.grey)),
-        trailing: duration.isEmpty
-            ? null
-            : Text(duration,
-                style:
-                    const TextStyle(color: Colors.grey)),
-        onTap: () => _playSong(ref, context, videoId),
+  Widget _artFallback(ThemeData theme) => Container(
+        color: theme.colorScheme.surfaceContainerHighest,
+        child: Icon(Icons.music_note,
+            size: 40, color: theme.colorScheme.primary),
       );
+}
+
+class _SongRow extends StatelessWidget {
+  final VideoDetails song;
+  final VoidCallback onTap;
+
+  const _SongRow({required this.song, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      onTap: onTap,
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(
+          width: 52,
+          height: 52,
+          child: song.thumbnailUrl.isNotEmpty
+              ? Image.network(song.thumbnailUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      _thumbFallback(theme))
+              : _thumbFallback(theme),
+        ),
+      ),
+      title: Text(song.title,
+          maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        [
+          song.author,
+          if (song.duration != null) _fmt(song.duration!),
+        ].join(' • '),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing:
+          Icon(Icons.play_arrow, color: AppTheme.primary),
+    );
+  }
+
+  Widget _thumbFallback(ThemeData theme) => Container(
+        color: theme.colorScheme.surfaceContainerHighest,
+        child:
+            Icon(Icons.music_note, color: theme.colorScheme.primary),
+      );
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes;
+    final s = d.inSeconds % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
 }
