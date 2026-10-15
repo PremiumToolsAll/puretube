@@ -72,7 +72,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _search(String q) {
     FocusScope.of(context).unfocus();
-    ref.read(searchControllerProvider.notifier).search(q);
+    if (ref.read(homeModeProvider)) {
+      // Audio mode: endless YouTube Music song search.
+      ref.read(audioSongSearchProvider.notifier).search(q);
+    } else {
+      ref.read(searchControllerProvider.notifier).search(q);
+    }
   }
 
   @override
@@ -166,6 +171,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                               .read(
                                   searchControllerProvider
                                       .notifier)
+                              .clear();
+                          ref
+                              .read(audioSongSearchProvider
+                                  .notifier)
                               .clear();
                         },
                       ),
