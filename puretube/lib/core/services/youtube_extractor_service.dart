@@ -136,6 +136,16 @@ class YoutubeExtractorService {
     }
   }
 
+  /// Piped fallback for the quality menu (same friendly-error contract).
+  Future<List<MuxedQuality>> _pipedQualities(String videoId) async {
+    try {
+      return await _piped.getQualityOptions(videoId);
+    } catch (_) {
+      throw ExtractorException(
+          'YouTube সাময়িকভাবে block করেছে আর বিকল্প সার্ভারেও পৌঁছানো যাচ্ছে না। কিছুক্ষণ পরে আবার চেষ্টা করো।');
+    }
+  }
+
   /// Piped fallback for search (same friendly-error contract).
   Future<List<VideoDetails>> _pipedSearch(String query,
       {int limit = 25}) async {
@@ -309,6 +319,11 @@ class YoutubeExtractorService {
   Future<List<MuxedQuality>> getQualityOptions(
       String videoId) async {
     await _requireNetwork();
+    // Circuit breaker: during a YouTube block the manifest fetch would
+    // just 429 — serve the quality menu from Piped instead.
+    if (_youtubeBlocked) {
+      return _pipedQualities(videoId);
+    }
     try {
       final manifest = await _getManifestWithAgeBypass(videoId);
 
@@ -399,6 +414,10 @@ class YoutubeExtractorService {
     } on PureTubeException {
       rethrow;
     } catch (e) {
+      if (_isRateLimitError(e)) {
+        _markYouTubeBlocked();
+        return _pipedQualities(videoId);
+      }
       throw ExtractorException('Could not list qualities: $e');
     }
   }
