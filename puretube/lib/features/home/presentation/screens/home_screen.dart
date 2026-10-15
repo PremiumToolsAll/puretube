@@ -3,10 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shimmer/shimmer.dart';
 
 import '../../../player/presentation/providers/player_controller.dart';
-import '../../../search/presentation/widgets/search_filter_sheet.dart';
 import '../../../shorts/presentation/screens/shorts_screen.dart';
+import '../providers/home_mode_provider.dart';
 import '../providers/search_provider.dart';
 import '../../../player/presentation/widgets/mini_player_bar.dart';
+import '../widgets/audio_home.dart';
 import '../widgets/video_card.dart';
 import '../../../player/presentation/providers/popup_visibility.dart';
 import '../../../library/presentation/screens/downloads_screen.dart';
@@ -70,18 +71,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     ref.read(searchControllerProvider.notifier).search(q);
   }
 
-  Future<void> _openFilters() async {
-    final current =
-        ref.read(searchControllerProvider).filters;
-    final picked =
-        await SearchFilterSheet.show(context, current);
-    if (picked != null && mounted) {
-      await ref
-          .read(searchControllerProvider.notifier)
-          .setFilters(picked);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final search = ref.watch(searchControllerProvider);
@@ -90,6 +79,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         player.status == PlayerStatus.ready &&
             player.video != null &&
             !ref.watch(popupVisibleProvider);
+    final isAudioHome = ref.watch(homeModeProvider);
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -155,7 +145,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     style: const TextStyle(
                         color: Colors.white),
                     decoration: InputDecoration(
-                      hintText: 'Search YouTube…',
+                      hintText: isAudioHome
+                          ? 'Search songs…'
+                          : 'Search YouTube…',
                       hintStyle: const TextStyle(
                           color: Colors.grey),
                       prefixIcon: const Icon(
@@ -192,17 +184,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
+                // Audio/Video home-mode toggle (sits where the
+                // search filter used to be). Tapping switches the
+                // whole home between video feed and music-style
+                // audio home.
                 Consumer(
                   builder: (_, ref, __) {
-                    final hasFilters = !ref
-                        .watch(
-                            searchControllerProvider)
-                        .filters
-                        .isEmpty;
+                    final isAudio =
+                        ref.watch(homeModeProvider);
                     return IconButton(
-                      tooltip: 'Search filters',
+                      tooltip: isAudio
+                          ? 'Video mode'
+                          : 'Audio mode',
                       style: IconButton.styleFrom(
-                        backgroundColor: hasFilters
+                        backgroundColor: isAudio
                             ? Theme.of(context)
                                 .colorScheme
                                 .primary
@@ -210,10 +205,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 .colorScheme
                                 .surfaceContainer,
                       ),
-                      icon: const Icon(
-                          Icons.tune,
-                          color: Colors.white),
-                      onPressed: _openFilters,
+                      icon: Icon(
+                          isAudio
+                              ? Icons
+                                  .videocam_outlined
+                              : Icons
+                                  .headphones_outlined,
+                          color: isAudio
+                              ? Colors.black
+                              : Colors.white),
+                      onPressed: () => ref
+                          .read(homeModeProvider
+                              .notifier)
+                          .toggle(),
                     );
                   },
                 ),
@@ -221,9 +225,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
           const SizedBox(height: 4),
-          SizedBox(
-            height: 42,
-            child: ListView.separated(
+          if (!isAudioHome)
+            SizedBox(
+              height: 42,
+              child: ListView.separated(
               scrollDirection: Axis.horizontal,
               padding:
                   const EdgeInsets.symmetric(horizontal: 16),
@@ -268,15 +273,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           const SizedBox(height: 4),
           Expanded(
-            child: RefreshIndicator(
-              color: Theme.of(context).colorScheme.primary,
-              backgroundColor:
-                  Theme.of(context).colorScheme.surfaceContainer,
-              onRefresh: () => ref
-                  .read(searchControllerProvider.notifier)
-                  .refreshFeed(),
-              child: _buildResults(search),
-            ),
+            child: isAudioHome
+                ? const AudioHome()
+                : RefreshIndicator(
+                    color:
+                        Theme.of(context).colorScheme.primary,
+                    backgroundColor: Theme.of(context)
+                        .colorScheme
+                        .surfaceContainer,
+                    onRefresh: () => ref
+                        .read(searchControllerProvider
+                            .notifier)
+                        .refreshFeed(),
+                    child: _buildResults(search),
+                  ),
           ),
         ],
       ),
