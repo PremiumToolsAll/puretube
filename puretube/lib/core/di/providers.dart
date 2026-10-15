@@ -4,10 +4,18 @@ import 'package:media_kit/media_kit.dart';
 import '../services/pip_service.dart';
 import '../services/sponsorblock_service.dart';
 import '../services/youtube_extractor_service.dart';
+import '../services/ytmusic_service.dart';
 import '../../features/player/data/services/audio_player_handler.dart';
 
 final extractorProvider = Provider<YoutubeExtractorService>((ref) {
   final service = YoutubeExtractorService();
+  ref.onDispose(service.dispose);
+  return service;
+});
+
+/// YouTube Music search backend for the audio home.
+final ytMusicProvider = Provider<YTMusicService>((ref) {
+  final service = YTMusicService();
   ref.onDispose(service.dispose);
   return service;
 });
