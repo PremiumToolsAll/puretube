@@ -5,6 +5,7 @@ import 'package:shimmer/shimmer.dart';
 import '../../../player/presentation/providers/player_controller.dart';
 import '../../../shorts/presentation/screens/shorts_screen.dart';
 import '../providers/home_mode_provider.dart';
+import '../providers/music_feed_provider.dart';
 import '../providers/search_provider.dart';
 import '../../../player/presentation/widgets/mini_player_bar.dart';
 import '../widgets/audio_home.dart';
@@ -32,6 +33,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         ref.read(searchControllerProvider.notifier).loadTrending();
+        // Preload the audio-mode music feed too, so switching to
+        // audio mode shows songs instantly.
+        ref.read(musicFeedProvider);
       }
     });
     // Infinite scroll: load more when near the bottom.
