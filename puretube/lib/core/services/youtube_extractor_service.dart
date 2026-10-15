@@ -6,6 +6,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import '../error/exceptions.dart';
 import '../../features/player/domain/entities/playback_models.dart';
+import 'invidious_service.dart';
 import 'piped_service.dart';
 import 'watch_category_tracker.dart';
 
@@ -73,16 +74,22 @@ class YoutubeExtractorService {
   YoutubeExtractorService(
       {YoutubeExplode? client,
       Connectivity? connectivity,
-      PipedService? piped})
+      PipedService? piped,
+      InvidiousService? invidious})
       : _yt = client ?? YoutubeExplode(),
         _connectivity = connectivity ?? Connectivity(),
-        _piped = piped ?? PipedService();
+        _piped = piped ?? PipedService(),
+        _invidious = invidious ?? InvidiousService();
 
   final YoutubeExplode _yt;
   final Connectivity _connectivity;
 
   /// Piped proxy fallback used when YouTube rate-limits the device IP.
   final PipedService _piped;
+
+  /// Invidious proxy fallback — a second, independent proxy network tried
+  /// when Piped is unreachable from the device's network too.
+  final InvidiousService _invidious;
 
   /// True when [e] looks like YouTube throttling the device IP
   /// (RequestLimitExceededException / HTTP 429). Those failures are worth
@@ -112,50 +119,58 @@ class YoutubeExtractorService {
     _youtubeBlockedUntil = DateTime.now().add(_blockCooldown);
   }
 
-  /// Piped fallback for video details. Throws a friendly error when the
-  /// proxy is unreachable too (instead of leaking the raw exception).
-  Future<VideoDetails> _pipedVideoDetails(String videoId) async {
+  /// Proxy fallback chain: Piped first, then Invidious. Throws a friendly
+  /// error only when every proxy route is unreachable too (instead of
+  /// leaking the raw exception).
+  Future<T> _viaProxies<T>(
+    Future<T> Function() piped,
+    Future<T> Function() invidious,
+  ) async {
     try {
-      return await _piped.getVideoDetails(videoId);
+      return await piped();
+    } catch (_) {}
+    try {
+      return await invidious();
     } catch (_) {
       throw ExtractorException(
           'YouTube সাময়িকভাবে block করেছে আর বিকল্প সার্ভারেও পৌঁছানো যাচ্ছে না। কিছুক্ষণ পরে আবার চেষ্টা করো।');
     }
   }
 
-  /// Piped fallback for playback streams (same friendly-error contract).
+  /// Proxy fallback for video details (same friendly-error contract).
+  Future<VideoDetails> _pipedVideoDetails(String videoId) =>
+      _viaProxies(
+        () => _piped.getVideoDetails(videoId),
+        () => _invidious.getVideoDetails(videoId),
+      );
+
+  /// Proxy fallback for playback streams (same friendly-error contract).
   Future<PlaybackStreams> _pipedStreams(String videoId,
-      {int maxMuxedHeight = 720, bool preferBestAudio = true}) async {
-    try {
-      return await _piped.getPlaybackStreams(videoId,
-          maxMuxedHeight: maxMuxedHeight,
-          preferBestAudio: preferBestAudio);
-    } catch (_) {
-      throw ExtractorException(
-          'YouTube সাময়িকভাবে block করেছে আর বিকল্প সার্ভারেও পৌঁছানো যাচ্ছে না। কিছুক্ষণ পরে আবার চেষ্টা করো।');
-    }
-  }
+          {int maxMuxedHeight = 720,
+          bool preferBestAudio = true}) =>
+      _viaProxies(
+        () => _piped.getPlaybackStreams(videoId,
+            maxMuxedHeight: maxMuxedHeight,
+            preferBestAudio: preferBestAudio),
+        () => _invidious.getPlaybackStreams(videoId,
+            maxMuxedHeight: maxMuxedHeight,
+            preferBestAudio: preferBestAudio),
+      );
 
-  /// Piped fallback for the quality menu (same friendly-error contract).
-  Future<List<MuxedQuality>> _pipedQualities(String videoId) async {
-    try {
-      return await _piped.getQualityOptions(videoId);
-    } catch (_) {
-      throw ExtractorException(
-          'YouTube সাময়িকভাবে block করেছে আর বিকল্প সার্ভারেও পৌঁছানো যাচ্ছে না। কিছুক্ষণ পরে আবার চেষ্টা করো।');
-    }
-  }
+  /// Proxy fallback for the quality menu (same friendly-error contract).
+  Future<List<MuxedQuality>> _pipedQualities(String videoId) =>
+      _viaProxies(
+        () => _piped.getQualityOptions(videoId),
+        () => _invidious.getQualityOptions(videoId),
+      );
 
-  /// Piped fallback for search (same friendly-error contract).
+  /// Proxy fallback for search (same friendly-error contract).
   Future<List<VideoDetails>> _pipedSearch(String query,
-      {int limit = 25}) async {
-    try {
-      return await _piped.searchVideos(query, limit: limit);
-    } catch (_) {
-      throw ExtractorException(
-          'YouTube সাময়িকভাবে block করেছে আর বিকল্প সার্ভারেও পৌঁছানো যাচ্ছে না। কিছুক্ষণ পরে আবার চেষ্টা করো।');
-    }
-  }
+          {int limit = 25}) =>
+      _viaProxies(
+        () => _piped.searchVideos(query, limit: limit),
+        () => _invidious.searchVideos(query, limit: limit),
+      );
 
   /// Throttle: minimum delay between YouTube requests to avoid IP blocking.
   DateTime _lastRequest = DateTime.fromMillisecondsSinceEpoch(0);
@@ -615,6 +630,7 @@ class YoutubeExtractorService {
   void dispose() {
     _yt.close();
     _piped.dispose();
+    _invidious.dispose();
   }
 
   /// Lists subtitle/caption tracks for a video. Returns empty list
