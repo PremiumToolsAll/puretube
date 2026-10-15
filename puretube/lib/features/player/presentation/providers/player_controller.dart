@@ -723,6 +723,16 @@ class PlayerController extends Notifier<PlayerUiState>
     await toggleAudioOnly();
   }
 
+  /// Starts [videoId] directly in audio-only mode (used by the audio home).
+  /// Persists the preference first so [loadVideo]'s keepAudioOnly picks it
+  /// up even from an idle state (unlike [toggleAudioOnly], which needs a
+  /// ready player).
+  Future<void> playAudioOnly(String videoId) async {
+    _prefAudioOnly = true;
+    unawaited(_saveAudioOnlyPref(true));
+    await loadVideo(videoId);
+  }
+
   Future<void> enterPip() async {
     if (state.pipSupported && state.status == PlayerStatus.ready) {
       await _pip.enterPip();
