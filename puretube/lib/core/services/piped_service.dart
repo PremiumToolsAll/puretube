@@ -89,6 +89,13 @@ class PipedService {
 
   /// Returns muxed + audio-only URLs from Piped's proxied streams,
   /// shaped exactly like the direct extractor's [PlaybackStreams].
+  ///
+  /// Piped sometimes answers with video streams but an empty audio list
+  /// (seen live 2026-10-15: muxed 360p + zero audioStreams). The muxed
+  /// file already carries audio+video, so it plays as-is — only throw
+  /// when there is genuinely no playable video stream. With no separate
+  /// audio track, [PlaybackStreams.audioOnlyUrl] falls back to the muxed
+  /// URL (correct for background/audio-only mode, which reads that URL).
   Future<PlaybackStreams> getPlaybackStreams(String videoId,
       {int maxMuxedHeight = 720, bool preferBestAudio = true}) async {
     final json = await _getJson('/streams/$videoId');
@@ -114,20 +121,90 @@ class PipedService {
         .toList()
       ..sort((a, b) => _bitrateOf(b).compareTo(_bitrateOf(a)));
 
-    if (muxedPick.isEmpty || audio.isEmpty) {
+    if (muxedPick.isEmpty) {
       throw Exception('Piped: no playable streams for $videoId');
     }
 
     final bestMuxed = muxedPick.first;
-    final audioPick = preferBestAudio ? audio.first : audio.last;
+    final audioPick =
+        audio.isEmpty ? null : (preferBestAudio ? audio.first : audio.last);
     return PlaybackStreams(
       videoId: videoId,
       muxedUrl: _streamUrl(bestMuxed),
       muxedHeight: _heightOf(bestMuxed),
-      audioOnlyUrl: _streamUrl(audioPick),
-      audioBitrate: _bitrateOf(audioPick),
+      audioOnlyUrl: audioPick != null
+          ? _streamUrl(audioPick)
+          : _streamUrl(bestMuxed),
+      audioBitrate: audioPick != null ? _bitrateOf(audioPick) : 0,
       fetchedAt: DateTime.now(),
     );
+  }
+
+  /// Quality-menu options from Piped's proxied streams, shaped like the
+  /// direct extractor's [getQualityOptions] result: muxed entries plus
+  /// video-only (DASH-style) entries paired with the best audio track.
+  /// Video-only entries are skipped when Piped sent no audio track —
+  /// offering them would mean silent video. Used when YouTube is
+  /// blocked so the quality menu still lists 720p/1080p instead of
+  /// failing silently.
+  Future<List<MuxedQuality>> getQualityOptions(String videoId) async {
+    final json = await _getJson('/streams/$videoId');
+
+    final videoStreams = (json['videoStreams'] as List?)
+            ?.whereType<Map<String, dynamic>>()
+            .where((s) => _streamUrl(s).isNotEmpty)
+            .toList() ??
+        const [];
+    final audioStreams = ((json['audioStreams'] as List?)
+            ?.whereType<Map<String, dynamic>>()
+            .where((s) => _streamUrl(s).isNotEmpty)
+            .toList() ??
+        const [])
+      ..sort((a, b) => _bitrateOf(b).compareTo(_bitrateOf(a)));
+
+    final seen = <String>{};
+    final options = <MuxedQuality>[];
+
+    final muxed = videoStreams
+        .where((s) => s['videoOnly'] != true)
+        .toList()
+      ..sort((a, b) => _heightOf(b).compareTo(_heightOf(a)));
+    for (final s in muxed) {
+      final h = _heightOf(s);
+      // h <= 0 skips non-video entries Piped sometimes includes
+      // (e.g. "LBRY" / "LBRY HLS" placeholders).
+      if (h <= 0 || !seen.add('muxed-$h')) continue;
+      options.add(MuxedQuality(
+        label: 'MPEG-4 ${h}p',
+        height: h,
+        url: _streamUrl(s),
+        fps: _fpsOf(s),
+        codec: _shortCodec(s['codec']?.toString()),
+      ));
+    }
+
+    if (audioStreams.isNotEmpty) {
+      final audioUrl = _streamUrl(audioStreams.first);
+      final videoOnly = videoStreams
+          .where((s) => s['videoOnly'] == true)
+          .toList()
+        ..sort((a, b) => _heightOf(b).compareTo(_heightOf(a)));
+      for (final s in videoOnly) {
+        final h = _heightOf(s);
+        if (h <= 0 || !seen.add('dash-$h')) continue;
+        options.add(MuxedQuality(
+          label: '${h}p · Piped',
+          height: h,
+          url: _streamUrl(s),
+          audioUrl: audioUrl,
+          fps: _fpsOf(s),
+          codec: _shortCodec(s['codec']?.toString()),
+        ));
+      }
+    }
+
+    options.sort((a, b) => b.height.compareTo(a.height));
+    return options;
   }
 
   void dispose() => _client.close();
@@ -149,6 +226,18 @@ class PipedService {
   static int _bitrateOf(Map<String, dynamic> s) {
     final b = s['bitrate'];
     return b is num ? b.toInt() : 0;
+  }
+
+  static int _fpsOf(Map<String, dynamic> s) {
+    final f = s['fps'];
+    return f is num ? f.toInt() : 0;
+  }
+
+  /// Piped reports codecs like "avc1.4d401f" / "vp9" / null —
+  /// keep the short family name, lowercase.
+  static String _shortCodec(String? raw) {
+    if (raw == null || raw.isEmpty) return '';
+    return raw.split('.').first.toLowerCase();
   }
 
   static String? _videoIdFromWatchUrl(String url) =>
