@@ -8,6 +8,7 @@ import '../error/exceptions.dart';
 import '../../features/player/domain/entities/playback_models.dart';
 import 'invidious_service.dart';
 import 'piped_service.dart';
+import 'youtube_session_service.dart';
 import 'watch_category_tracker.dart';
 
 /// All YouTube contact goes through here. Everything else in the app
@@ -75,14 +76,21 @@ class YoutubeExtractorService {
       {YoutubeExplode? client,
       Connectivity? connectivity,
       PipedService? piped,
-      InvidiousService? invidious})
+      InvidiousService? invidious,
+      YoutubeSessionService? session})
       : _yt = client ?? YoutubeExplode(),
         _connectivity = connectivity ?? Connectivity(),
         _piped = piped ?? PipedService(),
-        _invidious = invidious ?? InvidiousService();
+        _invidious = invidious ?? InvidiousService(),
+        _session = session ?? YoutubeSessionService();
 
   final YoutubeExplode _yt;
   final Connectivity _connectivity;
+
+  /// Real visitor-session YouTube access — tried first when the anonymous
+  /// API path is rate-limited. Uses the phone's real session (like the
+  /// browser), so YouTube's bot protection doesn't flag it.
+  final YoutubeSessionService _session;
 
   /// Piped proxy fallback used when YouTube rate-limits the device IP.
   final PipedService _piped;
@@ -119,13 +127,19 @@ class YoutubeExtractorService {
     _youtubeBlockedUntil = DateTime.now().add(_blockCooldown);
   }
 
-  /// Proxy fallback chain: Piped first, then Invidious. Throws a friendly
-  /// error only when every proxy route is unreachable too (instead of
+  /// Fallback chain when the anonymous API path is rate-limited:
+  /// real visitor session first (like the browser — not bot-flagged),
+  /// then the Piped and Invidious proxy networks. Throws a friendly
+  /// error only when every route is unreachable too (instead of
   /// leaking the raw exception).
-  Future<T> _viaProxies<T>(
+  Future<T> _viaFallbacks<T>(
+    Future<T> Function() session,
     Future<T> Function() piped,
     Future<T> Function() invidious,
   ) async {
+    try {
+      return await session();
+    } catch (_) {}
     try {
       return await piped();
     } catch (_) {}
@@ -137,18 +151,22 @@ class YoutubeExtractorService {
     }
   }
 
-  /// Proxy fallback for video details (same friendly-error contract).
+  /// Fallback for video details (same friendly-error contract).
   Future<VideoDetails> _pipedVideoDetails(String videoId) =>
-      _viaProxies(
+      _viaFallbacks(
+        () => _session.getVideoDetails(videoId),
         () => _piped.getVideoDetails(videoId),
         () => _invidious.getVideoDetails(videoId),
       );
 
-  /// Proxy fallback for playback streams (same friendly-error contract).
+  /// Fallback for playback streams (same friendly-error contract).
   Future<PlaybackStreams> _pipedStreams(String videoId,
           {int maxMuxedHeight = 720,
           bool preferBestAudio = true}) =>
-      _viaProxies(
+      _viaFallbacks(
+        () => _session.getPlaybackStreams(videoId,
+            maxMuxedHeight: maxMuxedHeight,
+            preferBestAudio: preferBestAudio),
         () => _piped.getPlaybackStreams(videoId,
             maxMuxedHeight: maxMuxedHeight,
             preferBestAudio: preferBestAudio),
@@ -157,17 +175,19 @@ class YoutubeExtractorService {
             preferBestAudio: preferBestAudio),
       );
 
-  /// Proxy fallback for the quality menu (same friendly-error contract).
+  /// Fallback for the quality menu (same friendly-error contract).
   Future<List<MuxedQuality>> _pipedQualities(String videoId) =>
-      _viaProxies(
+      _viaFallbacks(
+        () => _session.getQualityOptions(videoId),
         () => _piped.getQualityOptions(videoId),
         () => _invidious.getQualityOptions(videoId),
       );
 
-  /// Proxy fallback for search (same friendly-error contract).
+  /// Fallback for search (same friendly-error contract).
   Future<List<VideoDetails>> _pipedSearch(String query,
           {int limit = 25}) =>
-      _viaProxies(
+      _viaFallbacks(
+        () => _session.searchVideos(query, limit: limit),
         () => _piped.searchVideos(query, limit: limit),
         () => _invidious.searchVideos(query, limit: limit),
       );
@@ -629,6 +649,7 @@ class YoutubeExtractorService {
 
   void dispose() {
     _yt.close();
+    _session.dispose();
     _piped.dispose();
     _invidious.dispose();
   }
