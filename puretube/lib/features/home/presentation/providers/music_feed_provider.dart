@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/di/providers.dart';
+import '../../../../core/services/ytmusic_service.dart';
 import '../../../player/domain/entities/playback_models.dart';
 
 /// ---------------------------------------------------------------------------
@@ -209,33 +210,42 @@ class AudioSearchController extends StateNotifier<AudioSearchState> {
     state = AudioSearchState(
         query: query, loading: true, active: true);
     try {
-      final page =
-          await _ref.read(ytMusicProvider).searchSongs(query);
+      // Mix: YouTube Music songs + regular YouTube videos, so the
+      // audio home finds everything — songs and videos alike.
+      final results = await Future.wait(
+        [
+          _ref
+              .read(ytMusicProvider)
+              .searchSongs(query, limit: 15)
+              .then((p) => p)
+              .catchError((_) => const YTMSongPage(
+                  songs: [], continuation: null)),
+          _ref
+              .read(extractorProvider)
+              .searchVideos(query, limit: 10)
+              .catchError((_) => const <VideoDetails>[]),
+        ],
+        eagerError: false,
+      );
       if (myToken != _token) return;
+      final page = results[0] as YTMSongPage;
+      final ytVideos = results[1] as List<VideoDetails>;
       _continuation = page.continuation;
+      final seen = <String>{};
+      final merged = <VideoDetails>[];
+      for (final s in [...page.songs, ...ytVideos]) {
+        if (seen.add(s.id)) merged.add(s);
+      }
       state = state.copyWith(
-        songs: page.songs,
+        songs: merged,
         loading: false,
         hasMore: page.continuation != null,
-        error: page.songs.isEmpty ? 'No songs found.' : null,
+        error: merged.isEmpty ? 'No songs found.' : null,
       );
-    } catch (e) {
+    } catch (_) {
       if (myToken != _token) return;
-      // Fallback: regular extractor search.
-      try {
-        final songs = await _ref
-            .read(extractorProvider)
-            .searchVideos(query, limit: 25);
-        state = state.copyWith(
-          songs: songs,
-          loading: false,
-          hasMore: false,
-          error: songs.isEmpty ? 'No songs found.' : null,
-        );
-      } catch (_) {
-        state = state.copyWith(
-            loading: false, error: 'Search failed. Try again.');
-      }
+      state = state.copyWith(
+          loading: false, error: 'Search failed. Try again.');
     }
     _busy = false;
   }
