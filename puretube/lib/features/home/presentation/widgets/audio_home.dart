@@ -216,6 +216,21 @@ class _AudioHomeState extends ConsumerState<AudioHome> {
                   Center(child: CircularProgressIndicator()),
             ),
           )
+        else if (search.hasMore && search.songs.isNotEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+              child: Center(
+                child: OutlinedButton.icon(
+                  onPressed: () => ref
+                      .read(audioSongSearchProvider.notifier)
+                      .loadMore(),
+                  icon: const Icon(Icons.expand_more),
+                  label: const Text('Load more songs'),
+                ),
+              ),
+            ),
+          )
         else
           const SliverToBoxAdapter(child: SizedBox(height: 24)),
       ],
