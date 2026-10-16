@@ -249,7 +249,9 @@ class AudioSearchController extends StateNotifier<AudioSearchState> {
         hasMore: page.continuation != null,
       );
     } catch (_) {
-      state = state.copyWith(loadingMore: false, hasMore: false);
+      // Keep hasMore true so scrolling (or the Load more button)
+      // retries — a transient failure must not end pagination.
+      state = state.copyWith(loadingMore: false, hasMore: true);
     }
     _busy = false;
   }
