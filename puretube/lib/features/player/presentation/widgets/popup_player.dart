@@ -34,6 +34,11 @@ class PopupPlayerHost extends ConsumerWidget {
       return const SizedBox.shrink();
     }
     final uiState = ref.watch(playerControllerProvider);
+    // Never show the popup in audio mode — audio keeps playing in the
+    // background without any floating window, including on track Next.
+    if (uiState.audioOnly) {
+      return const SizedBox.shrink();
+    }
     final live = ref.watch(popupVisibleProvider) &&
         uiState.status == PlayerStatus.ready &&
         uiState.video != null;
@@ -73,7 +78,11 @@ class _LiveCornerPlayer extends ConsumerStatefulWidget {
 class _LiveCornerPlayerState
     extends ConsumerState<_LiveCornerPlayer> {
   VideoController? _videoController;
-  Offset? _offset;
+  // Drag offset via ValueNotifier so panning only rebuilds the
+  // Positioned wrapper — the Video widget itself is built once and
+  // never rebuilt mid-drag (that's what made dragging janky).
+  final ValueNotifier<Offset?> _offsetNotifier =
+      ValueNotifier<Offset?>(null);
 
   @override
   void initState() {
@@ -81,6 +90,12 @@ class _LiveCornerPlayerState
     // Second view onto the SAME shared player instance.
     _videoController =
         VideoController(ref.read(mediaKitPlayerProvider));
+  }
+
+  @override
+  void dispose() {
+    _offsetNotifier.dispose();
+    super.dispose();
   }
 
   void _hide() =>
@@ -91,6 +106,11 @@ class _LiveCornerPlayerState
         ref.read(playerControllerProvider).video?.id;
     _hide();
     if (videoId == null || !mounted) return;
+    // If paused, resume so tapping the popup always plays.
+    final player = ref.read(mediaKitPlayerProvider);
+    if (!player.state.playing) {
+      ref.read(playerControllerProvider.notifier).togglePlayPause();
+    }
     // PlayerScreen skips loadVideo when the id is unchanged,
     // so playback position is preserved.
     await Navigator.of(context).push(
@@ -114,18 +134,28 @@ class _LiveCornerPlayerState
     final player = ref.watch(mediaKitPlayerProvider);
 
     final size = MediaQuery.of(context).size;
-    final offset =
-        _Corner.clampOffset(_offset ?? _Corner.defaultOffset(size), size);
 
-    return Positioned(
-      left: offset.dx,
-      top: offset.dy,
-      child: GestureDetector(
-        onPanUpdate: (d) => setState(() {
-          _offset = _Corner.clampOffset(offset + d.delta, size);
-        }),
-        onTap: _expand,
-        child: Container(
+    return ValueListenableBuilder<Offset?>(
+      valueListenable: _offsetNotifier,
+      builder: (context, offsetValue, child) {
+        final offset = _Corner.clampOffset(
+            offsetValue ?? _Corner.defaultOffset(size), size);
+        return Positioned(
+          left: offset.dx,
+          top: offset.dy,
+          child: GestureDetector(
+            // Immediate drag response: update the notifier directly so
+            // the window tracks the finger 1:1 like YouTube's mini player.
+            onPanUpdate: (d) {
+              _offsetNotifier.value =
+                  _Corner.clampOffset(offset + d.delta, size);
+            },
+            onTap: _expand,
+            child: child!,
+          ),
+        );
+      },
+      child: Container(
           width: _Corner.width,
           height: _Corner.height,
           decoration: BoxDecoration(
@@ -228,7 +258,6 @@ class _LiveCornerPlayerState
               ],
             ),
           ),
-        ),
       ),
     );
   }
