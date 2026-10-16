@@ -1072,9 +1072,19 @@ class PlayerController extends Notifier<PlayerUiState>
               : mobileAudioQualityProvider) ==
       'worst';
 
+  /// Codec preference rank for DASH: AVC (H.264) is the most compatible
+  /// (proven to play), then VP9, then AV1.
+  int _dashCodecRank(String codec) {
+    final c = codec.toLowerCase();
+    if (c.contains('avc')) return 3;
+    if (c.contains('vp9')) return 2;
+    if (c.contains('av01') || c == 'av1') return 1;
+    return 0;
+  }
+
   /// Best DASH option at exactly [targetHeight], else the closest DASH
-  /// option below it, preferring the higher fps variant on ties. Null
-  /// when no DASH stream qualifies.
+  /// option below it, preferring AVC (most compatible) then higher fps
+  /// on ties. Null when no DASH stream qualifies.
   MuxedQuality? _pickDashOption(
       List<MuxedQuality> options, int targetHeight) {
     MuxedQuality? best;
@@ -1082,7 +1092,13 @@ class PlayerController extends Notifier<PlayerUiState>
       if (!q.isDash || q.height > targetHeight) continue;
       if (best == null ||
           q.height > best.height ||
-          (q.height == best.height && q.fps > best.fps)) {
+          (q.height == best.height &&
+              _dashCodecRank(q.codec) >
+                  _dashCodecRank(best.codec)) ||
+          (q.height == best.height &&
+              _dashCodecRank(q.codec) ==
+                  _dashCodecRank(best.codec) &&
+              q.fps > best.fps)) {
         best = q;
       }
     }
@@ -1171,6 +1187,19 @@ class PlayerController extends Notifier<PlayerUiState>
     final previous = state.currentQuality;
     final token = ++_qualitySwitchToken;
     var target = quality;
+    // For DASH menu picks, re-resolve to the most compatible codec
+    // variant (AVC first) at the chosen height — the menu entry might
+    // be a VP9/AV1 variant that this device can't play.
+    if (target.isDash) {
+      try {
+        final options = state.availableQualities ??
+            await _extractor.getQualityOptions(videoId);
+        final better = _pickDashOption(options, target.height);
+        if (better != null) target = better;
+      } catch (_) {
+        // Keep the menu's original target on failure.
+      }
+    }
     // NOTE: no manifest refresh before switching (an earlier version
     // refreshed here for DASH). YouTube's android client limits stream
     // URL reuse — the extractor itself warns it "often prevents
