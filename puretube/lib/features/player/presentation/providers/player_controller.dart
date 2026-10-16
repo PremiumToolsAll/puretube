@@ -414,11 +414,12 @@ class PlayerController extends Notifier<PlayerUiState>
       final targetHeight =
           _targetVideoHeight(onWifi: onWifi, fullscreen: false);
       final worstAudio = _wantWorstAudio(onWifi);
-      // DASH targets (1440p/2160p) need video-only + separate audio;
-      // the pre-cache only holds muxed streams, so it can't serve them.
-      final wantDash = targetHeight != null &&
-          targetHeight >= 1440 &&
-          !keepAudioOnly;
+      // DASH (video-only + separate audio) is how high quality plays:
+      // 'auto' aims for 720p DASH by default, explicit 720p+ choices
+      // use DASH too. The pre-cache only holds muxed streams, so it
+      // can't serve DASH targets.
+      final wantDash = !keepAudioOnly &&
+          (targetHeight == null || targetHeight >= 720);
 
       // Use pre-fetched Up Next data when available (instant Next),
       // otherwise fetch normally. The hit is removed; other queued
@@ -440,7 +441,11 @@ class PlayerController extends Notifier<PlayerUiState>
           // then build a DASH-backed PlaybackStreams.
           final results = await Future.wait([
             _extractor.getVideoDetails(videoId),
-            _extractor.getQualityOptions(videoId),
+            // Quality list failure must not kill the load — empty
+            // options simply fall back to the muxed stream below.
+            _extractor
+                .getQualityOptions(videoId)
+                .catchError((_) => const <MuxedQuality>[]),
             _extractor.getPlaybackStreams(videoId,
                 preferBestAudio: !worstAudio),
             _sponsorBlock.getSegments(videoId),
@@ -449,7 +454,8 @@ class PlayerController extends Notifier<PlayerUiState>
           final options = results[1] as List<MuxedQuality>;
           final base = results[2] as PlaybackStreams;
           segments = results[3] as List<SponsorSegment>;
-          final dash = _pickDashOption(options, targetHeight);
+          final dash =
+              _pickDashOption(options, targetHeight ?? 720);
           if (dash != null) {
             streams = PlaybackStreams(
               videoId: videoId,
