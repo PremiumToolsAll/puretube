@@ -138,6 +138,13 @@ class YTMusicService {
           }
           return; // don't descend into the shelf twice
         }
+        // Continuation responses carry bare musicResponsiveListItemRenderer
+        // items (no musicShelfRenderer wrapper) — collect them directly.
+        final direct = o['musicResponsiveListItemRenderer'];
+        if (direct is Map<String, dynamic>) {
+          out.add(direct);
+          return;
+        }
         for (final v in o.values) {
           walk(v);
         }
