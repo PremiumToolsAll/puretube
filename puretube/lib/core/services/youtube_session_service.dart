@@ -575,10 +575,19 @@ class YoutubeSessionService {
       );
 
       final dir = await getTemporaryDirectory();
+      // Use correct container extension based on mimeType.
+      final videoMime =
+          videoFormat['mimeType'] as String? ?? '';
+      final audioMime =
+          audioFormat['mimeType'] as String? ?? '';
+      final videoExt =
+          videoMime.contains('webm') ? 'webm' : 'mp4';
+      final audioExt =
+          audioMime.contains('webm') ? 'webm' : 'm4a';
       final videoPath =
-          '${dir.path}/sabr_${videoId}_v.mp4';
+          '${dir.path}/sabr_${videoId}_v.$videoExt';
       final audioPath =
-          '${dir.path}/sabr_${videoId}_a.m4a';
+          '${dir.path}/sabr_${videoId}_a.$audioExt';
       await File(videoPath)
           .writeAsBytes(result.video.toBytes());
       await File(audioPath)
