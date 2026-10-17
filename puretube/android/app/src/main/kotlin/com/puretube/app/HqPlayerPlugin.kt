@@ -17,7 +17,7 @@ import androidx.media3.exoplayer.dash.DashMediaSource
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.texture.TextureRegistry
+import io.flutter.view.TextureRegistry
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -341,7 +341,8 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             inputStream = connection.inputStream
             val contentLen = connection.contentLengthLong
-            bytesRemaining = if (contentLen > 0) contentLen else C.LENGTH_UNSET
+            bytesRemaining =
+                if (contentLen > 0) contentLen else C.LENGTH_UNSET.toLong()
             openedUri = uri
             transferActive = true
             transferStarted(dataSpec)
@@ -353,7 +354,7 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val stream = inputStream ?: return C.RESULT_END_OF_INPUT
             val read = stream.read(buffer, offset, length)
             if (read == -1) return C.RESULT_END_OF_INPUT
-            if (bytesRemaining != C.LENGTH_UNSET) bytesRemaining -= read
+            if (bytesRemaining != C.LENGTH_UNSET.toLong()) bytesRemaining -= read
             bytesTransferred(read)
             return read
         }
