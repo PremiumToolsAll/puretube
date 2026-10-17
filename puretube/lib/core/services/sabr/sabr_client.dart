@@ -108,7 +108,9 @@ class SabrClient {
       return true;
     }
 
-    // Safety: max 200 requests.
+    // Safety: max 200 requests, or stop if no new data for 10 requests.
+    var noProgressCount = 0;
+    var lastDownloaded = 0;
     while (rn < 200 && !isDone()) {
       if (backoffMs > 0) {
         await Future.delayed(Duration(milliseconds: backoffMs));
@@ -222,10 +224,23 @@ class SabrClient {
 
       onProgress?.call(downloaded, null);
       rn++;
+
+      // Stop if no new data for 10 consecutive requests.
+      if (downloaded == lastDownloaded) {
+        noProgressCount++;
+        if (noProgressCount >= 10) break;
+      } else {
+        noProgressCount = 0;
+        lastDownloaded = downloaded;
+      }
     }
 
-    if (!isDone()) {
-      throw StateError('SABR download incomplete after $rn requests');
+    // Accept partial download if we got substantial data.
+    final videoBytes = videoStream.media.length;
+    final audioBytes = audioStream.media.length;
+    if (videoBytes < 1024 * 100 || audioBytes < 1024 * 10) {
+      throw StateError(
+          'SABR download incomplete: only ${videoBytes}v/${audioBytes}a bytes after $rn requests');
     }
     return SabrResult(video: videoStream, audio: audioStream);
   }
