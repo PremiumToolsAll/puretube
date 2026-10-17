@@ -383,8 +383,16 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             ?: throw IllegalArgumentException("HQ: missing videoUrl")
         val audioUrl = args["audioUrl"] as? String
             ?: throw IllegalArgumentException("HQ: missing audioUrl")
-        val (videoBase, videoDur) = fetchSq0(videoUrl)
-        val (audioBase, audioDur) = fetchSq0(audioUrl)
+        val (videoBase, videoDur) = try {
+            fetchSq0(videoUrl)
+        } catch (e: IOException) {
+            throw IOException("HQ video sq=0: ${e.message}")
+        }
+        val (audioBase, audioDur) = try {
+            fetchSq0(audioUrl)
+        } catch (e: IOException) {
+            throw IOException("HQ audio sq=0: ${e.message}")
+        }
 
         val vCodec = (args["videoCodec"] as? String).orEmpty()
             .ifEmpty { codecForItag(itagOf(videoUrl), true) }
@@ -446,41 +454,84 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     /**
-     * Fetches sq=0 for a stream URL (plain GET is fine for ANDROID-client
-     * URLs) and returns (de-redirected base URL, Segment-Durations-Ms).
+     * Fetches sq=0 for a stream URL and returns (de-redirected base URL,
+     * Segment-Durations-Ms).
+     *
+     * Uses NewPipe's `alr=yes` redirect dance (YoutubeDashManifestCreatorsUtils):
+     * POST with the 2-byte body, Origin/Referer headers, and `&alr=yes` on the
+     * URL. The server answers 200 + text/plain whose BODY is the next URL;
+     * repeat until the response is the actual media (video/mp4 or audio/mp4),
+     * which carries the Segment-Durations-Ms header.
+     *
+     * Plain GET is rejected with 403 for these ANDROID-client URLs (verified),
+     * and plain POST without alr=yes only yields a 302 whose target then 403s.
      */
     private fun fetchSq0(streamUrl: String): Pair<String, String> {
         var url = stripParams(streamUrl, setOf("sq", "rn", "alr"))
-        url += (if (url.contains("?")) "&" else "?") + "sq=0&rn=0"
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            setRequestProperty("User-Agent", HQ_UA)
-            setRequestProperty("TE", "trailers")
-            setRequestProperty("Accept-Encoding", "identity")
-            connectTimeout = 15000
-            readTimeout = 15000
-            instanceFollowRedirects = true
-        }
-        conn.connect()
-        try {
+        url += (if (url.contains("?")) "&" else "?") +
+                "sq=0&rn=${globalRn.getAndIncrement()}&alr=yes"
+
+        var hops = 0
+        while (hops < 10) {
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("User-Agent", HQ_UA)
+                setRequestProperty("Origin", "https://www.youtube.com")
+                setRequestProperty("Referer", "https://www.youtube.com")
+                setRequestProperty("TE", "trailers")
+                setRequestProperty("Accept-Encoding", "identity")
+                setRequestProperty(
+                    "Content-Type", "application/x-www-form-urlencoded")
+                doOutput = true
+                connectTimeout = 15000
+                readTimeout = 15000
+                instanceFollowRedirects = false
+            }
+            // 2-byte POST body, like NewPipe's YoutubeHttpDataSource.
+            try {
+                conn.outputStream.use { it.write(byteArrayOf(0x78, 0x00)) }
+            } catch (e: Exception) {
+                conn.disconnect()
+                throw IOException("HQ sq=0: POST body failed: ${e.message}")
+            }
             val code = conn.responseCode
             if (code != HttpURLConnection.HTTP_OK) {
+                conn.disconnect()
                 throw IOException("HQ sq=0: HTTP $code")
+            }
+            val mime = (conn.contentType ?: "").substringBefore(";").trim()
+            if (mime == "text/plain") {
+                // Redirect dance: the body IS the next URL.
+                val next = try {
+                    conn.inputStream.use {
+                        it.readBytes().toString(Charsets.UTF_8).trim()
+                    }
+                } finally {
+                    conn.disconnect()
+                }
+                if (!next.startsWith("http")) {
+                    throw IOException("HQ sq=0: bad redirect body")
+                }
+                url = next
+                hops++
+                continue
             }
             val durations = conn.getHeaderField("Segment-Durations-Ms")
                 ?: conn.getHeaderField("segment-durations-ms")
-                ?: throw IOException("HQ sq=0: missing Segment-Durations-Ms")
             // Drain the init segment body.
             try {
                 conn.inputStream.use { it.readBytes() }
             } catch (_: Exception) {
             }
             var finalUrl = conn.url.toString()
+            conn.disconnect()
+            if (durations.isNullOrEmpty()) {
+                throw IOException("HQ sq=0: missing Segment-Durations-Ms")
+            }
             finalUrl = stripParams(finalUrl, setOf("sq", "rn", "alr"))
             return finalUrl to durations
-        } finally {
-            conn.disconnect()
         }
+        throw IOException("HQ sq=0: too many redirects")
     }
 
     private fun stripParams(url: String, names: Set<String>): String {
