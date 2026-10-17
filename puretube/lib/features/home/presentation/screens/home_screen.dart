@@ -5,6 +5,7 @@ import 'package:shimmer/shimmer.dart';
 import '../../../player/presentation/providers/player_controller.dart';
 import '../../../shorts/presentation/screens/shorts_screen.dart';
 import '../providers/home_mode_provider.dart';
+import '../providers/home_sections_provider.dart';
 import '../providers/music_feed_provider.dart';
 import '../providers/search_provider.dart';
 import '../../../player/presentation/widgets/mini_player_bar.dart';
@@ -36,6 +37,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         // Preload the audio-mode music feed too, so switching to
         // audio mode shows songs instantly.
         ref.read(musicFeedProvider);
+        // Preload the Bengali/Hindi/ghazal/waz rails for both modes.
+        ref
+            .read(homeSectionsProvider.notifier)
+            .loadVideo();
+        ref
+            .read(homeSectionsProvider.notifier)
+            .loadAudio();
       }
     });
     // Infinite scroll: load more when near the bottom.
@@ -294,10 +302,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     backgroundColor: Theme.of(context)
                         .colorScheme
                         .surfaceContainer,
-                    onRefresh: () => ref
-                        .read(searchControllerProvider
-                            .notifier)
-                        .refreshFeed(),
+                    onRefresh: () async {
+                      await ref
+                          .read(homeSectionsProvider.notifier)
+                          .refreshVideo();
+                      await ref
+                          .read(searchControllerProvider
+                              .notifier)
+                          .refreshFeed();
+                    },
                     child: _buildResults(search),
                   ),
           ),
@@ -372,31 +385,90 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: Text('No results found.',
                   style: TextStyle(color: Colors.grey)));
         }
-        return GridView.builder(
+        // Bengali/Hindi songs, ghazal and waz rails (Bengali headers)
+        // sit above the trending grid on the home feed. Hidden while a
+        // search is active — same as the audio home.
+        final sections =
+            ref.watch(homeSectionsProvider).video;
+        final showSections = s.query.isEmpty;
+        return CustomScrollView(
           controller: _scrollController,
-          padding: const EdgeInsets.all(12),
-          gridDelegate:
-              const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 0.72,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-          ),
-          // Extra item at the end for the loading indicator.
-          itemCount:
-              s.results.length + (s.loadingMore ? 1 : 0),
-          itemBuilder: (ctx, i) {
-            if (i >= s.results.length) {
-              return const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: CircularProgressIndicator(),
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            if (showSections)
+              for (final section in sections)
+                if (section.items.isNotEmpty) ...[
+                  SliverToBoxAdapter(
+                    child: _HomeSectionHeader(
+                        title: section.header),
+                  ),
+                  SliverToBoxAdapter(
+                    child: SizedBox(
+                      height: 190,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12),
+                        itemCount: section.items.length,
+                        itemBuilder: (c, i) => Padding(
+                          padding:
+                              const EdgeInsets.only(right: 12),
+                          child: SizedBox(
+                            width: 160,
+                            child: VideoCard(
+                                video: section.items[i]),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+            SliverPadding(
+              padding: const EdgeInsets.all(12),
+              sliver: SliverGrid.builder(
+                gridDelegate:
+                    const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  childAspectRatio: 0.72,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
                 ),
-              );
-            }
-            return VideoCard(video: s.results[i]);
-          },
+                // Extra item at the end for the loading indicator.
+                itemCount:
+                    s.results.length + (s.loadingMore ? 1 : 0),
+                itemBuilder: (ctx, i) {
+                  if (i >= s.results.length) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: CircularProgressIndicator(),
+                      ),
+                    );
+                  }
+                  return VideoCard(video: s.results[i]);
+                },
+              ),
+            ),
+          ],
         );
     }
+  }
+}
+
+/// Section header for the video home — same look as the audio home's
+/// section headers (titleMedium, bold, 16/16/16/8 padding).
+class _HomeSectionHeader extends StatelessWidget {
+  final String title;
+  const _HomeSectionHeader({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Text(title,
+          style: theme.textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.bold)),
+    );
   }
 }
