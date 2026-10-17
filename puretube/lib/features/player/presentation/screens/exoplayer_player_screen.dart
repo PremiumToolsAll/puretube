@@ -65,8 +65,20 @@ class _ExoPlayerScreenState
   }
 
   MuxedQuality? _pickBest(List<MuxedQuality> qualities) {
-    // Prefer 1080p AVC, then highest AVC, then highest overall.
+    // Like 360p: prefer reliable muxed (up to 720p), then DASH.
+    // Muxed plays directly without manifest — most reliable.
     MuxedQuality? best;
+
+    // 1. Highest muxed (720p max, plays like 360p).
+    best = qualities
+        .where((q) => !q.isDash)
+        .fold<MuxedQuality?>(null, (b, q) {
+      if (b == null || q.height > b.height) return q;
+      return b;
+    });
+    if (best != null) return best;
+
+    // 2. 1080p AVC DASH.
     for (final q in qualities) {
       if (!q.isDash) continue;
       if (q.height == 1080 &&
@@ -77,21 +89,15 @@ class _ExoPlayerScreenState
         }
       }
     }
-    best ??= qualities
-        .where((q) =>
-            q.isDash &&
-            q.codec.toLowerCase().contains('avc'))
-        .fold<MuxedQuality?>(null, (b, q) {
-      if (b == null || q.height > b.height) return q;
-      return b;
-    });
-    best ??= qualities
+    if (best != null) return best;
+
+    // 3. Highest DASH.
+    return qualities
         .where((q) => q.isDash)
         .fold<MuxedQuality?>(null, (b, q) {
       if (b == null || q.height > b.height) return q;
       return b;
     });
-    return best;
   }
 
   Future<void> _playQuality(MuxedQuality q) async {
@@ -128,6 +134,15 @@ class _ExoPlayerScreenState
         throw Exception('No video URL');
       }
 
+      // Muxed (like 360p): play directly, no manifest needed.
+      // This is how NewPipe plays progressive streams.
+      if (!q.isDash) {
+        await _exoService.playMuxed(videoUrl);
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
+
+      // DASH: need both video and audio URLs.
       if (audioUrl == null || audioUrl.isEmpty) {
         throw Exception('No audio URL for ${q.label}');
       }
