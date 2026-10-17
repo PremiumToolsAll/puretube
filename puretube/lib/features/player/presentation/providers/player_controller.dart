@@ -13,6 +13,7 @@ import '../../../../core/di/providers.dart';
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/services/pip_service.dart';
 import '../../../../core/services/sponsorblock_service.dart';
+import '../../../../core/services/hq_player_service.dart';
 import '../../../../core/services/lyrics_service.dart';
 import '../../../../core/services/watch_category_tracker.dart';
 import '../../../../core/services/youtube_extractor_service.dart';
@@ -49,6 +50,15 @@ class PlayerUiState {
   final LyricsResult? lyricsResult;
   final bool lyricsLoading;
 
+  /// Native HQ (ExoPlayer) texture id. Non-null means 1080p+ DASH is
+  /// playing through the Java engine instead of mpv — the UI renders a
+  /// [Texture] and routes transport through [HqPlayerService].
+  final int? hqTextureId;
+
+  /// HQ video aspect ratio (width/height) from the native player.
+  /// 0 = unknown (UI falls back to 16:9).
+  final double hqAspectRatio;
+
   /// Autoplay: when ON, completing a video automatically starts the
   /// next Up Next video (both video and audio mode).
   final bool autoplay;
@@ -77,6 +87,8 @@ class PlayerUiState {
     this.lyricsResult,
     this.lyricsLoading = false,
     this.autoplay = true,
+    this.hqTextureId,
+    this.hqAspectRatio = 0,
   });
 
   PlayerUiState copyWith({
@@ -106,6 +118,9 @@ class PlayerUiState {
     bool? lyricsLoading,
     bool clearLyrics = false,
     bool? autoplay,
+    int? hqTextureId,
+    bool clearHq = false,
+    double? hqAspectRatio,
   }) {
     return PlayerUiState(
       status: status ?? this.status,
@@ -142,6 +157,8 @@ class PlayerUiState {
           clearLyrics ? null : (lyricsResult ?? this.lyricsResult),
       lyricsLoading: lyricsLoading ?? this.lyricsLoading,
       autoplay: autoplay ?? this.autoplay,
+      hqTextureId: clearHq ? null : (hqTextureId ?? this.hqTextureId),
+      hqAspectRatio: clearHq ? 0 : (hqAspectRatio ?? this.hqAspectRatio),
     );
   }
 }
@@ -215,6 +232,64 @@ class PlayerController extends Notifier<PlayerUiState>
   /// The global [_onPlayerError] recovery must stay out during this window —
   /// the switch owns error handling until verification completes.
   bool _dashVerifyInFlight = false;
+
+  /// Raw mpv error stashed while [_dashVerifyInFlight] is true. This is the
+  /// REAL reason a quality switch failed (e.g. "Failed to open ... 403").
+  /// User directive 2026-10-17: surface it loudly instead of silently
+  /// falling back to 360p. Reset at the start of every DASH switch.
+  String? _dashVerifyError;
+
+  // ---------------- native HQ player (1080p+ DASH) ----------------
+  // The Java/ExoPlayer engine for high quality. Active only when
+  // state.hqTextureId != null; everything else stays on mpv.
+  final HqPlayerService _hq = HqPlayerService();
+  Timer? _hqPollTimer;
+  Duration _hqPosition = Duration.zero;
+  Duration _hqDuration = Duration.zero;
+  bool _hqPlaying = false;
+  // True while HQ audio was handed to the background audio service
+  // (app backgrounded during HQ playback).
+  bool _hqBackgrounded = false;
+  final _hqPositionCtrl = StreamController<Duration>.broadcast();
+  final _hqDurationCtrl = StreamController<Duration>.broadcast();
+  final _hqPlayingCtrl = StreamController<bool>.broadcast();
+
+  /// Unified display streams for the UI: HQ engine when active, else mpv.
+  /// (media_kit's streams are broadcast without replay, so the UI also
+  /// needs synchronous initialData — see displayPosition/displayDuration.)
+  bool get hqActive => state.hqTextureId != null;
+
+  /// HQ display streams + synchronous snapshots for the player UI.
+  /// Branch on [hqActive]: use these when true, else the media_kit player.
+  Stream<Duration> get hqPositionStream => _hqPositionCtrl.stream;
+  Stream<Duration> get hqDurationStream => _hqDurationCtrl.stream;
+  Stream<bool> get hqPlayingStream => _hqPlayingCtrl.stream;
+  Duration get hqPosition => _hqPosition;
+  Duration get hqDuration => _hqDuration;
+  bool get hqIsPlaying => _hqPlaying;
+
+  /// Unified synchronous snapshots for gesture handlers: HQ engine when
+  /// active, else mpv.
+  Duration get displayPosition =>
+      hqActive ? _hqPosition : _handler.player.state.position;
+  Duration get displayDuration =>
+      hqActive ? _hqDuration : _handler.player.state.duration;
+
+  double _hqVolume = 1.0;
+
+  /// Unified volume: HQ engine when active, else mpv. [v] is 0-100.
+  Future<void> setDisplayVolume(double v) async {
+    final clamped = v.clamp(0.0, 100.0);
+    if (hqActive) {
+      _hqVolume = clamped / 100;
+      await _hq.setVolume(_hqVolume);
+      return;
+    }
+    await _handler.player.setVolume(clamped);
+  }
+
+  double get displayVolume =>
+      hqActive ? _hqVolume * 100 : _handler.player.state.volume;
 
   /// Last persisted audio-only preference (Hive). Applied on the next
   /// loadVideo so a fresh app start restores the user's last mode.
@@ -335,6 +410,11 @@ class PlayerController extends Notifier<PlayerUiState>
       _errorSub?.cancel();
       _completedSub?.cancel();
       _cancelSleepTimer();
+      _hqPollTimer?.cancel();
+      unawaited(_hq.dispose());
+      _hqPositionCtrl.close();
+      _hqDurationCtrl.close();
+      _hqPlayingCtrl.close();
     });
 
     return const PlayerUiState();
@@ -349,6 +429,16 @@ class PlayerController extends Notifier<PlayerUiState>
         // PiP only when user explicitly taps the PiP button — auto-PiP
         // was interrupting background playback.
         unawaited(_persistResumePosition());
+        // HQ (ExoPlayer) lives in the activity: hand its audio to the
+        // background audio service so playback continues seamlessly.
+        if (hqActive && !_hqBackgrounded) {
+          unawaited(_hqToBackground());
+        }
+        break;
+      case AppLifecycleState.resumed:
+        if (_hqBackgrounded) {
+          unawaited(_hqFromBackground());
+        }
         break;
       case AppLifecycleState.detached:
         // DANGER: On some devices (notably Xiaomi/MIUI), `detached`
@@ -367,6 +457,46 @@ class PlayerController extends Notifier<PlayerUiState>
       default:
         break;
     }
+  }
+
+  /// Hands HQ playback to the background audio service (app backgrounded).
+  /// The native ExoPlayer is activity-bound; the audio service's mpv
+  /// keeps the audio going with its foreground notification.
+  Future<void> _hqToBackground() async {
+    if (!hqActive || _hqBackgrounded) return;
+    _hqBackgrounded = true;
+    Duration pos = Duration.zero;
+    try {
+      pos = await _hq.position();
+    } catch (_) {}
+    try {
+      await _hq.pause();
+    } catch (_) {}
+    final audioUrl = state.currentQuality?.audioUrl;
+    if (audioUrl == null) return;
+    try {
+      await _handler.switchStream(audioUrl, resumeAt: pos);
+      await _handler.play();
+    } catch (_) {}
+  }
+
+  /// Returns from background: give playback back to the HQ engine.
+  Future<void> _hqFromBackground() async {
+    if (!_hqBackgrounded || !hqActive) return;
+    _hqBackgrounded = false;
+    Duration pos = Duration.zero;
+    try {
+      pos = _handler.player.state.position;
+    } catch (_) {}
+    try {
+      await _handler.pause();
+    } catch (_) {}
+    try {
+      await _hq.seekTo(pos);
+      await _hq.play();
+      _hqPlaying = true;
+      _hqPlayingCtrl.add(true);
+    } catch (_) {}
   }
 
   // ---------------- loading ----------------
@@ -394,6 +524,8 @@ class PlayerController extends Notifier<PlayerUiState>
     _precacheToken++;
     // Navigating away also cancels any in-flight lyrics auto-fetch.
     _lyricsToken++;
+    // A new video stops any active HQ (ExoPlayer) session first.
+    await _stopHq();
     await _handler.player.stop();
 
     // Record in playback history (unless this load IS a history
@@ -581,6 +713,7 @@ class PlayerController extends Notifier<PlayerUiState>
   Future<void> stop() async {
     _cancelSleepTimer();
     _recoveryAttempts = 0;
+    await _stopHq();
     await _handler.stop();
     // Full reset, but keep the user's autoplay preference.
     state = PlayerUiState(autoplay: _autoplay);
@@ -691,6 +824,17 @@ class PlayerController extends Notifier<PlayerUiState>
   // ---------------- transport ----------------
 
   Future<void> togglePlayPause() async {
+    if (hqActive) {
+      // Optimistic flip for a snappy icon; the poll corrects it.
+      _hqPlaying = !_hqPlaying;
+      _hqPlayingCtrl.add(_hqPlaying);
+      if (_hqPlaying) {
+        await _hq.play();
+      } else {
+        await _hq.pause();
+      }
+      return;
+    }
     if (_handler.player.state.playing) {
       await _handler.pause();
     } else {
@@ -698,9 +842,18 @@ class PlayerController extends Notifier<PlayerUiState>
     }
   }
 
-  Future<void> seekTo(Duration position) => _handler.seek(position);
+  Future<void> seekTo(Duration position) => _seekInternal(position);
 
   Future<void> seekBy(Duration offset) async {
+    if (hqActive) {
+      var target = _hqPosition + offset;
+      if (target < Duration.zero) target = Duration.zero;
+      if (_hqDuration > Duration.zero && target > _hqDuration) {
+        target = _hqDuration;
+      }
+      await _seekInternal(target);
+      return;
+    }
     final player = _handler.player;
     var target = player.state.position + offset;
     final duration = player.state.duration;
@@ -713,6 +866,7 @@ class PlayerController extends Notifier<PlayerUiState>
 
   Future<void> setSpeed(double speed) async {
     final s = speed.clamp(0.25, 4.0);
+    if (hqActive) await _hq.setSpeed(s);
     await _handler.setSpeed(s);
     state = state.copyWith(speed: s);
   }
@@ -1205,9 +1359,9 @@ class PlayerController extends Notifier<PlayerUiState>
   ///
   /// DASH (video-only) streams are fragile: YouTube may reject them
   /// (PO token / throttling / "Failed to open"). The new stream is
-  /// verified after switching; on failure the PREVIOUS quality is
-  /// restored and a clear error is shown — the app never silently
-  /// drops to an arbitrary lower quality.
+  /// verified after switching; on failure the previous quality is
+  /// restored and the REAL failure reason is shown loudly (user
+  /// directive 2026-10-17: never silently fall back to 360p).
   Future<void> setQuality(MuxedQuality quality) async {
     final videoId = state.videoId;
     if (state.status != PlayerStatus.ready || videoId == null) {
@@ -1225,6 +1379,18 @@ class PlayerController extends Notifier<PlayerUiState>
     // codec variant separately). Automatic selection uses _pickDashOption
     // which prefers AVC.
     var target = quality;
+    // 1080p+ DASH goes straight to the native HQ (ExoPlayer) engine —
+    // mpv cannot play these streams on this phone (user directive
+    // 2026-10-17: "Java code দিয়ে ফোর্স করো"). Everything below 1080p
+    // keeps the proven mpv path.
+    if (target.isDash && target.height >= 1080) {
+      await _playHq(target, token);
+      return;
+    }
+    // Leaving the HQ engine: stop it before mpv takes over.
+    if (hqActive) {
+      await _stopHq();
+    }
     // NOTE: no manifest refresh before switching (an earlier version
     // refreshed here for DASH). YouTube's android client limits stream
     // URL reuse — the extractor itself warns it "often prevents
@@ -1253,6 +1419,7 @@ class PlayerController extends Notifier<PlayerUiState>
     // Verify DASH actually loads; muxed streams are trusted.
     if (target.isDash) {
       _dashVerifyInFlight = true;
+      _dashVerifyError = null;
       try {
         var outcome = await _verifyDashLoad(target, token);
         if (token != _qualitySwitchToken || state.videoId != videoId) {
@@ -1292,11 +1459,20 @@ class PlayerController extends Notifier<PlayerUiState>
           }
         }
         if (outcome != _DashLoadOutcome.loaded) {
-          // DASH failed — SABR fallback disabled (was not working
-          // reliably on device). Roll back to previous quality.
-          // TODO: Re-enable SABR once the buffering issue is fixed.
+          // DASH failed. User directive 2026-10-17: NEVER silently drop
+          // to a lower quality — restore the previous stream so playback
+          // continues, but surface the REAL failure reason loudly.
+          // (_dashVerifyError holds mpv's raw error, e.g. 403; a timeout
+          // means the stream stalled without any mpv error.)
+          final reason = _dashVerifyError != null
+              ? _shortenError(_dashVerifyError!)
+              : 'no data within 8s (timeout)';
           await _rollbackQuality(
               previous: previous, failed: target);
+          state = state.copyWith(
+            errorMessage:
+                '${target.resolutionLabel} চালানো যায়নি: $reason',
+          );
           return;
         }
       } finally {
@@ -1325,6 +1501,16 @@ class PlayerController extends Notifier<PlayerUiState>
     );
   }
 
+  /// Shortens a raw playback error for display: long stream URLs carry
+  /// no information for the user, so they are collapsed to a placeholder.
+  String _shortenError(String e) {
+    var s = e.replaceAll(
+        RegExp(r'https?://[^\s]*googlevideo\.com[^\s]*'), '[googlevideo-url]');
+    s = s.replaceAll(RegExp(r'https?://\S+'), '[url]');
+    s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return s.length > 200 ? '${s.substring(0, 200)}…' : s;
+  }
+
   /// Waits for a DASH stream to actually start producing a duration.
   ///
   /// [token] must match [_qualitySwitchToken]; a mismatch means the user
@@ -1345,11 +1531,180 @@ class PlayerController extends Notifier<PlayerUiState>
       // state.currentQuality here: it still holds the OLD quality
       // until verification succeeds.)
       if (token != _qualitySwitchToken) return _DashLoadOutcome.timeout;
+      // A hard mpv error was stashed by _onPlayerError during the
+      // verify window — the URL is dead (expired/403/revoked), not slow.
+      if (_dashVerifyError != null) return _DashLoadOutcome.error;
       final duration = _handler.player.state.duration;
       if (duration > Duration.zero) return _DashLoadOutcome.loaded;
       await Future.delayed(pollInterval);
     }
     return _DashLoadOutcome.timeout;
+  }
+
+  // ---------------- native HQ player (1080p+ DASH) ----------------
+
+  /// Plays [target] (1080p+ DASH) through the native HQ (ExoPlayer) engine.
+  /// mpv cannot play these streams on this phone, so they go straight to
+  /// the Java player. On failure the REAL reason is surfaced loudly —
+  /// never a silent downgrade (user directive 2026-10-17).
+  Future<void> _playHq(MuxedQuality target, int token) async {
+    final videoId = state.videoId;
+    // Pause mpv so it doesn't double-play under the HQ engine.
+    try {
+      await _handler.pause();
+    } catch (_) {}
+    final resumeAt = _handler.player.state.position;
+
+    String? hqError;
+    var hqFailed = false;
+    _hq.onError = (msg) {
+      if (token != _qualitySwitchToken || state.videoId != videoId) return;
+      hqError = msg;
+      hqFailed = true;
+    };
+    _hq.onReady = (dur, w, h) {
+      if (dur > Duration.zero) {
+        _hqDuration = dur;
+        _hqDurationCtrl.add(dur);
+      }
+      if (w > 0 && h > 0) {
+        state = state.copyWith(hqAspectRatio: w / h);
+      }
+    };
+    _hq.onCompleted = () {
+      if (token != _qualitySwitchToken || state.videoId != videoId) return;
+      _onPlaybackCompleted();
+    };
+
+    try {
+      final texId = await _hq.create();
+      if (token != _qualitySwitchToken || state.videoId != videoId) {
+        await _hq.dispose();
+        return;
+      }
+      state = state.copyWith(hqTextureId: texId);
+      await _hq.loadDash(
+        videoUrl: target.url,
+        audioUrl: target.audioUrl!,
+        videoCodec: target.fullCodec,
+        width: (target.height * 16) ~/ 9,
+        height: target.height,
+        fps: target.fps,
+        videoBitrateBps: (target.bitrateKbps * 1000).round(),
+        audioCodec: target.audioFullCodec,
+        audioBitrateBps: target.audioBitrateBps,
+        audioSampleRate: target.audioSampleRate,
+        startAt: resumeAt,
+        speed: state.speed,
+      );
+      // Verify the native player actually produces a duration.
+      const pollInterval = Duration(milliseconds: 500);
+      final deadline =
+          DateTime.now().add(const Duration(seconds: 20));
+      var loaded = false;
+      while (DateTime.now().isBefore(deadline)) {
+        if (token != _qualitySwitchToken || state.videoId != videoId) {
+          return;
+        }
+        if (hqFailed) break;
+        if (_hqDuration > Duration.zero) {
+          loaded = true;
+          break;
+        }
+        try {
+          final d = await _hq.duration();
+          if (d > Duration.zero) {
+            _hqDuration = d;
+            _hqDurationCtrl.add(d);
+            loaded = true;
+            break;
+          }
+        } catch (_) {}
+        await Future.delayed(pollInterval);
+      }
+      if (token != _qualitySwitchToken || state.videoId != videoId) return;
+      if (!loaded || hqFailed) {
+        final reason = hqError ?? 'no data within 20s (timeout)';
+        throw StateError(reason);
+      }
+      // Success: adopt the quality and start polling position.
+      _hqPosition = resumeAt;
+      _hqPositionCtrl.add(resumeAt);
+      _startHqPoll();
+      final s = state.streams;
+      state = state.copyWith(
+        currentQuality: target,
+        streams: s == null
+            ? null
+            : PlaybackStreams(
+                videoId: s.videoId,
+                muxedUrl: target.url,
+                muxedHeight: target.height,
+                audioOnlyUrl: s.audioOnlyUrl,
+                audioBitrate: s.audioBitrate,
+                fetchedAt: s.fetchedAt,
+              ),
+      );
+    } catch (e) {
+      if (token != _qualitySwitchToken || state.videoId != videoId) return;
+      await _stopHq();
+      // Resume the previous (working) mpv stream so the video keeps playing.
+      try {
+        await _handler.play();
+      } catch (_) {}
+      final raw = hqError ?? e.toString();
+      state = state.copyWith(
+        errorMessage:
+            '${target.resolutionLabel} চালানো যায়নি: ${_shortenError(raw)}',
+      );
+    }
+  }
+
+  /// Stops the HQ engine and clears its state. Does not touch mpv.
+  Future<void> _stopHq() async {
+    _hqPollTimer?.cancel();
+    _hqPollTimer = null;
+    _hqBackgrounded = false;
+    _hqPosition = Duration.zero;
+    _hqDuration = Duration.zero;
+    _hqPlaying = false;
+    _hq.onError = null;
+    _hq.onReady = null;
+    _hq.onCompleted = null;
+    await _hq.dispose();
+    if (state.hqTextureId != null) {
+      state = state.copyWith(clearHq: true);
+    }
+  }
+
+  /// Polls HQ position/playing state for the UI + SponsorBlock.
+  void _startHqPoll() {
+    _hqPollTimer?.cancel();
+    _hqPollTimer =
+        Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      if (state.hqTextureId == null) return;
+      try {
+        final pos = await _hq.position();
+        _hqPosition = pos;
+        _hqPositionCtrl.add(pos);
+        final playing = await _hq.isPlaying();
+        if (playing != _hqPlaying) {
+          _hqPlaying = playing;
+          _hqPlayingCtrl.add(playing);
+        }
+        _maybeSkipSponsor(pos);
+      } catch (_) {}
+    });
+  }
+
+  /// Unified seek: HQ engine when active, else mpv.
+  Future<void> _seekInternal(Duration target) {
+    if (hqActive) {
+      _hqPosition = target;
+      _hqPositionCtrl.add(target);
+      return _hq.seekTo(target);
+    }
+    return _handler.seek(target);
   }
 
   /// Tries SABR (YouTube's native streaming protocol) when DASH fails.
@@ -1588,8 +1943,7 @@ class PlayerController extends Notifier<PlayerUiState>
     try {
       await ref.read(historyRepositoryProvider).saveResumePosition(
             videoId: id,
-            positionSecs:
-                _handler.player.state.position.inSeconds,
+            positionSecs: displayPosition.inSeconds,
             title: v?.title ?? '',
             author: v?.author ?? '',
             thumbnailUrl: v?.thumbnailUrl ?? '',
@@ -1683,8 +2037,7 @@ class PlayerController extends Notifier<PlayerUiState>
     for (final seg in state.sponsorSegments) {
       if (seg.contains(position)) {
         _skipInProgress = true;
-        _handler
-            .seek(
+        _seekInternal(
                 Duration(milliseconds: (seg.end * 1000).toInt() + 250))
             .whenComplete(() => _skipInProgress = false);
         break;
@@ -1704,10 +2057,18 @@ class PlayerController extends Notifier<PlayerUiState>
       return;
     }
     if (error.trim().isEmpty) return;
+    // HQ (ExoPlayer) owns playback right now — mpv is paused and its
+    // errors must not trigger recovery that would fight the HQ engine.
+    if (hqActive) return;
     // A DASH quality switch is mid-verification/rollback — it owns error
     // handling until done. Recovering here would fight the switch and
-    // leave the player in an inconsistent state.
-    if (_dashVerifyInFlight) return;
+    // leave the player in an inconsistent state. Stash the raw error so
+    // the switch can report the REAL failure reason (user directive
+    // 2026-10-17: no silent 360p fallback).
+    if (_dashVerifyInFlight) {
+      _dashVerifyError = error;
+      return;
+    }
 
     if (_recoveryAttempts >= 2) {
       state = state.copyWith(
