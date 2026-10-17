@@ -540,11 +540,17 @@ class YoutubeSessionService {
   ///
   /// Returns {'videoPath': String, 'audioPath': String} with local file
   /// paths suitable for mpv playback. Throws on failure.
+  ///
+  /// For true streaming: [onReadyToPlay] is called as soon as the init
+  /// segment + first media data is written (enough for mpv to start).
+  /// The download continues in the background while mpv plays the
+  /// growing file.
   Future<Map<String, String>> downloadViaSabr({
     required String videoId,
     required int videoItag,
     required int audioItag,
     void Function(int downloaded, int? total)? onProgress,
+    void Function(String videoPath, String audioPath)? onReadyToPlay,
   }) async {
     final info = await getSabrInfo(videoId);
     final formats = info['formats'] as List<Map<String, dynamic>>;
@@ -562,9 +568,34 @@ class YoutubeSessionService {
       throw Exception('SABR: format not found');
     }
 
-    final sabr = SabrClient();
+    final dir = await getTemporaryDirectory();
+    // Use correct container extension based on mimeType.
+    final videoMime =
+        videoFormat['mimeType'] as String? ?? '';
+    final audioMime =
+        audioFormat['mimeType'] as String? ?? '';
+    final videoExt =
+        videoMime.contains('webm') ? 'webm' : 'mp4';
+    final audioExt =
+        audioMime.contains('webm') ? 'webm' : 'm4a';
+    final videoPath =
+        '${dir.path}/sabr_${videoId}_v.$videoExt';
+    final audioPath =
+        '${dir.path}/sabr_${videoId}_a.$audioExt';
+    // Delete any stale files from a previous attempt.
     try {
-      final result = await sabr.download(
+      await File(videoPath).delete();
+    } catch (_) {}
+    try {
+      await File(audioPath).delete();
+    } catch (_) {}
+
+    final sabr = SabrClient();
+    // For true streaming: return as soon as onReadyToPlay fires,
+    // while the download continues in the background.
+    final readyCompleter = Completer<Map<String, String>>();
+    try {
+      final downloadFuture = sabr.download(
         serverAbrStreamingUrl:
             info['serverAbrStreamingUrl'] as String,
         ustreamerConfig:
@@ -572,29 +603,34 @@ class YoutubeSessionService {
         videoFormat: videoFormat,
         audioFormat: audioFormat,
         onProgress: onProgress,
+        videoFilePath: videoPath,
+        audioFilePath: audioPath,
+        onReadyToPlay: () {
+          onReadyToPlay?.call(videoPath, audioPath);
+          if (!readyCompleter.isCompleted) {
+            readyCompleter.complete(
+                {'videoPath': videoPath, 'audioPath': audioPath});
+          }
+        },
       );
-
-      final dir = await getTemporaryDirectory();
-      // Use correct container extension based on mimeType.
-      final videoMime =
-          videoFormat['mimeType'] as String? ?? '';
-      final audioMime =
-          audioFormat['mimeType'] as String? ?? '';
-      final videoExt =
-          videoMime.contains('webm') ? 'webm' : 'mp4';
-      final audioExt =
-          audioMime.contains('webm') ? 'webm' : 'm4a';
-      final videoPath =
-          '${dir.path}/sabr_${videoId}_v.$videoExt';
-      final audioPath =
-          '${dir.path}/sabr_${videoId}_a.$audioExt';
-      await File(videoPath)
-          .writeAsBytes(result.video.toBytes());
-      await File(audioPath)
-          .writeAsBytes(result.audio.toBytes());
-      return {'videoPath': videoPath, 'audioPath': audioPath};
-    } finally {
+      // Keep the download running in the background; don't let
+      // unhandled errors crash the app.
+      downloadFuture.then((_) {
+        if (!readyCompleter.isCompleted) {
+          readyCompleter.complete(
+              {'videoPath': videoPath, 'audioPath': audioPath});
+        }
+        sabr.dispose();
+      }).catchError((e) {
+        if (!readyCompleter.isCompleted) {
+          readyCompleter.completeError(e);
+        }
+        sabr.dispose();
+      });
+      return await readyCompleter.future;
+    } catch (e) {
       sabr.dispose();
+      rethrow;
     }
   }
 
