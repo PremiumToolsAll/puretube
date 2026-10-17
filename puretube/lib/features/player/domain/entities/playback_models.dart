@@ -189,6 +189,20 @@ class MuxedQuality {
   /// Short codec name: "avc", "vp9", "av1". Empty when unknown.
   final String codec;
 
+  /// Full codec string from the stream's mimeType, e.g. "avc1.640028".
+  /// Needed by the native HQ (ExoPlayer) player to build a correct DASH
+  /// manifest. Empty when unknown (HQ player derives from itag then).
+  final String fullCodec;
+
+  /// Full audio codec string for DASH entries, e.g. "mp4a.40.2".
+  final String audioFullCodec;
+
+  /// Audio bitrate in bps (DASH entries). 0 when unknown.
+  final int audioBitrateBps;
+
+  /// Audio sample rate in Hz (DASH entries), e.g. 44100. 0 when unknown.
+  final int audioSampleRate;
+
   /// True when the stream carries HDR (PQ/HLG) metadata, detected from
   /// the stream's quality label when the extractor exposes it.
   /// youtube_explode_dart does not surface per-stream color info, so
@@ -206,6 +220,10 @@ class MuxedQuality {
     this.fps = 0,
     this.codec = '',
     this.isHdr = false,
+    this.fullCodec = '',
+    this.audioFullCodec = '',
+    this.audioBitrateBps = 0,
+    this.audioSampleRate = 0,
   });
 
   /// True when this is a video-only DASH stream needing external audio.
