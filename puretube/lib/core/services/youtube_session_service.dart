@@ -164,6 +164,15 @@ class YoutubeSessionService {
     return m.group(1)!.split(',').first.split('.').first.trim();
   }
 
+  /// Full codec string from the mimeType, e.g. "avc1.640028".
+  /// The native HQ player needs the verbatim string for its DASH manifest.
+  static String _fullCodecOf(String? mimeType) {
+    if (mimeType == null) return '';
+    final m = _codecsRe.firstMatch(mimeType);
+    if (m == null) return '';
+    return m.group(1)!.split(',').first.trim();
+  }
+
   static int _num(Object? v) {
     if (v is num) return v.toInt();
     // YouTube sometimes sends numbers as strings ("1827060694").
@@ -261,6 +270,8 @@ class YoutubeSessionService {
         url: s['url'].toString(),
         fps: _num(s['fps']),
         codec: _codecOf(s['mimeType']?.toString()),
+        fullCodec: _fullCodecOf(s['mimeType']?.toString()),
+        bitrateKbps: _num(s['bitrate']) / 1000.0,
       ));
     }
 
@@ -273,7 +284,12 @@ class YoutubeSessionService {
       ..sort((a, b) =>
           _num(b['bitrate']).compareTo(_num(a['bitrate'])));
     if (audio.isNotEmpty) {
-      final audioUrl = audio.first['url'].toString();
+      final audioPick = audio.first;
+      final audioUrl = audioPick['url'].toString();
+      final audioMime = audioPick['mimeType']?.toString() ?? '';
+      final audioFullCodec = _fullCodecOf(audioMime);
+      final audioBitrateBps = _num(audioPick['bitrate']);
+      final audioSampleRate = _num(audioPick['audioSampleRate']);
       final videoOnly = _asMaps(sd['adaptiveFormats'])
           .where((s) =>
               (s['mimeType']?.toString() ?? '')
@@ -298,6 +314,11 @@ class YoutubeSessionService {
           audioUrl: audioUrl,
           fps: _num(s['fps']),
           codec: _codecOf(s['mimeType']?.toString()),
+          fullCodec: _fullCodecOf(s['mimeType']?.toString()),
+          bitrateKbps: _num(s['bitrate']) / 1000.0,
+          audioFullCodec: audioFullCodec,
+          audioBitrateBps: audioBitrateBps,
+          audioSampleRate: audioSampleRate,
         ));
       }
     }
