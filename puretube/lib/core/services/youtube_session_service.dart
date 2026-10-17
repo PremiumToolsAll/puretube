@@ -1,9 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 import '../../features/player/domain/entities/playback_models.dart';
+import 'sabr/sabr_client.dart';
 
 /// Direct YouTube access through a real visitor session.
 ///
@@ -468,6 +472,121 @@ class YoutubeSessionService {
       uploadDate: null,
       description: '',
     );
+  }
+
+  /// SABR streaming info from the player response.
+  ///
+  /// Returns {'serverAbrStreamingUrl': String,
+  ///          'ustreamerConfig': Uint8List,
+  ///          'formats': List<Map>} where each format has
+  /// itag/mimeType/bitrate/lastModified/xtags.
+  /// Throws if SABR is not available for this video/client.
+  Future<Map<String, dynamic>> getSabrInfo(String videoId) async {
+    final json = await _playerJson(videoId);
+    final sd = json['streamingData'];
+    if (sd is! Map<String, dynamic>) {
+      throw Exception('YouTube session: no streaming data');
+    }
+    final sabrUrl = sd['serverAbrStreamingUrl']?.toString() ?? '';
+    if (sabrUrl.isEmpty) {
+      throw Exception('YouTube session: no SABR URL');
+    }
+    // ustreamer config: base64url in playerConfig.
+    Uint8List ustreamerConfig = Uint8List(0);
+    try {
+      final pc = json['playerConfig'];
+      final mcc = pc is Map ? pc['mediaCommonConfig'] : null;
+      final usrc = mcc is Map ? mcc['mediaUstreamerRequestConfig'] : null;
+      final vpu = usrc is Map
+          ? usrc['videoPlaybackUstreamerConfig']
+          : null;
+      if (vpu is String && vpu.isNotEmpty) {
+        var s = vpu.replaceAll('-', '+').replaceAll('_', '/');
+        while (s.length % 4 != 0) {
+          s += '=';
+        }
+        ustreamerConfig =
+            Uint8List.fromList(base64.decode(s));
+      }
+    } catch (_) {}
+
+    final formats = <Map<String, dynamic>>[];
+    for (final s in _asMaps(sd['adaptiveFormats'])) {
+      final itag = _num(s['itag']).toInt();
+      final mime = s['mimeType']?.toString() ?? '';
+      if (itag <= 0 || mime.isEmpty) continue;
+      formats.add({
+        'itag': itag,
+        'mimeType': mime,
+        'bitrate': _num(s['bitrate']).toInt(),
+        'lastModified': int.tryParse(
+                s['lastModified']?.toString() ?? '') ??
+            0,
+        'xtags': s['xtags']?.toString() ?? '',
+        'isAudio': mime.startsWith('audio/'),
+        'height': _heightOfLabel(
+            s['size']?.toString() ??
+                s['qualityLabel']?.toString()),
+      });
+    }
+    return {
+      'serverAbrStreamingUrl': sabrUrl,
+      'ustreamerConfig': ustreamerConfig,
+      'formats': formats,
+    };
+  }
+
+  /// Downloads video+audio via SABR and saves to temp files.
+  ///
+  /// Returns {'videoPath': String, 'audioPath': String} with local file
+  /// paths suitable for mpv playback. Throws on failure.
+  Future<Map<String, String>> downloadViaSabr({
+    required String videoId,
+    required int videoItag,
+    required int audioItag,
+    void Function(int downloaded, int? total)? onProgress,
+  }) async {
+    final info = await getSabrInfo(videoId);
+    final formats = info['formats'] as List<Map<String, dynamic>>;
+
+    Map<String, dynamic>? findFormat(int itag) {
+      for (final f in formats) {
+        if (f['itag'] == itag) return f;
+      }
+      return null;
+    }
+
+    final videoFormat = findFormat(videoItag);
+    final audioFormat = findFormat(audioItag);
+    if (videoFormat == null || audioFormat == null) {
+      throw Exception('SABR: format not found');
+    }
+
+    final sabr = SabrClient();
+    try {
+      final result = await sabr.download(
+        serverAbrStreamingUrl:
+            info['serverAbrStreamingUrl'] as String,
+        ustreamerConfig:
+            info['ustreamerConfig'] as Uint8List,
+        videoFormat: videoFormat,
+        audioFormat: audioFormat,
+        onProgress: onProgress,
+      );
+
+      final dir = await getTemporaryDirectory();
+      final videoPath =
+          '${dir.path}/sabr_${videoId}_v.mp4';
+      final audioPath =
+          '${dir.path}/sabr_${videoId}_a.m4a';
+      await File(videoPath)
+          .writeAsBytes(result.video.toBytes());
+      await File(audioPath)
+          .writeAsBytes(result.audio.toBytes());
+      return {'videoPath': videoPath, 'audioPath': audioPath};
+    } finally {
+      sabr.dispose();
+    }
   }
 
   void dispose() => _client.close();
