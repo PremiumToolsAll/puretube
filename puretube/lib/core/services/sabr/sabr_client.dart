@@ -18,6 +18,7 @@ import 'sabr_proto.dart';
 import 'ump_parser.dart';
 
 /// A downloaded media segment for one format.
+/// Supports progressive file writing for true streaming.
 class SabrFormatStream {
   final int itag;
   final String mimeType;
@@ -27,13 +28,43 @@ class SabrFormatStream {
   int endSegmentNumber = -1;
   bool initReceived = false;
 
+  /// Optional file sink for progressive writing.
+  /// When set, media bytes are appended to the file as they arrive.
+  IOSink? fileSink;
+  bool _initWritten = false;
+
   SabrFormatStream({required this.itag, required this.mimeType});
+
+  /// Appends payload to the stream (and file if sink is set).
+  void addMedia(List<int> payload, {required bool isInit}) {
+    if (isInit) {
+      initSegment.add(payload);
+      initReceived = true;
+      // Write init to file first.
+      fileSink?.add(initSegment.toBytes());
+      _initWritten = true;
+    } else {
+      // Ensure init is written before media.
+      if (!_initWritten && initReceived) {
+        fileSink?.add(initSegment.toBytes());
+        _initWritten = true;
+      }
+      media.add(payload);
+      fileSink?.add(payload);
+    }
+  }
 
   Uint8List toBytes() {
     final out = BytesBuilder();
     out.add(initSegment.toBytes());
     out.add(media.toBytes());
     return out.toBytes();
+  }
+
+  Future<void> closeFile() async {
+    await fileSink?.flush();
+    await fileSink?.close();
+    fileSink = null;
   }
 }
 
@@ -64,6 +95,10 @@ class SabrClient {
     required Map<String, dynamic> videoFormat,
     required Map<String, dynamic> audioFormat,
     void Function(int downloaded, int? total)? onProgress,
+    String? videoFilePath,
+    String? audioFilePath,
+    void Function()? onReadyToPlay,
+    int readyThresholdBytes = 2 * 1024 * 1024,
   }) async {
     final videoItag = videoFormat['itag'] as int;
     final audioItag = audioFormat['itag'] as int;
@@ -77,6 +112,17 @@ class SabrClient {
       mimeType: audioFormat['mimeType'] as String? ?? '',
     );
     final streams = {videoItag: videoStream, audioItag: audioStream};
+
+    // Set up progressive file writing if paths are provided.
+    if (videoFilePath != null) {
+      videoStream.fileSink =
+          File(videoFilePath).openWrite();
+    }
+    if (audioFilePath != null) {
+      audioStream.fileSink =
+          File(audioFilePath).openWrite();
+    }
+    var readyFired = false;
 
     // header_id -> itag mapping from MEDIA_HEADER parts.
     final headerToItag = <int, int>{};
@@ -183,13 +229,9 @@ class SabrClient {
             if (itag != null) {
               final s = streams[itag]!;
               final payload = part.data.sublist(1);
-              if (headerIsInit[headerId] == true) {
-                s.initSegment.add(payload);
-                s.initReceived = true;
-              } else {
-                s.media.add(payload);
-                downloaded += payload.length;
-              }
+              final isInit = headerIsInit[headerId] == true;
+              s.addMedia(payload, isInit: isInit);
+              if (!isInit) downloaded += payload.length;
               final seq = headerSeq[headerId];
               if (seq != null && seq > s.maxSequenceNumber) {
                 s.maxSequenceNumber = seq;
@@ -225,6 +267,19 @@ class SabrClient {
       onProgress?.call(downloaded, null);
       rn++;
 
+      // Fire onReadyToPlay once we have enough video data for mpv
+      // to start (init segment + threshold bytes).
+      if (!readyFired &&
+          onReadyToPlay != null &&
+          videoStream.initReceived &&
+          videoStream.media.length >= readyThresholdBytes) {
+        readyFired = true;
+        // Flush files so mpv sees the data.
+        await videoStream.fileSink?.flush();
+        await audioStream.fileSink?.flush();
+        onReadyToPlay();
+      }
+
       // Stop if no new data for 10 consecutive requests.
       if (downloaded == lastDownloaded) {
         noProgressCount++;
@@ -242,6 +297,9 @@ class SabrClient {
       throw StateError(
           'SABR download incomplete: only ${videoBytes}v/${audioBytes}a bytes after $rn requests');
     }
+    // Close file sinks.
+    await videoStream.closeFile();
+    await audioStream.closeFile();
     return SabrResult(video: videoStream, audio: audioStream);
   }
 
