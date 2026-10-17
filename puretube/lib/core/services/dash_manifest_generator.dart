@@ -37,35 +37,22 @@ class DashManifestGenerator {
     final vUrl = _xmlEscape(videoUrl);
     final aUrl = _xmlEscape(audioUrl);
 
+    // Progressive DASH: simple BaseURL, no SegmentBase.
+    // This is how NewPipe wraps progressive streams.
     return '''<?xml version="1.0" encoding="UTF-8"?>
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011"
-     profiles="urn:mpeg:dash:profile:isoff-on-demand:2011"
      type="static"
      mediaPresentationDuration="PT${durationSec.toStringAsFixed(2)}S"
      minBufferTime="PT1.5S">
-  <Period duration="PT${durationSec.toStringAsFixed(2)}S">
-    <AdaptationSet mimeType="$videoContainer"
-                   codecs="$videoCodec"
-                   contentType="video">
-      <Representation id="v1"
-                      bandwidth="$videoBitrate"
-                      width="$videoWidth"
-                      height="$videoHeight">
+  <Period>
+    <AdaptationSet mimeType="$videoContainer" contentType="video">
+      <Representation id="v1" bandwidth="$videoBitrate" width="$videoWidth" height="$videoHeight" codecs="$videoCodec">
         <BaseURL>$vUrl</BaseURL>
-        <SegmentBase indexRange="0-0">
-          <Initialization range="0-0"/>
-        </SegmentBase>
       </Representation>
     </AdaptationSet>
-    <AdaptationSet mimeType="$audioContainer"
-                   codecs="$audioCodec"
-                   contentType="audio">
-      <Representation id="a1"
-                      bandwidth="$audioBitrate">
+    <AdaptationSet mimeType="$audioContainer" contentType="audio">
+      <Representation id="a1" bandwidth="$audioBitrate" codecs="$audioCodec">
         <BaseURL>$aUrl</BaseURL>
-        <SegmentBase indexRange="0-0">
-          <Initialization range="0-0"/>
-        </SegmentBase>
       </Representation>
     </AdaptationSet>
   </Period>
