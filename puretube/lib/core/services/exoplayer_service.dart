@@ -24,6 +24,23 @@ class ExoPlayerService {
   bool get isInitialized =>
       _controller?.value.isInitialized ?? false;
 
+  /// Plays a muxed (progressive) stream directly — like 360p.
+  ///
+  /// NewPipe plays muxed URLs directly, no manifest needed.
+  Future<void> playMuxed(String url) async {
+    await dispose();
+
+    // Route through proxy for reliability.
+    await _proxy.start();
+    final proxied = _proxy.proxyUrl(url);
+
+    _controller = VideoPlayerController.networkUrl(
+      Uri.parse(proxied),
+    );
+    await _controller!.initialize();
+    await _controller!.play();
+  }
+
   /// Plays video+audio streams via a generated DASH manifest.
   ///
   /// Like 360p (muxed single file), the DASH video+audio are
