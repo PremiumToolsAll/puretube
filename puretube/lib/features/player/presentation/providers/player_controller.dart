@@ -1323,14 +1323,11 @@ class PlayerController extends Notifier<PlayerUiState>
           }
         }
         if (outcome != _DashLoadOutcome.loaded) {
-          // DASH failed — try SABR (YouTube's native protocol) before
-          // rolling back. SABR streams directly from YouTube's CDN.
-          final sabrOk = await _trySabrFallback(
-              videoId, target, token);
-          if (!sabrOk) {
-            await _rollbackQuality(
-                previous: previous, failed: target);
-          }
+          // DASH failed — SABR fallback disabled (was not working
+          // reliably on device). Roll back to previous quality.
+          // TODO: Re-enable SABR once the buffering issue is fixed.
+          await _rollbackQuality(
+              previous: previous, failed: target);
           return;
         }
       } finally {
