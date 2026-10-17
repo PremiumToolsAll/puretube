@@ -92,6 +92,9 @@ class YoutubeExtractorService {
   /// browser), so YouTube's bot protection doesn't flag it.
   final YoutubeSessionService _session;
 
+  /// Public access to the session service (for SABR fallback).
+  YoutubeSessionService get session => _session;
+
   /// Piped proxy fallback used when YouTube rate-limits the device IP.
   final PipedService _piped;
 
