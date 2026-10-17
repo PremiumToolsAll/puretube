@@ -407,7 +407,10 @@ class YoutubeExtractorService {
         for (final v in videoOnly) {
           final h = v.videoResolution.height;
           final fps = v.framerate.framesPerSecond.round();
-          if (h <= 0 || !seen.add('$h@$fps')) continue;
+          final codec = _shortCodec(v.videoCodec);
+          // Keep every codec variant as a separate entry for explicit
+          // format choice in the quality menu.
+          if (h <= 0 || !seen.add('$h@$fps-$codec')) continue;
           final fpsSuffix = fps > 30 ? '$fps' : '';
           final resLabel = h >= 2160
               ? '2160p$fpsSuffix (2K)'
