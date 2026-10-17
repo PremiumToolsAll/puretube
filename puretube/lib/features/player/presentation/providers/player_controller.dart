@@ -18,6 +18,7 @@ import '../../../../core/services/watch_category_tracker.dart';
 import '../../../../core/services/youtube_extractor_service.dart';
 import '../../../../core/services/sabr/sabr_http_server.dart';
 import '../../../../core/services/youtube_proxy_server.dart';
+import '../../../../core/services/exoplayer_service.dart';
 import '../../../settings/presentation/providers/quality_providers.dart';
 import 'popup_visibility.dart';
 import '../../data/services/audio_player_handler.dart';
@@ -54,6 +55,10 @@ class PlayerUiState {
   /// next Up Next video (both video and audio mode).
   final bool autoplay;
 
+  /// True when ExoPlayer (not mpv) is the active playback engine.
+  /// Used for DASH high-quality playback (NewPipe-style).
+  final bool useExoPlayer;
+
   const PlayerUiState({
     this.status = PlayerStatus.idle,
     this.videoId,
@@ -78,6 +83,7 @@ class PlayerUiState {
     this.lyricsResult,
     this.lyricsLoading = false,
     this.autoplay = true,
+    this.useExoPlayer = false,
   });
 
   PlayerUiState copyWith({
@@ -107,6 +113,7 @@ class PlayerUiState {
     bool? lyricsLoading,
     bool clearLyrics = false,
     bool? autoplay,
+    bool? useExoPlayer,
   }) {
     return PlayerUiState(
       status: status ?? this.status,
@@ -143,6 +150,7 @@ class PlayerUiState {
           clearLyrics ? null : (lyricsResult ?? this.lyricsResult),
       lyricsLoading: lyricsLoading ?? this.lyricsLoading,
       autoplay: autoplay ?? this.autoplay,
+      useExoPlayer: useExoPlayer ?? this.useExoPlayer,
     );
   }
 }
@@ -211,6 +219,14 @@ class PlayerController extends Notifier<PlayerUiState>
       _ytProxyStarted = true;
     }
   }
+
+  /// ExoPlayer for DASH high-quality playback (NewPipe-style).
+  /// When active, the UI renders ExoPlayer's output instead of mpv.
+  final ExoPlayerService _exoPlayer = ExoPlayerService();
+
+  /// The active ExoPlayer controller for the UI to render.
+  /// Null when mpv is the active engine.
+  get exoPlayerController => _exoPlayer.controller;
 
   /// Routes a YouTube DASH URL through the local proxy.
   Future<String> _proxied(String youtubeUrl) async {
@@ -720,6 +736,16 @@ class PlayerController extends Notifier<PlayerUiState>
   // ---------------- transport ----------------
 
   Future<void> togglePlayPause() async {
+    if (state.useExoPlayer) {
+      final c = _exoPlayer.controller;
+      if (c == null) return;
+      if (c.value.isPlaying) {
+        await _exoPlayer.pause();
+      } else {
+        await _exoPlayer.resume();
+      }
+      return;
+    }
     if (_handler.player.state.playing) {
       await _handler.pause();
     } else {
@@ -727,9 +753,26 @@ class PlayerController extends Notifier<PlayerUiState>
     }
   }
 
-  Future<void> seekTo(Duration position) => _handler.seek(position);
+  Future<void> seekTo(Duration position) {
+    if (state.useExoPlayer) {
+      return _exoPlayer.seekTo(position);
+    }
+    return _handler.seek(position);
+  }
 
   Future<void> seekBy(Duration offset) async {
+    if (state.useExoPlayer) {
+      final c = _exoPlayer.controller;
+      if (c == null) return;
+      var target = c.value.position + offset;
+      final duration = c.value.duration;
+      if (target < Duration.zero) target = Duration.zero;
+      if (duration > Duration.zero && target > duration) {
+        target = duration;
+      }
+      await _exoPlayer.seekTo(target);
+      return;
+    }
     final player = _handler.player;
     var target = player.state.position + offset;
     final duration = player.state.duration;
@@ -1265,14 +1308,14 @@ class PlayerController extends Notifier<PlayerUiState>
     // loadQualities() are minutes old (signed URLs live ~6h). If they
     // did expire, verification below fails and we refresh+retry once.
     try {
-      // Route DASH through local proxy (NewPipe's rn + range tricks).
-      final playUrl = target.isDash
-          ? await _proxied(target.url)
-          : target.url;
-      final playAudio = target.audioUrl != null && target.isDash
-          ? await _proxied(target.audioUrl!)
-          : target.audioUrl;
-      await _handler.switchStream(playUrl, audioUrl: playAudio);
+      // DASH (1080p+): use ExoPlayer (NewPipe-style) — mpv can't
+      // handle high-quality DASH on this device.
+      if (target.isDash) {
+        await _playDashViaExoPlayer(target, token, videoId);
+        return;
+      }
+      // Muxed (360p/720p): use mpv (existing reliable path).
+      await _handler.switchStream(target.url);
     } catch (_) {
       // Switch itself threw (e.g. invalid URL): roll back.
       if (token != _qualitySwitchToken || state.videoId != videoId) {
@@ -1534,6 +1577,60 @@ class PlayerController extends Notifier<PlayerUiState>
     } catch (e) {
       // SABR failed; caller will roll back.
       return false;
+    }
+  }
+
+  /// Plays DASH quality via ExoPlayer (NewPipe-style).
+  ///
+  /// Called from setQuality when target.isDash. Sets useExoPlayer=true
+  /// so the UI renders ExoPlayer's output. Stops mpv to avoid conflicts.
+  Future<void> _playDashViaExoPlayer(
+    MuxedQuality target,
+    int token,
+    String videoId,
+  ) async {
+    try {
+      // Stop mpv — ExoPlayer takes over.
+      await _handler.stop();
+
+      // Get stream metadata for the manifest.
+      final durationSec =
+          state.video?.duration?.inSeconds.toDouble() ?? 3600.0;
+
+      // Play via ExoPlayer (proxied URLs for reliability).
+      await _exoPlayer.play(
+        videoUrl: target.url,
+        audioUrl: target.audioUrl!,
+        videoMime: 'video/mp4; codecs="avc1.640028"',
+        audioMime: 'audio/mp4; codecs="mp4a.40.2"',
+        width: 1920,
+        height: target.height,
+        videoBitrate: (target.bitrateKbps * 1000).toInt(),
+        audioBitrate: 128000,
+        durationSec: durationSec,
+      );
+
+      if (token != _qualitySwitchToken || state.videoId != videoId) {
+        return;
+      }
+
+      // Switch UI to ExoPlayer mode.
+      state = state.copyWith(
+        currentQuality: target,
+        useExoPlayer: true,
+        status: PlayerStatus.ready,
+      );
+    } catch (e) {
+      // ExoPlayer failed: roll back to previous quality.
+      if (token != _qualitySwitchToken || state.videoId != videoId) {
+        return;
+      }
+      state = state.copyWith(
+        useExoPlayer: false,
+        errorMessage: 'Failed to play ${target.label}: $e',
+      );
+      await _rollbackQuality(
+          previous: state.currentQuality, failed: target);
     }
   }
 
