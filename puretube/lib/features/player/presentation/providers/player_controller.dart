@@ -1335,24 +1335,21 @@ class PlayerController extends Notifier<PlayerUiState>
     const timeout = Duration(seconds: 8);
     const pollInterval = Duration(milliseconds: 500);
     final deadline = DateTime.now().add(timeout);
-    var hadError = false;
-    final errorSub =
-        _handler.player.stream.error.listen((_) => hadError = true);
-    try {
-      while (DateTime.now().isBefore(deadline)) {
-        // Bail early if superseded or an error fired. (Do NOT compare
-        // state.currentQuality here: it still holds the OLD quality
-        // until verification succeeds.)
-        if (token != _qualitySwitchToken) return _DashLoadOutcome.timeout;
-        if (hadError) return _DashLoadOutcome.error;
-        final duration = _handler.player.state.duration;
-        if (duration > Duration.zero) return _DashLoadOutcome.loaded;
-        await Future.delayed(pollInterval);
-      }
-      return _DashLoadOutcome.timeout;
-    } finally {
-      await errorSub.cancel();
+    // NOTE: Do NOT subscribe to _handler.player.stream.error here —
+    // it's a single-subscription stream already listened by _errorSub
+    // (line 304). A second listen throws "Bad state: Stream was
+    // already listened to". Just poll duration; the global
+    // _onPlayerError handler catches failures separately.
+    while (DateTime.now().isBefore(deadline)) {
+      // Bail early if superseded. (Do NOT compare
+      // state.currentQuality here: it still holds the OLD quality
+      // until verification succeeds.)
+      if (token != _qualitySwitchToken) return _DashLoadOutcome.timeout;
+      final duration = _handler.player.state.duration;
+      if (duration > Duration.zero) return _DashLoadOutcome.loaded;
+      await Future.delayed(pollInterval);
     }
+    return _DashLoadOutcome.timeout;
   }
 
   /// Tries SABR (YouTube's native streaming protocol) when DASH fails.
