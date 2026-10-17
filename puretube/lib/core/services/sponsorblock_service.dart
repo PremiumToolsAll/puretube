@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SponsorSegment {
   final double start; // seconds
@@ -26,10 +27,24 @@ class SponsorBlockService {
 
   static const _base = 'https://sponsor.ajay.app';
 
+  /// All known SponsorBlock categories with display names.
+  /// API names per https://wiki.sponsor.ajay.app/w/Segment_Categories
+  static const allCategories = <String, String>{
+    'sponsor': 'Sponsor',
+    'intro': 'Intro animation',
+    'outro': 'Endcards/credits',
+    'interaction': 'Interaction reminder',
+    'selfpromo': 'Self promotion',
+    'music_offtopic': 'Non-music section',
+    'preview': 'Preview/recap',
+    'filler': 'Off-topic (filler)',
+    'poi_highlight': 'Interesting point',
+  };
+
   static const defaultCategories = [
     'sponsor',
     'selfpromo',
-    'interaction_reminder',
+    'interaction',
     'intro',
     'outro',
     'music_offtopic',
@@ -44,10 +59,19 @@ class SponsorBlockService {
     String videoId, {
     List<String>? categories,
   }) async {
-    final cats =
-        (categories ?? defaultCategories).map((c) => '"$c"').join(',');
+    // When no explicit categories are given, use the user's enabled
+    // categories from Settings (falls back to defaults).
+    List<String> cats = categories ?? defaultCategories;
+    if (categories == null) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final saved = prefs.getStringList('sponsorblock_categories');
+        if (saved != null && saved.isNotEmpty) cats = saved;
+      } catch (_) {}
+    }
+    final catStr = cats.map((c) => '"$c"').join(',');
     final uri = Uri.parse(
-        '$_base/api/skipSegments?videoID=$videoId&categories=[$cats]');
+        '$_base/api/skipSegments?videoID=$videoId&categories=[$catStr]');
     try {
       final res =
           await _client.get(uri).timeout(const Duration(seconds: 12));
