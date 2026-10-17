@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/utils/format.dart';
 import '../../../player/domain/entities/playback_models.dart';
 import '../../../player/presentation/screens/player_screen.dart';
-import '../../../player/presentation/screens/webview_player_screen.dart';
+import '../../../player/presentation/screens/hidden_webview_player.dart';
 
 class VideoCard extends StatelessWidget {
   final VideoDetails video;
@@ -22,7 +22,7 @@ class VideoCard extends StatelessWidget {
       // (browser engine — all qualities work like Chrome).
       onLongPress: () => Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => WebViewPlayerScreen(
+          builder: (_) => HiddenWebViewPlayer(
             videoId: video.id,
             title: video.title,
           ),
