@@ -184,6 +184,17 @@ class PlayerController extends Notifier<PlayerUiState>
       ref.read(extractorProvider);
   SponsorBlockService get _sponsorBlock =>
       ref.read(sponsorBlockProvider);
+
+  /// Reads the "Prefer AVC" setting (default true).
+  bool _preferAvc = true;
+
+  Future<void> _loadPreferAvc() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final v = prefs.getBool('prefer_avc');
+      if (v != null) _preferAvc = v;
+    } catch (_) {}
+  }
   PipService get _pip => ref.read(pipServiceProvider);
 
   StreamSubscription<Duration>? _positionSub;
@@ -306,6 +317,8 @@ class PlayerController extends Notifier<PlayerUiState>
     };
     // Sync saved sponsor-skip preference (default ON).
     unawaited(_loadSavedSkipSponsors());
+    // Load the Prefer AVC setting (default ON).
+    unawaited(_loadPreferAvc());
     // Restore the persisted audio-only preference (default OFF).
     unawaited(_loadPlayerPrefs());
     // Restore a persisted sleep timer (e.g. after backgrounding).
@@ -1087,24 +1100,26 @@ class PlayerController extends Notifier<PlayerUiState>
 
   /// Best DASH option at-or-below [targetHeight].
   ///
-  /// AVC (H.264) is strongly preferred — it's proven playable on this
-  /// device. First pass picks the highest AVC at-or-below target; only
-  /// if no AVC exists at all does it fall back to best-height VP9/AV1.
-  /// This avoids picking an unplayable 1080p VP9 over a playable 720p
-  /// AVC just because the height is higher.
+  /// When "Prefer AVC" is ON (default): AVC (H.264) is strongly
+  /// preferred — it's the most compatible codec. First pass picks the
+  /// highest AVC at-or-below target; only if no AVC exists at all does
+  /// it fall back to best-height VP9/AV1.
+  /// When OFF: picks by height first, then codec rank, then fps.
   MuxedQuality? _pickDashOption(
       List<MuxedQuality> options, int targetHeight) {
-    MuxedQuality? bestAvc;
-    for (final q in options) {
-      if (!q.isDash || q.height > targetHeight) continue;
-      if (!_isAvc(q.codec)) continue;
-      if (bestAvc == null ||
-          q.height > bestAvc.height ||
-          (q.height == bestAvc.height && q.fps > bestAvc.fps)) {
-        bestAvc = q;
+    if (_preferAvc) {
+      MuxedQuality? bestAvc;
+      for (final q in options) {
+        if (!q.isDash || q.height > targetHeight) continue;
+        if (!_isAvc(q.codec)) continue;
+        if (bestAvc == null ||
+            q.height > bestAvc.height ||
+            (q.height == bestAvc.height && q.fps > bestAvc.fps)) {
+          bestAvc = q;
+        }
       }
+      if (bestAvc != null) return bestAvc;
     }
-    if (bestAvc != null) return bestAvc;
 
     MuxedQuality? best;
     for (final q in options) {
