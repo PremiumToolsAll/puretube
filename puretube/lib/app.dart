@@ -30,6 +30,8 @@ class _PureTubeAppState extends ConsumerState<PureTubeApp> {
     loadSavedPreloadCount(ref);
     loadSavedQualitySettings(ref);
     loadSavedSkipSponsors(ref);
+    loadSavedSponsorBlockCategories(ref);
+    loadSavedPreferAvc(ref);
     loadSavedThemeOption(ref);
     loadSavedGeminiApiKey(ref);
   }
