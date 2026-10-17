@@ -17,6 +17,7 @@ import '../../../../core/services/lyrics_service.dart';
 import '../../../../core/services/watch_category_tracker.dart';
 import '../../../../core/services/youtube_extractor_service.dart';
 import '../../../../core/services/sabr/sabr_http_server.dart';
+import '../../../../core/services/youtube_proxy_server.dart';
 import '../../../settings/presentation/providers/quality_providers.dart';
 import 'popup_visibility.dart';
 import '../../data/services/audio_player_handler.dart';
@@ -198,6 +199,23 @@ class PlayerController extends Notifier<PlayerUiState>
       await _sabrServer.start();
       _sabrServerStarted = true;
     }
+  }
+
+  /// YouTube proxy applying NewPipe's tricks (rn + range param).
+  final YoutubeProxyServer _ytProxy = YoutubeProxyServer();
+  bool _ytProxyStarted = false;
+
+  Future<void> _ensureYtProxy() async {
+    if (!_ytProxyStarted) {
+      await _ytProxy.start();
+      _ytProxyStarted = true;
+    }
+  }
+
+  /// Routes a YouTube DASH URL through the local proxy.
+  Future<String> _proxied(String youtubeUrl) async {
+    await _ensureYtProxy();
+    return _ytProxy.proxyUrl(youtubeUrl);
   }
 
   Future<void> _loadPreferAvc() async {
@@ -1247,8 +1265,14 @@ class PlayerController extends Notifier<PlayerUiState>
     // loadQualities() are minutes old (signed URLs live ~6h). If they
     // did expire, verification below fails and we refresh+retry once.
     try {
-      await _handler.switchStream(target.url,
-          audioUrl: target.audioUrl);
+      // Route DASH through local proxy (NewPipe's rn + range tricks).
+      final playUrl = target.isDash
+          ? await _proxied(target.url)
+          : target.url;
+      final playAudio = target.audioUrl != null && target.isDash
+          ? await _proxied(target.audioUrl!)
+          : target.audioUrl;
+      await _handler.switchStream(playUrl, audioUrl: playAudio);
     } catch (_) {
       // Switch itself threw (e.g. invalid URL): roll back.
       if (token != _qualitySwitchToken || state.videoId != videoId) {
