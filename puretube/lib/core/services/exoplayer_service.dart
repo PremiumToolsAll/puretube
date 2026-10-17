@@ -4,21 +4,31 @@ import 'dart:io';
 import 'package:video_player/video_player.dart';
 
 import 'dash_manifest_generator.dart';
+import 'youtube_proxy_server.dart';
 
 /// ExoPlayer-based video service (NewPipe-style).
 ///
 /// Generates DASH manifests from stream URLs and plays them via
 /// ExoPlayer (through the video_player plugin). This is how NewPipe
 /// plays high-quality YouTube videos.
+///
+/// URLs are routed through YoutubeProxyServer (NewPipe trick:
+/// Range header → &range= param, incrementing &rn) to avoid
+/// throttling, just like 360p plays reliably.
 class ExoPlayerService {
   VideoPlayerController? _controller;
   HttpServer? _manifestServer;
+  final YoutubeProxyServer _proxy = YoutubeProxyServer();
 
   VideoPlayerController? get controller => _controller;
   bool get isInitialized =>
       _controller?.value.isInitialized ?? false;
 
   /// Plays video+audio streams via a generated DASH manifest.
+  ///
+  /// Like 360p (muxed single file), the DASH video+audio are
+  /// served through the local proxy so ExoPlayer gets a reliable
+  /// stream.
   Future<void> play({
     required String videoUrl,
     required String audioUrl,
@@ -32,10 +42,15 @@ class ExoPlayerService {
   }) async {
     await dispose();
 
-    // Generate DASH manifest.
+    // Route through proxy (NewPipe trick) for reliability.
+    await _proxy.start();
+    final proxiedVideo = _proxy.proxyUrl(videoUrl);
+    final proxiedAudio = _proxy.proxyUrl(audioUrl);
+
+    // Generate DASH manifest with proxied URLs.
     final manifest = DashManifestGenerator.generate(
-      videoUrl: videoUrl,
-      audioUrl: audioUrl,
+      videoUrl: proxiedVideo,
+      audioUrl: proxiedAudio,
       videoMime: videoMime,
       audioMime: audioMime,
       videoWidth: width,
@@ -84,5 +99,6 @@ class ExoPlayerService {
     _controller = null;
     await _manifestServer?.close(force: true);
     _manifestServer = null;
+    _proxy.clear();
   }
 }
