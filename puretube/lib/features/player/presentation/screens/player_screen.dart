@@ -1000,10 +1000,39 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   /// Premium bottom-sheet quality picker (VLC/Seal style): each row shows
   /// resolution + fps + bitrate + codec with a radio indicator, DASH
   /// streams get an accent badge.
+  /// Groups qualities by height (YouTube-style: one entry per quality).
+  /// For each height, picks the best variant (AVC first, then highest bitrate).
+  List<MuxedQuality> _groupQualitiesByHeight(
+      List<MuxedQuality> qualities) {
+    final Map<int, MuxedQuality> bestByHeight = {};
+    for (final q in qualities) {
+      final existing = bestByHeight[q.height];
+      if (existing == null) {
+        bestByHeight[q.height] = q;
+      } else {
+        // Prefer AVC, then higher bitrate.
+        final qIsAvc =
+            q.codec.toLowerCase().contains('avc');
+        final eIsAvc =
+            existing.codec.toLowerCase().contains('avc');
+        if (qIsAvc && !eIsAvc) {
+          bestByHeight[q.height] = q;
+        } else if (qIsAvc == eIsAvc &&
+            q.bitrateKbps > existing.bitrateKbps) {
+          bestByHeight[q.height] = q;
+        }
+      }
+    }
+    final grouped = bestByHeight.values.toList();
+    grouped.sort((a, b) => b.height.compareTo(a.height));
+    return grouped;
+  }
+
   void _showQualityMenu(BuildContext buttonContext) {
     final notifier = ref.read(playerControllerProvider.notifier);
     final uiState = ref.read(playerControllerProvider);
-    final qualities = uiState.availableQualities;
+    final qualities =
+        _groupQualitiesByHeight(uiState.availableQualities);
     if (qualities.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1057,12 +1086,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 itemCount: qualities.length,
                 itemBuilder: (ctx, i) {
                   final q = qualities[i];
+                  // YouTube-style: selected if same height.
                   final selected = current != null &&
-                      current.height == q.height &&
-                      current.isDash == q.isDash &&
-                      current.fps == q.fps &&
-                      current.codec == q.codec;
-                  final detail = q.detailLine;
+                      current.height == q.height;
                   return InkWell(
                     onTap: () {
                       Navigator.pop(ctx);
@@ -1096,78 +1122,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                           ),
                           const SizedBox(width: 16),
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Flexible(
-                                      child: Text(q.resolutionLabel,
-                                          style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 16,
-                                              fontWeight:
-                                                  FontWeight.w600)),
-                                    ),
-                                    if (q.isDash) ...[
-                                      const SizedBox(width: 8),
-                                      Container(
-                                        padding: const EdgeInsets
-                                            .symmetric(
-                                                horizontal: 8,
-                                                vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: _accent.withValues(
-                                              alpha: 0.2),
-                                          borderRadius:
-                                              BorderRadius.circular(
-                                                  4),
-                                        ),
-                                        child: Text('DASH',
-                                            style: TextStyle(
-                                                color: _accent,
-                                                fontSize: 11,
-                                                fontWeight:
-                                                    FontWeight.bold)),
-                                      ),
-                                    ],
-                                    if (q.isHdr) ...[
-                                      const SizedBox(width: 8),
-                                      Container(
-                                        padding: const EdgeInsets
-                                            .symmetric(
-                                                horizontal: 8,
-                                                vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: Colors.purple
-                                              .withValues(
-                                                  alpha: 0.25),
-                                          borderRadius:
-                                              BorderRadius.circular(
-                                                  4),
-                                        ),
-                                        child: const Text('HDR',
-                                            style: TextStyle(
-                                                color: Colors
-                                                    .purpleAccent,
-                                                fontSize: 11,
-                                                fontWeight:
-                                                    FontWeight.bold)),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                                if (detail.isNotEmpty)
-                                  Padding(
-                                    padding:
-                                        const EdgeInsets.only(top: 2),
-                                    child: Text(detail,
-                                        style: const TextStyle(
-                                            color: Colors.grey,
-                                            fontSize: 13)),
-                                  ),
-                              ],
+                            // YouTube-style: just "1080p", "720p", etc.
+                            child: Text(
+                              q.fps >= 50
+                                  ? '${q.height}p${q.fps}'
+                                  : '${q.height}p',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600),
                             ),
                           ),
                         ],
