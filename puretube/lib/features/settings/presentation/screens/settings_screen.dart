@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../library/presentation/providers/library_providers.dart';
 import '../../../player/presentation/providers/player_controller.dart';
+import '../../../../core/services/sponsorblock_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/theme_provider.dart';
 import '../../../../main.dart';
@@ -96,6 +97,60 @@ Future<void> savePreloadCount(int count) async {
 
 /// Skip sponsored segments (SponsorBlock). Default ON.
 final skipSponsorsProvider = StateProvider<bool>((ref) => true);
+
+/// Enabled SponsorBlock categories. Default = sponsor, selfpromo,
+/// interaction, intro, outro, music_offtopic.
+final sponsorBlockCategoriesProvider =
+    StateProvider<Set<String>>((ref) => {
+          'sponsor',
+          'selfpromo',
+          'interaction',
+          'intro',
+          'outro',
+          'music_offtopic',
+        });
+
+/// Loads the saved SponsorBlock categories at startup.
+Future<void> loadSavedSponsorBlockCategories(WidgetRef ref) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList('sponsorblock_categories');
+    if (list != null) {
+      ref.read(sponsorBlockCategoriesProvider.notifier).state =
+          list.toSet();
+    }
+  } catch (_) {}
+}
+
+Future<void> saveSponsorBlockCategories(Set<String> value) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+        'sponsorblock_categories', value.toList());
+  } catch (_) {}
+}
+
+/// Prefer AVC (H.264) over VP9/AV1 for DASH. Default ON.
+/// Matches LibreTube's "prefer avc over vp9" — max 1080p for AVC.
+final preferAvcProvider = StateProvider<bool>((ref) => true);
+
+/// Loads the saved prefer-AVC preference at startup.
+Future<void> loadSavedPreferAvc(WidgetRef ref) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getBool('prefer_avc');
+    if (v != null) {
+      ref.read(preferAvcProvider.notifier).state = v;
+    }
+  } catch (_) {}
+}
+
+Future<void> savePreferAvc(bool value) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('prefer_avc', value);
+  } catch (_) {}
+}
 
 /// Loads the saved sponsor-skip preference at startup.
 Future<void> loadSavedSkipSponsors(WidgetRef ref) async {
@@ -775,6 +830,32 @@ class SettingsScreen extends ConsumerWidget {
                 );
               },
             ),
+            Consumer(
+              builder: (context, ref, _) {
+                final preferAvc =
+                    ref.watch(preferAvcProvider);
+                return SwitchListTile(
+                  secondary: Icon(Icons.video_settings_outlined,
+                      color: accentLight),
+                  title: const Text('Prefer AVC (H.264)',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: const Text(
+                      'Use H.264 over VP9/AV1 when available. '
+                      'Max 1080p for AVC.',
+                      style: TextStyle(color: Colors.grey)),
+                  value: preferAvc,
+                  activeThumbColor: accent,
+                  activeTrackColor:
+                      accent.withValues(alpha: 0.35),
+                  onChanged: (v) async {
+                    ref
+                        .read(preferAvcProvider.notifier)
+                        .state = v;
+                    await savePreferAvc(v);
+                  },
+                );
+              },
+            ),
           ]),
           _sectionHeader(context, 'General'),
           _settingsCard(context, children: [
@@ -862,6 +943,53 @@ class SettingsScreen extends ConsumerWidget {
                           .toggleSkipSponsors(v);
                     } catch (_) {}
                   },
+                );
+              },
+            ),
+            Consumer(
+              builder: (context, ref, _) {
+                final enabled = ref
+                    .watch(sponsorBlockCategoriesProvider);
+                return ExpansionTile(
+                  leading: Icon(Icons.category_outlined,
+                      color: accentLight),
+                  title: const Text('SponsorBlock categories',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: Text(
+                      '${enabled.length} categories enabled',
+                      style:
+                          const TextStyle(color: Colors.grey)),
+                  iconColor: Colors.grey,
+                  collapsedIconColor: Colors.grey,
+                  children: [
+                    for (final entry
+                        in SponsorBlockService
+                            .allCategories.entries)
+                      CheckboxListTile(
+                        title: Text(entry.value,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14)),
+                        value: enabled.contains(entry.key),
+                        activeColor: accent,
+                        onChanged: (v) async {
+                          final next =
+                              Set<String>.from(enabled);
+                          if (v == true) {
+                            next.add(entry.key);
+                          } else {
+                            next.remove(entry.key);
+                          }
+                          ref
+                              .read(
+                                  sponsorBlockCategoriesProvider
+                                      .notifier)
+                              .state = next;
+                          await saveSponsorBlockCategories(
+                              next);
+                        },
+                      ),
+                  ],
                 );
               },
             ),
