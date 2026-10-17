@@ -49,3 +49,9 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Native HQ player (ExoPlayer) for 1080p+ DASH.
+    implementation("androidx.media3:media3-exoplayer:1.6.1")
+    implementation("androidx.media3:media3-exoplayer-dash:1.6.1")
+}
