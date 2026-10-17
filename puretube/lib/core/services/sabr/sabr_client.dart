@@ -40,8 +40,8 @@ class SabrFormatStream {
     if (isInit) {
       initSegment.add(payload);
       initReceived = true;
-      // Write init to file first.
-      fileSink?.add(initSegment.toBytes());
+      // Write only this payload (not the accumulated buffer).
+      fileSink?.add(payload);
       _initWritten = true;
     } else {
       // Ensure init is written before media.
