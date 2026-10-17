@@ -1419,17 +1419,42 @@ class PlayerController extends Notifier<PlayerUiState>
         return false;
       }
 
-      // Download via SABR.
+      // True streaming via SABR: start mpv as soon as enough data
+      // is buffered, while the download continues in the background.
+      var started = false;
       final paths =
           await _extractor.session.downloadViaSabr(
         videoId: videoId,
         videoItag: videoFormat['itag'] as int,
         audioItag: audioFormat['itag'] as int,
         onProgress: (d, _) {
-          if (token == _qualitySwitchToken) {
+          if (token == _qualitySwitchToken && !started) {
             state = state.copyWith(
                 errorMessage:
-                    'SABR: ${d ~/ 1024} KB downloaded...');
+                    'SABR: ${d ~/ 1024} KB buffered...');
+          }
+        },
+        onReadyToPlay: (videoPath, audioPath) async {
+          if (token != _qualitySwitchToken ||
+              state.videoId != videoId ||
+              started) {
+            return;
+          }
+          started = true;
+          try {
+            // Play the growing files via mpv.
+            await _handler.switchStream(
+              videoPath,
+              audioUrl: audioPath,
+            );
+            if (token == _qualitySwitchToken) {
+              state = state.copyWith(
+                currentQuality: target,
+                errorMessage: null,
+              );
+            }
+          } catch (_) {
+            // mpv failed; the download continues, caller handles.
           }
         },
       );
@@ -1439,15 +1464,18 @@ class PlayerController extends Notifier<PlayerUiState>
         return false;
       }
 
-      // Play the downloaded files via mpv.
-      await _handler.switchStream(
-        paths['videoPath']!,
-        audioUrl: paths['audioPath'],
-      );
-      state = state.copyWith(
-        currentQuality: target,
-        errorMessage: null,
-      );
+      // If onReadyToPlay already started playback, we're done.
+      // Otherwise (download completed without early start), play now.
+      if (!started) {
+        await _handler.switchStream(
+          paths['videoPath']!,
+          audioUrl: paths['audioPath'],
+        );
+        state = state.copyWith(
+          currentQuality: target,
+          errorMessage: null,
+        );
+      }
       return true;
     } catch (e) {
       // SABR failed; caller will roll back.
