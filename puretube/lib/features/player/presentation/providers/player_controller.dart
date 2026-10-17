@@ -1287,7 +1287,14 @@ class PlayerController extends Notifier<PlayerUiState>
           }
         }
         if (outcome != _DashLoadOutcome.loaded) {
-          await _rollbackQuality(previous: previous, failed: target);
+          // DASH failed — try SABR (YouTube's native protocol) before
+          // rolling back. SABR streams directly from YouTube's CDN.
+          final sabrOk = await _trySabrFallback(
+              videoId, target, token);
+          if (!sabrOk) {
+            await _rollbackQuality(
+                previous: previous, failed: target);
+          }
           return;
         }
       } finally {
@@ -1343,6 +1350,108 @@ class PlayerController extends Notifier<PlayerUiState>
       return _DashLoadOutcome.timeout;
     } finally {
       await errorSub.cancel();
+    }
+  }
+
+  /// Tries SABR (YouTube's native streaming protocol) when DASH fails.
+  /// Downloads video+audio via SABR and plays the local files.
+  /// Returns true if SABR playback started.
+  Future<bool> _trySabrFallback(
+      String videoId, MuxedQuality target, int token) async {
+    try {
+      state = state.copyWith(
+          errorMessage: 'Trying SABR for ${target.resolutionLabel}...');
+      // Get SABR info to find matching itags.
+      final sabrInfo =
+          await _extractor.session.getSabrInfo(videoId);
+      final formats =
+          sabrInfo['formats'] as List<Map<String, dynamic>>;
+
+      // Find video format matching target height (prefer same codec).
+      Map<String, dynamic>? videoFormat;
+      for (final f in formats) {
+        if (f['isAudio'] as bool) continue;
+        if ((f['height'] as int) != target.height) continue;
+        if (videoFormat == null) {
+          videoFormat = f;
+        } else {
+          // Prefer AVC if target is AVC.
+          final targetIsAvc = target.codec.toLowerCase().contains('avc');
+          final fIsAvc = (f['mimeType'] as String)
+              .toLowerCase()
+              .contains('avc');
+          if (targetIsAvc == fIsAvc) {
+            if ((f['bitrate'] as int) >
+                (videoFormat['bitrate'] as int)) {
+              videoFormat = f;
+            }
+          }
+        }
+      }
+      // Fallback: highest bitrate at target height.
+      videoFormat ??= formats
+          .where((f) =>
+              !(f['isAudio'] as bool) &&
+              (f['height'] as int) == target.height)
+          .fold<Map<String, dynamic>?>(null, (best, f) {
+        if (best == null ||
+            (f['bitrate'] as int) > (best['bitrate'] as int)) {
+          return f;
+        }
+        return best;
+      });
+      if (videoFormat == null) return false;
+
+      // Best audio format.
+      final audioFormat = formats
+          .where((f) => f['isAudio'] as bool)
+          .fold<Map<String, dynamic>?>(null, (best, f) {
+        if (best == null ||
+            (f['bitrate'] as int) > (best['bitrate'] as int)) {
+          return f;
+        }
+        return best;
+      });
+      if (audioFormat == null) return false;
+
+      if (token != _qualitySwitchToken ||
+          state.videoId != videoId) {
+        return false;
+      }
+
+      // Download via SABR.
+      final paths =
+          await _extractor.session.downloadViaSabr(
+        videoId: videoId,
+        videoItag: videoFormat['itag'] as int,
+        audioItag: audioFormat['itag'] as int,
+        onProgress: (d, _) {
+          if (token == _qualitySwitchToken) {
+            state = state.copyWith(
+                errorMessage:
+                    'SABR: ${d ~/ 1024} KB downloaded...');
+          }
+        },
+      );
+
+      if (token != _qualitySwitchToken ||
+          state.videoId != videoId) {
+        return false;
+      }
+
+      // Play the downloaded files via mpv.
+      await _handler.switchStream(
+        paths['videoPath']!,
+        audioUrl: paths['audioPath'],
+      );
+      state = state.copyWith(
+        currentQuality: target,
+        errorMessage: null,
+      );
+      return true;
+    } catch (e) {
+      // SABR failed; caller will roll back.
+      return false;
     }
   }
 
