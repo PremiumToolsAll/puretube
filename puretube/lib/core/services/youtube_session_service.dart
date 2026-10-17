@@ -284,7 +284,10 @@ class YoutubeSessionService {
       for (final s in videoOnly) {
         final h =
             _heightOfLabel(s['qualityLabel']?.toString());
-        if (h <= 0 || !seen.add('dash-$h')) continue;
+        final codec = _codecOf(s['mimeType']?.toString());
+        // Keep every codec variant (avc/vp9/av1) as a separate entry
+        // so the quality menu can offer explicit format choice.
+        if (h <= 0 || !seen.add('dash-$h-$codec')) continue;
         options.add(MuxedQuality(
           label: '${h}p',
           height: h,
@@ -296,7 +299,21 @@ class YoutubeSessionService {
       }
     }
 
-    options.sort((a, b) => b.height.compareTo(a.height));
+    // Sort: height desc, then AVC first (recommended), then fps desc.
+    int codecRank(String c) {
+      final lc = c.toLowerCase();
+      if (lc.contains('avc')) return 2;
+      if (lc.contains('vp9')) return 1;
+      return 0;
+    }
+
+    options.sort((a, b) {
+      final h = b.height.compareTo(a.height);
+      if (h != 0) return h;
+      final c = codecRank(b.codec).compareTo(codecRank(a.codec));
+      if (c != 0) return c;
+      return b.fps.compareTo(a.fps);
+    });
     return options;
   }
 
