@@ -16,9 +16,7 @@ import '../../../../core/services/sponsorblock_service.dart';
 import '../../../../core/services/lyrics_service.dart';
 import '../../../../core/services/watch_category_tracker.dart';
 import '../../../../core/services/youtube_extractor_service.dart';
-import '../../../../core/services/sabr/sabr_http_server.dart';
-import '../../../../core/services/youtube_proxy_server.dart';
-import '../../../../core/services/exoplayer_service.dart';
+
 import '../../../settings/presentation/providers/quality_providers.dart';
 import 'popup_visibility.dart';
 import '../../data/services/audio_player_handler.dart';
@@ -55,10 +53,6 @@ class PlayerUiState {
   /// next Up Next video (both video and audio mode).
   final bool autoplay;
 
-  /// True when ExoPlayer (not mpv) is the active playback engine.
-  /// Used for DASH high-quality playback (NewPipe-style).
-  final bool useExoPlayer;
-
   const PlayerUiState({
     this.status = PlayerStatus.idle,
     this.videoId,
@@ -83,7 +77,6 @@ class PlayerUiState {
     this.lyricsResult,
     this.lyricsLoading = false,
     this.autoplay = true,
-    this.useExoPlayer = false,
   });
 
   PlayerUiState copyWith({
@@ -113,7 +106,6 @@ class PlayerUiState {
     bool? lyricsLoading,
     bool clearLyrics = false,
     bool? autoplay,
-    bool? useExoPlayer,
   }) {
     return PlayerUiState(
       status: status ?? this.status,
@@ -150,7 +142,6 @@ class PlayerUiState {
           clearLyrics ? null : (lyricsResult ?? this.lyricsResult),
       lyricsLoading: lyricsLoading ?? this.lyricsLoading,
       autoplay: autoplay ?? this.autoplay,
-      useExoPlayer: useExoPlayer ?? this.useExoPlayer,
     );
   }
 }
@@ -197,42 +188,6 @@ class PlayerController extends Notifier<PlayerUiState>
 
   /// Reads the "Prefer AVC" setting (default true).
   bool _preferAvc = true;
-
-  /// Local HTTP server for serving SABR media to the player.
-  final SabrHttpServer _sabrServer = SabrHttpServer();
-  bool _sabrServerStarted = false;
-
-  Future<void> _ensureSabrServer() async {
-    if (!_sabrServerStarted) {
-      await _sabrServer.start();
-      _sabrServerStarted = true;
-    }
-  }
-
-  /// YouTube proxy applying NewPipe's tricks (rn + range param).
-  final YoutubeProxyServer _ytProxy = YoutubeProxyServer();
-  bool _ytProxyStarted = false;
-
-  Future<void> _ensureYtProxy() async {
-    if (!_ytProxyStarted) {
-      await _ytProxy.start();
-      _ytProxyStarted = true;
-    }
-  }
-
-  /// ExoPlayer for DASH high-quality playback (NewPipe-style).
-  /// When active, the UI renders ExoPlayer's output instead of mpv.
-  final ExoPlayerService _exoPlayer = ExoPlayerService();
-
-  /// The active ExoPlayer controller for the UI to render.
-  /// Null when mpv is the active engine.
-  get exoPlayerController => _exoPlayer.controller;
-
-  /// Routes a YouTube DASH URL through the local proxy.
-  Future<String> _proxied(String youtubeUrl) async {
-    await _ensureYtProxy();
-    return _ytProxy.proxyUrl(youtubeUrl);
-  }
 
   Future<void> _loadPreferAvc() async {
     try {
@@ -736,16 +691,6 @@ class PlayerController extends Notifier<PlayerUiState>
   // ---------------- transport ----------------
 
   Future<void> togglePlayPause() async {
-    if (state.useExoPlayer) {
-      final c = _exoPlayer.controller;
-      if (c == null) return;
-      if (c.value.isPlaying) {
-        await _exoPlayer.pause();
-      } else {
-        await _exoPlayer.resume();
-      }
-      return;
-    }
     if (_handler.player.state.playing) {
       await _handler.pause();
     } else {
@@ -753,26 +698,9 @@ class PlayerController extends Notifier<PlayerUiState>
     }
   }
 
-  Future<void> seekTo(Duration position) {
-    if (state.useExoPlayer) {
-      return _exoPlayer.seekTo(position);
-    }
-    return _handler.seek(position);
-  }
+  Future<void> seekTo(Duration position) => _handler.seek(position);
 
   Future<void> seekBy(Duration offset) async {
-    if (state.useExoPlayer) {
-      final c = _exoPlayer.controller;
-      if (c == null) return;
-      var target = c.value.position + offset;
-      final duration = c.value.duration;
-      if (target < Duration.zero) target = Duration.zero;
-      if (duration > Duration.zero && target > duration) {
-        target = duration;
-      }
-      await _exoPlayer.seekTo(target);
-      return;
-    }
     final player = _handler.player;
     var target = player.state.position + offset;
     final duration = player.state.duration;
@@ -1308,14 +1236,12 @@ class PlayerController extends Notifier<PlayerUiState>
     // loadQualities() are minutes old (signed URLs live ~6h). If they
     // did expire, verification below fails and we refresh+retry once.
     try {
-      // DASH (1080p+): use ExoPlayer (NewPipe-style) — mpv can't
-      // handle high-quality DASH on this device.
-      if (target.isDash) {
-        await _playDashViaExoPlayer(target, token, videoId);
-        return;
-      }
-      // Muxed (360p/720p): use mpv (existing reliable path).
-      await _handler.switchStream(target.url);
+      // Clean mpv path: direct URLs, no proxy, no ExoPlayer.
+      // DASH passes video+audio (mpv audio-file); muxed passes single URL.
+      await _handler.switchStream(
+        target.url,
+        audioUrl: target.isDash ? target.audioUrl : null,
+      );
     } catch (_) {
       // Switch itself threw (e.g. invalid URL): roll back.
       if (token != _qualitySwitchToken || state.videoId != videoId) {
@@ -1432,208 +1358,6 @@ class PlayerController extends Notifier<PlayerUiState>
   /// Tries SABR (YouTube's native streaming protocol) when DASH fails.
   /// Downloads video+audio via SABR and plays the local files.
   /// Returns true if SABR playback started.
-  Future<bool> _trySabrFallback(
-      String videoId, MuxedQuality target, int token) async {
-    try {
-      state = state.copyWith(
-          errorMessage: 'Trying SABR for ${target.resolutionLabel}...');
-      // Get SABR info to find matching itags.
-      final sabrInfo =
-          await _extractor.session.getSabrInfo(videoId);
-      final formats =
-          sabrInfo['formats'] as List<Map<String, dynamic>>;
-
-      // Find video format matching target height (prefer same codec).
-      Map<String, dynamic>? videoFormat;
-      for (final f in formats) {
-        if (f['isAudio'] as bool) continue;
-        if ((f['height'] as int) != target.height) continue;
-        if (videoFormat == null) {
-          videoFormat = f;
-        } else {
-          // Prefer AVC if target is AVC.
-          final targetIsAvc = target.codec.toLowerCase().contains('avc');
-          final fIsAvc = (f['mimeType'] as String)
-              .toLowerCase()
-              .contains('avc');
-          if (targetIsAvc == fIsAvc) {
-            if ((f['bitrate'] as int) >
-                (videoFormat['bitrate'] as int)) {
-              videoFormat = f;
-            }
-          }
-        }
-      }
-      // Fallback: highest bitrate at target height.
-      videoFormat ??= formats
-          .where((f) =>
-              !(f['isAudio'] as bool) &&
-              (f['height'] as int) == target.height)
-          .fold<Map<String, dynamic>?>(null, (best, f) {
-        if (best == null ||
-            (f['bitrate'] as int) > (best['bitrate'] as int)) {
-          return f;
-        }
-        return best;
-      });
-      if (videoFormat == null) return false;
-
-      // Best audio format.
-      final audioFormat = formats
-          .where((f) => f['isAudio'] as bool)
-          .fold<Map<String, dynamic>?>(null, (best, f) {
-        if (best == null ||
-            (f['bitrate'] as int) > (best['bitrate'] as int)) {
-          return f;
-        }
-        return best;
-      });
-      if (audioFormat == null) return false;
-
-      if (token != _qualitySwitchToken ||
-          state.videoId != videoId) {
-        return false;
-      }
-
-      // True streaming via SABR: start mpv as soon as enough data
-      // is buffered, while the download continues in the background.
-      var started = false;
-      final paths =
-          await _extractor.session.downloadViaSabr(
-        videoId: videoId,
-        videoItag: videoFormat['itag'] as int,
-        audioItag: audioFormat['itag'] as int,
-        onProgress: (d, _) {
-          if (token == _qualitySwitchToken && !started) {
-            state = state.copyWith(
-                errorMessage:
-                    'SABR: ${d ~/ 1024} KB buffered...');
-          }
-        },
-        onReadyToPlay: (videoPath, audioPath) async {
-          if (token != _qualitySwitchToken ||
-              state.videoId != videoId ||
-              started) {
-            return;
-          }
-          started = true;
-          try {
-            // Serve via local HTTP for better streaming.
-            await _ensureSabrServer();
-            final urls = _sabrServer.registerFiles(
-              videoId: videoId,
-              videoPath: videoPath,
-              audioPath: audioPath,
-              videoMime:
-                  videoFormat?['mimeType'] as String? ?? 'video/mp4',
-              audioMime:
-                  audioFormat?['mimeType'] as String? ?? 'audio/mp4',
-            );
-            await _handler.switchStream(
-              urls['videoUrl']!,
-              audioUrl: urls['audioUrl']!,
-            );
-            if (token == _qualitySwitchToken) {
-              state = state.copyWith(
-                currentQuality: target,
-                errorMessage: null,
-              );
-            }
-          } catch (_) {
-            // mpv failed; the download continues, caller handles.
-          }
-        },
-      );
-
-      if (token != _qualitySwitchToken ||
-          state.videoId != videoId) {
-        return false;
-      }
-
-      // If onReadyToPlay already started playback, we're done.
-      // Otherwise (download completed without early start), play now
-      // via the local HTTP server (better range-request handling).
-      if (!started) {
-        await _ensureSabrServer();
-        final urls = _sabrServer.registerFiles(
-          videoId: videoId,
-          videoPath: paths['videoPath']!,
-          audioPath: paths['audioPath']!,
-          videoMime:
-              videoFormat['mimeType'] as String? ?? 'video/mp4',
-          audioMime:
-              audioFormat['mimeType'] as String? ?? 'audio/mp4',
-        );
-        await _handler.switchStream(
-          urls['videoUrl']!,
-          audioUrl: urls['audioUrl'],
-        );
-        state = state.copyWith(
-          currentQuality: target,
-          errorMessage: null,
-        );
-      }
-      return true;
-    } catch (e) {
-      // SABR failed; caller will roll back.
-      return false;
-    }
-  }
-
-  /// Plays DASH quality via ExoPlayer (NewPipe-style).
-  ///
-  /// Called from setQuality when target.isDash. Sets useExoPlayer=true
-  /// so the UI renders ExoPlayer's output. Stops mpv to avoid conflicts.
-  Future<void> _playDashViaExoPlayer(
-    MuxedQuality target,
-    int token,
-    String videoId,
-  ) async {
-    try {
-      // Stop mpv — ExoPlayer takes over.
-      await _handler.stop();
-
-      // Get stream metadata for the manifest.
-      final durationSec =
-          state.video?.duration?.inSeconds.toDouble() ?? 3600.0;
-
-      // Play via ExoPlayer (proxied URLs for reliability).
-      await _exoPlayer.play(
-        videoUrl: target.url,
-        audioUrl: target.audioUrl!,
-        videoMime: 'video/mp4; codecs="avc1.640028"',
-        audioMime: 'audio/mp4; codecs="mp4a.40.2"',
-        width: 1920,
-        height: target.height,
-        videoBitrate: (target.bitrateKbps * 1000).toInt(),
-        audioBitrate: 128000,
-        durationSec: durationSec,
-      );
-
-      if (token != _qualitySwitchToken || state.videoId != videoId) {
-        return;
-      }
-
-      // Switch UI to ExoPlayer mode.
-      state = state.copyWith(
-        currentQuality: target,
-        useExoPlayer: true,
-        status: PlayerStatus.ready,
-      );
-    } catch (e) {
-      // ExoPlayer failed: roll back to previous quality.
-      if (token != _qualitySwitchToken || state.videoId != videoId) {
-        return;
-      }
-      state = state.copyWith(
-        useExoPlayer: false,
-        errorMessage: 'Failed to play ${target.label}: $e',
-      );
-      await _rollbackQuality(
-          previous: state.currentQuality, failed: target);
-    }
-  }
-
   /// Restores the previous quality after a failed switch and surfaces a
   /// clear error (e.g. "1080p failed to load, back to 720p"). The app
   /// never silently drops to an arbitrary lower quality.
