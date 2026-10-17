@@ -27,15 +27,19 @@ class ExoPlayerService {
   /// Plays a muxed (progressive) stream directly — like 360p.
   ///
   /// NewPipe plays muxed URLs directly, no manifest needed.
+  /// Direct play (no proxy) for fastest loading — muxed streams
+  /// are reliable without the proxy overhead.
   Future<void> playMuxed(String url) async {
     await dispose();
 
-    // Route through proxy for reliability.
-    await _proxy.start();
-    final proxied = _proxy.proxyUrl(url);
-
+    // Direct play for speed — like 360p in the old player.
+    // Proxy only needed for DASH throttling, not muxed.
     _controller = VideoPlayerController.networkUrl(
-      Uri.parse(proxied),
+      Uri.parse(url),
+      // Hint for faster startup.
+      videoPlayerOptions: VideoPlayerOptions(
+        mixWithOthers: false,
+      ),
     );
     await _controller!.initialize();
     await _controller!.play();
