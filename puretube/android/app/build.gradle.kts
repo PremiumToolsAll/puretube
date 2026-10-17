@@ -38,6 +38,17 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    packaging {
+        jniLibs {
+            // Belt-and-suspenders with the ndk abiFilters above: drop every
+            // non-arm64 native lib (media_kit bundles armeabi-v7a/x86_64).
+            excludes += "/lib/armeabi-v7a/*"
+            excludes += "/lib/armeabi/*"
+            excludes += "/lib/x86/*"
+            excludes += "/lib/x86_64/*"
+        }
+    }
 }
 
 kotlin {
