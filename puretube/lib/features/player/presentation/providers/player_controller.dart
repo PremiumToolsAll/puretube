@@ -16,6 +16,7 @@ import '../../../../core/services/sponsorblock_service.dart';
 import '../../../../core/services/lyrics_service.dart';
 import '../../../../core/services/watch_category_tracker.dart';
 import '../../../../core/services/youtube_extractor_service.dart';
+import '../../../../core/services/sabr/sabr_http_server.dart';
 import '../../../settings/presentation/providers/quality_providers.dart';
 import 'popup_visibility.dart';
 import '../../data/services/audio_player_handler.dart';
@@ -187,6 +188,17 @@ class PlayerController extends Notifier<PlayerUiState>
 
   /// Reads the "Prefer AVC" setting (default true).
   bool _preferAvc = true;
+
+  /// Local HTTP server for serving SABR media to the player.
+  final SabrHttpServer _sabrServer = SabrHttpServer();
+  bool _sabrServerStarted = false;
+
+  Future<void> _ensureSabrServer() async {
+    if (!_sabrServerStarted) {
+      await _sabrServer.start();
+      _sabrServerStarted = true;
+    }
+  }
 
   Future<void> _loadPreferAvc() async {
     try {
@@ -1442,10 +1454,20 @@ class PlayerController extends Notifier<PlayerUiState>
           }
           started = true;
           try {
-            // Play the growing files via mpv.
+            // Serve via local HTTP for better streaming.
+            await _ensureSabrServer();
+            final urls = _sabrServer.registerFiles(
+              videoId: videoId,
+              videoPath: videoPath,
+              audioPath: audioPath,
+              videoMime:
+                  videoFormat?['mimeType'] as String? ?? 'video/mp4',
+              audioMime:
+                  audioFormat?['mimeType'] as String? ?? 'audio/mp4',
+            );
             await _handler.switchStream(
-              videoPath,
-              audioUrl: audioPath,
+              urls['videoUrl']!,
+              audioUrl: urls['audioUrl']!,
             );
             if (token == _qualitySwitchToken) {
               state = state.copyWith(
@@ -1465,11 +1487,22 @@ class PlayerController extends Notifier<PlayerUiState>
       }
 
       // If onReadyToPlay already started playback, we're done.
-      // Otherwise (download completed without early start), play now.
+      // Otherwise (download completed without early start), play now
+      // via the local HTTP server (better range-request handling).
       if (!started) {
+        await _ensureSabrServer();
+        final urls = _sabrServer.registerFiles(
+          videoId: videoId,
+          videoPath: paths['videoPath']!,
+          audioPath: paths['audioPath']!,
+          videoMime:
+              videoFormat['mimeType'] as String? ?? 'video/mp4',
+          audioMime:
+              audioFormat['mimeType'] as String? ?? 'audio/mp4',
+        );
         await _handler.switchStream(
-          paths['videoPath']!,
-          audioUrl: paths['audioPath'],
+          urls['videoUrl']!,
+          audioUrl: urls['audioUrl'],
         );
         state = state.copyWith(
           currentQuality: target,
