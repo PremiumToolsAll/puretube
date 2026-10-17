@@ -1205,20 +1205,10 @@ class PlayerController extends Notifier<PlayerUiState>
     if (state.currentQuality == quality) return;
     final previous = state.currentQuality;
     final token = ++_qualitySwitchToken;
+    // Explicit menu choice is respected as-is (the menu now lists every
+    // codec variant separately). Automatic selection uses _pickDashOption
+    // which prefers AVC.
     var target = quality;
-    // For DASH menu picks, re-resolve to the most compatible codec
-    // variant (AVC first) at the chosen height — the menu entry might
-    // be a VP9/AV1 variant that this device can't play.
-    if (target.isDash) {
-      try {
-        final options = state.availableQualities ??
-            await _extractor.getQualityOptions(videoId);
-        final better = _pickDashOption(options, target.height);
-        if (better != null) target = better;
-      } catch (_) {
-        // Keep the menu's original target on failure.
-      }
-    }
     // NOTE: no manifest refresh before switching (an earlier version
     // refreshed here for DASH). YouTube's android client limits stream
     // URL reuse — the extractor itself warns it "often prevents
