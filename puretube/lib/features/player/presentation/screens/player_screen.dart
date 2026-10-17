@@ -8,7 +8,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:screen_brightness/screen_brightness.dart';
-import 'package:video_player/video_player.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -2580,19 +2579,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           children: [
             if (uiState.audioOnly && uiState.video != null)
               _buildAudioArt(uiState)
-            else if (uiState.useExoPlayer)
-              // ExoPlayer mode (DASH high quality, NewPipe-style).
-              Builder(builder: (context) {
-                final exoController = ref
-                    .read(playerControllerProvider.notifier)
-                    .exoPlayerController as VideoPlayerController?;
-                if (exoController != null &&
-                    exoController.value.isInitialized) {
-                  return VideoPlayer(exoController);
-                }
-                return const Center(
-                    child: CircularProgressIndicator());
-              })
             else if (_videoController != null)
               Video(
                   controller: _videoController!,
