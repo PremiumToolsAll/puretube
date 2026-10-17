@@ -1059,7 +1059,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   final selected = current != null &&
                       current.height == q.height &&
                       current.isDash == q.isDash &&
-                      current.fps == q.fps;
+                      current.fps == q.fps &&
+                      current.codec == q.codec;
                   final detail = q.detailLine;
                   return InkWell(
                     onTap: () {
