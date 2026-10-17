@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/utils/format.dart';
 import '../../../player/domain/entities/playback_models.dart';
-import '../../../player/presentation/screens/exoplayer_player_screen.dart';
+import '../../../player/presentation/screens/player_screen.dart';
 import '../../../player/presentation/screens/hidden_webview_player.dart';
 
 class VideoCard extends StatelessWidget {
@@ -14,11 +14,9 @@ class VideoCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      // Tap opens ExoPlayer (NewPipe-style, high quality).
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
-            builder: (_) =>
-                ExoPlayerScreen(videoId: video.id)),
+            builder: (_) => PlayerScreen(videoId: video.id)),
       ),
       // Long-press opens the hidden WebView player
       // (browser engine — all qualities work like Chrome).
