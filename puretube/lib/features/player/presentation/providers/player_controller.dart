@@ -1082,11 +1082,30 @@ class PlayerController extends Notifier<PlayerUiState>
     return 0;
   }
 
-  /// Best DASH option at exactly [targetHeight], else the closest DASH
-  /// option below it, preferring AVC (most compatible) then higher fps
-  /// on ties. Null when no DASH stream qualifies.
+  bool _isAvc(String codec) =>
+      codec.toLowerCase().contains('avc');
+
+  /// Best DASH option at-or-below [targetHeight].
+  ///
+  /// AVC (H.264) is strongly preferred — it's proven playable on this
+  /// device. First pass picks the highest AVC at-or-below target; only
+  /// if no AVC exists at all does it fall back to best-height VP9/AV1.
+  /// This avoids picking an unplayable 1080p VP9 over a playable 720p
+  /// AVC just because the height is higher.
   MuxedQuality? _pickDashOption(
       List<MuxedQuality> options, int targetHeight) {
+    MuxedQuality? bestAvc;
+    for (final q in options) {
+      if (!q.isDash || q.height > targetHeight) continue;
+      if (!_isAvc(q.codec)) continue;
+      if (bestAvc == null ||
+          q.height > bestAvc.height ||
+          (q.height == bestAvc.height && q.fps > bestAvc.fps)) {
+        bestAvc = q;
+      }
+    }
+    if (bestAvc != null) return bestAvc;
+
     MuxedQuality? best;
     for (final q in options) {
       if (!q.isDash || q.height > targetHeight) continue;
