@@ -276,9 +276,11 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     companion object {
+        // Must match NewPipe's UA verbatim: a non-existent future version
+        // (e.g. rv:153) gets flagged by YouTube's edge.
         private const val HQ_UA =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) " +
-                "Gecko/20100101 Firefox/153.0"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) " +
+                "Gecko/20100101 Firefox/140.0"
     }
 
     // ------------------------------------------------------------------
@@ -457,47 +459,67 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      * Fetches sq=0 for a stream URL and returns (de-redirected base URL,
      * Segment-Durations-Ms).
      *
-     * Uses NewPipe's `alr=yes` redirect dance (YoutubeDashManifestCreatorsUtils):
-     * POST with the 2-byte body, Origin/Referer headers, and `&alr=yes` on the
-     * URL. The server answers 200 + text/plain whose BODY is the next URL;
-     * repeat until the response is the actual media (video/mp4 or audio/mp4),
-     * which carries the Segment-Durations-Ms header.
+     * Tries two strategies in order (both verified to return 200 in sandbox):
+     *  1. POST + alr=yes dance (NewPipe's YoutubeDashManifestCreatorsUtils):
+     *     POST with the 2-byte body, Origin/Referer headers, `&alr=yes`.
+     *     Server answers 200 + text/plain whose BODY is the next URL; repeat
+     *     until the response is the actual media, which carries
+     *     Segment-Durations-Ms.
+     *  2. GET + alr=yes dance: same loop but with GET (no body).
      *
-     * Plain GET is rejected with 403 for these ANDROID-client URLs (verified),
-     * and plain POST without alr=yes only yields a 302 whose target then 403s.
+     * Plain GET/POST without alr=yes are rejected (403/302) for these
+     * ANDROID-client URLs.
      */
     private fun fetchSq0(streamUrl: String): Pair<String, String> {
-        var url = stripParams(streamUrl, setOf("sq", "rn", "alr"))
-        url += (if (url.contains("?")) "&" else "?") +
+        val base = stripParams(streamUrl, setOf("sq", "rn", "alr"))
+        var lastError = ""
+        // Strategy 1: POST dance. Strategy 2: GET dance.
+        for (usePost in listOf(true, false)) {
+            try {
+                return fetchSq0Dance(base, usePost)
+            } catch (e: IOException) {
+                lastError = (if (usePost) "POST" else "GET") + ": ${e.message}"
+            }
+        }
+        throw IOException("HQ sq=0: all strategies failed ($lastError)")
+    }
+
+    private fun fetchSq0Dance(base: String, usePost: Boolean): Pair<String, String> {
+        var url = base + (if (base.contains("?")) "&" else "?") +
                 "sq=0&rn=${globalRn.getAndIncrement()}&alr=yes"
+        val method = if (usePost) "POST" else "GET"
 
         var hops = 0
         while (hops < 10) {
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
+                requestMethod = method
                 setRequestProperty("User-Agent", HQ_UA)
                 setRequestProperty("Origin", "https://www.youtube.com")
                 setRequestProperty("Referer", "https://www.youtube.com")
                 setRequestProperty("TE", "trailers")
                 setRequestProperty("Accept-Encoding", "identity")
-                setRequestProperty(
-                    "Content-Type", "application/x-www-form-urlencoded")
-                doOutput = true
+                if (usePost) {
+                    setRequestProperty(
+                        "Content-Type", "application/x-www-form-urlencoded")
+                    doOutput = true
+                }
                 connectTimeout = 15000
                 readTimeout = 15000
                 instanceFollowRedirects = false
             }
-            // 2-byte POST body, like NewPipe's YoutubeHttpDataSource.
-            try {
-                conn.outputStream.use { it.write(byteArrayOf(0x78, 0x00)) }
-            } catch (e: Exception) {
-                conn.disconnect()
-                throw IOException("HQ sq=0: POST body failed: ${e.message}")
+            if (usePost) {
+                // 2-byte POST body, like NewPipe's YoutubeHttpDataSource.
+                try {
+                    conn.outputStream.use { it.write(byteArrayOf(0x78, 0x00)) }
+                } catch (e: Exception) {
+                    conn.disconnect()
+                    throw IOException("$method hop$hops: body failed")
+                }
             }
             val code = conn.responseCode
             if (code != HttpURLConnection.HTTP_OK) {
                 conn.disconnect()
-                throw IOException("HQ sq=0: HTTP $code")
+                throw IOException("$method hop$hops: HTTP $code")
             }
             val mime = (conn.contentType ?: "").substringBefore(";").trim()
             if (mime == "text/plain") {
@@ -510,7 +532,7 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     conn.disconnect()
                 }
                 if (!next.startsWith("http")) {
-                    throw IOException("HQ sq=0: bad redirect body")
+                    throw IOException("$method hop$hops: bad redirect body")
                 }
                 url = next
                 hops++
@@ -526,12 +548,12 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             var finalUrl = conn.url.toString()
             conn.disconnect()
             if (durations.isNullOrEmpty()) {
-                throw IOException("HQ sq=0: missing Segment-Durations-Ms")
+                throw IOException("$method hop$hops: missing SegDurMs")
             }
             finalUrl = stripParams(finalUrl, setOf("sq", "rn", "alr"))
             return finalUrl to durations
         }
-        throw IOException("HQ sq=0: too many redirects")
+        throw IOException("$method: too many redirects")
     }
 
     private fun stripParams(url: String, names: Set<String>): String {
