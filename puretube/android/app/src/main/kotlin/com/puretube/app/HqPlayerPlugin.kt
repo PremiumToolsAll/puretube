@@ -13,8 +13,10 @@ import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.dash.manifest.DashManifestParser
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import java.io.ByteArrayInputStream
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.dash.DashMediaSource
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -176,13 +178,23 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         private var surface: Surface? = null
 
         fun loadDash(args: Map<String, Any?>, result: MethodChannel.Result) {
-            // Heavy work (sq=0 fetches + MPD build) off the main thread.
+            // Heavy work off the main thread.
             loadThread = thread(isDaemon = true, name = "hq-load-$id") {
                 try {
-                    val mpd = buildOtfManifest(args)
+                    // Check if we have init/index ranges for DASH.
+                    val vInitS = (args["initStart"] as? Number)?.toLong() ?: -1L
+                    val hasRanges = vInitS >= 0
                     mainHandler.post {
                         try {
-                            prepareAndPlay(mpd, args)
+                            if (hasRanges) {
+                                // SparkTube-style on-demand DASH.
+                                val mpd = buildOtfManifest(args)
+                                prepareAndPlay(mpd, args)
+                            } else {
+                                // Fallback: merge video+audio progressive streams.
+                                // No manifest needed, works without ranges.
+                                prepareMerged(args)
+                            }
                             result.success(null)
                         } catch (e: Exception) {
                             fail(result, "HQ_PREPARE_FAILED", e)
@@ -202,23 +214,22 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             releasePlayerOnly()
             val appContext = this@HqPlayerPlugin.appContext
                 ?: throw IllegalStateException("HQ plugin not attached")
-            // Muxed playback: video + audio as two progressive streams
-            // merged at playback time (no DASH manifest, no segments).
-            // This is the reliable "muxed system" for 1080p+.
+            // SparkTube-style on-demand DASH: manifest built from
+            // initRange/indexRange (no probe), parsed with DashManifestParser,
+            // played via DashMediaSource. Plain GET + Chrome UA.
             val dataSourceFactory = DefaultHttpDataSource.Factory()
                 .setUserAgent(CHROME_UA)
                 .setConnectTimeoutMs(15000)
                 .setReadTimeoutMs(20000)
                 .setAllowCrossProtocolRedirects(true)
-            val videoUrl = args["videoUrl"] as? String
-                ?: throw IllegalArgumentException("HQ: missing videoUrl")
-            val audioUrl = args["audioUrl"] as? String
-                ?: throw IllegalArgumentException("HQ: missing audioUrl")
-            val videoSource = ProgressiveMediaSource.Factory(dataSourceFactory)
-                .createMediaSource(MediaItem.fromUri(Uri.parse(videoUrl)))
-            val audioSource = ProgressiveMediaSource.Factory(dataSourceFactory)
-                .createMediaSource(MediaItem.fromUri(Uri.parse(audioUrl)))
-            val mediaSource = MergingMediaSource(videoSource, audioSource)
+            val manifestUri = Uri.parse("https://puretube.invalid/manifest.mpd")
+            val manifest = DashManifestParser().parse(
+                manifestUri,
+                ByteArrayInputStream(mpdXml.toByteArray(Charsets.UTF_8))
+            )
+            val item = MediaItem.fromUri(manifestUri)
+            val mediaSource = DashMediaSource.Factory(dataSourceFactory)
+                .createMediaSource(manifest, item)
             val player = ExoPlayer.Builder(appContext).build()
             exo = player
             surface?.release()
@@ -254,6 +265,51 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             channel?.invokeMethod(
                                 "onHqCompleted", mapOf("textureId" to id))
                         }
+                    }
+                }
+            })
+            player.setMediaSource(mediaSource)
+            player.prepare()
+            if (startMs > 0) player.seekTo(startMs)
+            player.playWhenReady = true
+        }
+
+        // Fallback when init/index ranges are unavailable (e.g. Piped/
+        // Invidious fallback): merge video+audio as progressive streams.
+        private fun prepareMerged(args: Map<String, Any?>) {
+            releasePlayerOnly()
+            val appContext = this@HqPlayerPlugin.appContext
+                ?: throw IllegalStateException("HQ plugin not attached")
+            val dataSourceFactory = DefaultHttpDataSource.Factory()
+                .setUserAgent(CHROME_UA)
+                .setConnectTimeoutMs(15000)
+                .setReadTimeoutMs(20000)
+                .setAllowCrossProtocolRedirects(true)
+            val videoUrl = args["videoUrl"] as? String
+                ?: throw IllegalArgumentException("HQ: missing videoUrl")
+            val audioUrl = args["audioUrl"] as? String
+                ?: throw IllegalArgumentException("HQ: missing audioUrl")
+            val videoSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                .createMediaSource(MediaItem.fromUri(Uri.parse(videoUrl)))
+            val audioSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                .createMediaSource(MediaItem.fromUri(Uri.parse(audioUrl)))
+            val mediaSource = MergingMediaSource(videoSource, audioSource)
+            val player = ExoPlayer.Builder(appContext).build()
+            exo = player
+            surface?.release()
+            surface = Surface(textureEntry.surfaceTexture())
+            player.setVideoSurface(surface)
+            val speed = (args["speed"] as? Number)?.toFloat() ?: 1f
+            if (speed != 1f) player.setPlaybackSpeed(speed)
+            val startMs = (args["startPositionMs"] as? Number)?.toLong() ?: 0L
+            player.addListener(object : Player.Listener {
+                override fun onPlayerError(error: PlaybackException) {
+                    val msg = PlaybackException.getErrorCodeName(
+                        error.errorCode) + ": " + error.message
+                    mainHandler.post {
+                        channel?.invokeMethod(
+                            "onHqError",
+                            mapOf("textureId" to id, "message" to msg))
                     }
                 }
             })
