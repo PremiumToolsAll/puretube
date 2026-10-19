@@ -380,20 +380,31 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     // ------------------------------------------------------------------
     // On-the-fly DASH manifest (ports NewPipe's YoutubeOtfDashManifestCreator).
     // ------------------------------------------------------------------
+    // On-the-fly DASH manifest.
+    // ------------------------------------------------------------------
+    // NOTE: We do NOT use the sq=0 Segment-Durations-Ms probe — YouTube's edge
+    // 403s it on some networks. Instead we measure the real segment duration
+    // by parsing tfdt boxes from media segments (sq=1, sq=2) fetched through
+    // the same POST path the player itself uses, and build the manifest with
+    // a fixed SegmentTemplate duration.
     private fun buildOtfManifest(args: Map<String, Any?>): String {
         val videoUrl = args["videoUrl"] as? String
             ?: throw IllegalArgumentException("HQ: missing videoUrl")
         val audioUrl = args["audioUrl"] as? String
             ?: throw IllegalArgumentException("HQ: missing audioUrl")
-        val (videoBase, videoDur) = try {
-            fetchSq0(videoUrl)
+        val videoBase = stripParams(videoUrl, setOf("sq", "rn", "alr"))
+        val audioBase = stripParams(audioUrl, setOf("sq", "rn", "alr"))
+
+        // Measure segment durations from real media segments.
+        val vSegMs = try {
+            measureSegmentMs(videoBase, "video")
         } catch (e: IOException) {
-            throw IOException("HQ video sq=0: ${e.message}")
+            throw IOException("HQ video segprobe: ${e.message}")
         }
-        val (audioBase, audioDur) = try {
-            fetchSq0(audioUrl)
+        val aSegMs = try {
+            measureSegmentMs(audioBase, "audio")
         } catch (e: IOException) {
-            throw IOException("HQ audio sq=0: ${e.message}")
+            throw IOException("HQ audio segprobe: ${e.message}")
         }
 
         val vCodec = (args["videoCodec"] as? String).orEmpty()
@@ -408,13 +419,8 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val sampleRate = (args["audioSampleRate"] as? Number)?.toInt()
             .let { if (it == null || it <= 0) 44100 else it }
 
-        val vTimeline = timelineXml(parseDurations(videoDur))
-        val aTimeline = timelineXml(parseDurations(audioDur))
-        if (vTimeline.isEmpty() || aTimeline.isEmpty()) {
-            throw IOException("HQ: empty segment timeline")
-        }
-        val totalMs = parseDurations(videoDur).sum()
-        val mpdDuration = "PT%.3fS".format(totalMs / 1000.0)
+        val totalSec = (args["durationSec"] as? Number)?.toDouble() ?: 0.0
+        val mpdDuration = if (totalSec > 0) "PT%.3fS".format(totalSec) else "PT0S"
         val itagV = itagOf(videoUrl).ifEmpty { "0" }
         val itagA = itagOf(audioUrl).ifEmpty { "0" }
         val dollar = "$"
@@ -437,18 +443,13 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 <AdaptationSet id="0" mimeType="video/mp4" subsegmentAlignment="true">
 <Role schemeIdUri="urn:mpeg:DASH:role:2011" value="main"/>
 <Representation id="$itagV" codecs="$vCodec" startWithSAP="1" maxPlayoutRate="1" bandwidth="$vBitrate" width="$width" height="$height"$fpsAttr>
-<SegmentTemplate startNumber="1" timescale="1000" initialization="$vInit" media="$vMedia">
-<SegmentTimeline>$vTimeline</SegmentTimeline>
-</SegmentTemplate>
+<SegmentTemplate startNumber="1" timescale="1000" duration="$vSegMs" initialization="$vInit" media="$vMedia"/>
 </Representation>
 </AdaptationSet>
 <AdaptationSet id="1" mimeType="audio/mp4" subsegmentAlignment="true">
-<Role schemeIdUri="urn:mpeg:DASH:role:2011" value="main"/>
 <Representation id="$itagA" codecs="$aCodec" startWithSAP="1" maxPlayoutRate="1" bandwidth="$aBitrate" audioSamplingRate="$sampleRate">
 <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>
-<SegmentTemplate startNumber="1" timescale="1000" initialization="$aInit" media="$aMedia">
-<SegmentTimeline>$aTimeline</SegmentTimeline>
-</SegmentTemplate>
+<SegmentTemplate startNumber="1" timescale="1000" duration="$aSegMs" initialization="$aInit" media="$aMedia"/>
 </Representation>
 </AdaptationSet>
 </Period>
@@ -456,101 +457,128 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     /**
-     * Fetches sq=0 for a stream URL and returns (de-redirected base URL,
-     * Segment-Durations-Ms).
-     *
-     * Tries two strategies in order (both verified to return 200 in sandbox):
-     *  1. POST + alr=yes dance (NewPipe's YoutubeDashManifestCreatorsUtils):
-     *     POST with the 2-byte body, Origin/Referer headers, `&alr=yes`.
-     *     Server answers 200 + text/plain whose BODY is the next URL; repeat
-     *     until the response is the actual media, which carries
-     *     Segment-Durations-Ms.
-     *  2. GET + alr=yes dance: same loop but with GET (no body).
-     *
-     * Plain GET/POST without alr=yes are rejected (403/302) for these
-     * ANDROID-client URLs.
+     * Measures one segment's duration in milliseconds by parsing tfdt
+     * (track fragment decode time) boxes from media segments sq=1 and sq=2,
+     * fetched with the same POST shape the player uses for segments.
+     * durationMs = (tfdt2 - tfdt1) / timescale * 1000.
      */
-    private fun fetchSq0(streamUrl: String): Pair<String, String> {
-        val base = stripParams(streamUrl, setOf("sq", "rn", "alr"))
-        val errors = mutableListOf<String>()
-        // Strategy 1: POST dance. Strategy 2: GET dance.
-        for (usePost in listOf(true, false)) {
-            try {
-                return fetchSq0Dance(base, usePost)
-            } catch (e: IOException) {
-                errors += (if (usePost) "POST" else "GET") + ": ${e.message}"
-            }
+    private fun measureSegmentMs(base: String, tag: String): Long {
+        val initBytes = fetchSegmentBytes("$base&sq=0", tag, 8192)
+        val timescale = parseMdhdTimescale(initBytes)
+            ?: throw IOException("$tag: no timescale in init")
+        val t1 = parseTfdt(fetchSegmentBytes("$base&sq=1", tag, 4096))
+            ?: throw IOException("$tag: no tfdt in sq=1")
+        val t2 = parseTfdt(fetchSegmentBytes("$base&sq=2", tag, 4096))
+            ?: throw IOException("$tag: no tfdt in sq=2")
+        val delta = t2 - t1
+        if (delta <= 0 || timescale <= 0) {
+            throw IOException("$tag: bad tfdt delta=$delta ts=$timescale")
         }
-        throw IOException("HQ sq=0: all strategies failed (${errors.joinToString("; ")})")
+        val ms = (delta * 1000L) / timescale
+        if (ms < 500 || ms > 30000) {
+            throw IOException("$tag: implausible segMs=$ms")
+        }
+        return ms
     }
 
-    private fun fetchSq0Dance(base: String, usePost: Boolean): Pair<String, String> {
-        var url = base + (if (base.contains("?")) "&" else "?") +
-                "sq=0&rn=${globalRn.getAndIncrement()}&alr=yes"
-        val method = if (usePost) "POST" else "GET"
-
-        var hops = 0
-        while (hops < 10) {
-            // Match NewPipe's downloader.post() exactly: only UA + Origin +
-            // Referer. Extra headers (TE, Accept-Encoding, Content-Type) can
-            // trigger 403 on some networks.
-            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                requestMethod = method
-                setRequestProperty("User-Agent", HQ_UA)
-                setRequestProperty("Origin", "https://www.youtube.com")
-                setRequestProperty("Referer", "https://www.youtube.com")
-                if (usePost) doOutput = true
-                connectTimeout = 15000
-                readTimeout = 15000
-                instanceFollowRedirects = false
-            }
-            if (usePost) {
-                // 2-byte POST body, like NewPipe's YoutubeHttpDataSource.
-                try {
-                    conn.outputStream.use { it.write(byteArrayOf(0x78, 0x00)) }
-                } catch (e: Exception) {
-                    conn.disconnect()
-                    throw IOException("$method hop$hops: body failed")
-                }
-            }
-            val code = conn.responseCode
-            if (code != HttpURLConnection.HTTP_OK) {
-                conn.disconnect()
-                throw IOException("$method hop$hops: HTTP $code")
-            }
-            val mime = (conn.contentType ?: "").substringBefore(";").trim()
-            if (mime == "text/plain") {
-                // Redirect dance: the body IS the next URL.
-                val next = try {
-                    conn.inputStream.use {
-                        it.readBytes().toString(Charsets.UTF_8).trim()
-                    }
-                } finally {
-                    conn.disconnect()
-                }
-                if (!next.startsWith("http")) {
-                    throw IOException("$method hop$hops: bad redirect body")
-                }
-                url = next
-                hops++
-                continue
-            }
-            val durations = conn.getHeaderField("Segment-Durations-Ms")
-                ?: conn.getHeaderField("segment-durations-ms")
-            // Drain the init segment body.
-            try {
-                conn.inputStream.use { it.readBytes() }
-            } catch (_: Exception) {
-            }
-            var finalUrl = conn.url.toString()
-            conn.disconnect()
-            if (durations.isNullOrEmpty()) {
-                throw IOException("$method hop$hops: missing SegDurMs")
-            }
-            finalUrl = stripParams(finalUrl, setOf("sq", "rn", "alr"))
-            return finalUrl to durations
+    /** Fetches the first [maxBytes] of a segment URL via POST (player shape). */
+    private fun fetchSegmentBytes(url: String, tag: String, maxBytes: Int): ByteArray {
+        val full = url + (if (url.contains("?")) "&" else "?") +
+                "rn=${globalRn.getAndIncrement()}"
+        val conn = (URL(full).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            setRequestProperty("User-Agent", HQ_UA)
+            setRequestProperty("Origin", "https://www.youtube.com")
+            setRequestProperty("Referer", "https://www.youtube.com")
+            doOutput = true
+            connectTimeout = 15000
+            readTimeout = 15000
+            instanceFollowRedirects = true
         }
-        throw IOException("$method: too many redirects")
+        try {
+            conn.outputStream.use { it.write(byteArrayOf(0x78, 0x00)) }
+        } catch (e: Exception) {
+            conn.disconnect()
+            throw IOException("$tag probe: body failed")
+        }
+        val code = conn.responseCode
+        if (code != HttpURLConnection.HTTP_OK &&
+            code != HttpURLConnection.HTTP_PARTIAL
+        ) {
+            conn.disconnect()
+            throw IOException("$tag probe: HTTP $code")
+        }
+        return try {
+            val inp = conn.inputStream
+            val buf = ByteArray(maxBytes)
+            var read = 0
+            while (read < maxBytes) {
+                val n = inp.read(buf, read, maxBytes - read)
+                if (n < 0) break
+                read += n
+            }
+            inp.close()
+            buf.copyOf(read)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** Minimal MP4 box scanner: finds first box with the given 4-char type. */
+    private fun findBox(data: ByteArray, type: String, start: Int = 0, end: Int = data.size): Int {
+        var p = start
+        val t = type.toByteArray(Charsets.US_ASCII)
+        while (p + 8 <= end) {
+            val size = ((data[p].toInt() and 0xFF) shl 24) or
+                    ((data[p + 1].toInt() and 0xFF) shl 16) or
+                    ((data[p + 2].toInt() and 0xFF) shl 8) or
+                    (data[p + 3].toInt() and 0xFF)
+            if (size < 8) break
+            if (data[p + 4] == t[0] && data[p + 5] == t[1] &&
+                data[p + 6] == t[2] && data[p + 7] == t[3]
+            ) return p
+            val ctype = String(data, p + 4, 4, Charsets.US_ASCII)
+            if (ctype == "moof" || ctype == "traf" || ctype == "moov" ||
+                ctype == "trak" || ctype == "mdia" || ctype == "minf" ||
+                ctype == "stbl"
+            ) {
+                val inner = findBox(data, type, p + 8, minOf(p + size, end))
+                if (inner >= 0) return inner
+            }
+            p += size
+        }
+        return -1
+    }
+
+    private fun u32(data: ByteArray, p: Int): Long =
+        ((data[p].toLong() and 0xFF) shl 24) or
+                ((data[p + 1].toLong() and 0xFF) shl 16) or
+                ((data[p + 2].toLong() and 0xFF) shl 8) or
+                (data[p + 3].toLong() and 0xFF)
+
+    private fun u64(data: ByteArray, p: Int): Long =
+        (u32(data, p) shl 32) or u32(data, p + 4)
+
+    /** Parses timescale from mdhd inside the init segment. */
+    private fun parseMdhdTimescale(data: ByteArray): Long? {
+        val p = findBox(data, "mdhd")
+        if (p < 0 || p + 32 > data.size) return null
+        val version = data[p + 8].toInt() and 0xFF
+        val tsPos = if (version == 1) p + 8 + 4 + 8 + 8 else p + 8 + 4 + 4 + 4
+        if (tsPos + 4 > data.size) return null
+        return u32(data, tsPos)
+    }
+
+    /** Parses baseMediaDecodeTime from tfdt inside a media segment. */
+    private fun parseTfdt(data: ByteArray): Long? {
+        val p = findBox(data, "tfdt")
+        if (p < 0 || p + 16 > data.size) return null
+        val version = data[p + 8].toInt() and 0xFF
+        return if (version == 1) {
+            if (p + 20 > data.size) null else u64(data, p + 12)
+        } else {
+            u32(data, p + 12)
+        }
     }
 
     private fun stripParams(url: String, names: Set<String>): String {
@@ -572,41 +600,11 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     /** Fallback codec strings when the extractor didn't supply full ones. */
     private fun codecForItag(itag: String, video: Boolean): String {
-        if (!video) return "mp4a.40.2" // itag 140/139
         return when (itag) {
-            "137" -> "avc1.640028"
-            "136" -> "avc1.4d401f"
-            "135", "134", "133", "160" -> "avc1.4d401f"
-            "22", "18" -> "avc1.64001F"
-            else -> "avc1.640028"
+            "137", "299" -> "avc1.640028"
+            "136", "298" -> "avc1.4d401f"
+            "140", "139" -> "mp4a.40.2"
+            else -> if (video) "avc1.4d401f" else "mp4a.40.2"
         }
-    }
-
-    private fun parseDurations(header: String): List<Long> {
-        val out = mutableListOf<Long>()
-        for (raw in header.split(",")) {
-            val p = raw.trim()
-            if (p.isEmpty()) continue
-            val m = Regex("""(\d+)(?:\(r=(\d+)\))?""").matchEntire(p) ?: continue
-            val d = m.groupValues[1].toLongOrNull() ?: continue
-            val r = m.groupValues[2].toLongOrNull() ?: 0L
-            repeat((r + 1).coerceAtMost(100000).toInt()) { out.add(d) }
-        }
-        return out
-    }
-
-    private fun timelineXml(durations: List<Long>): String {
-        if (durations.isEmpty()) return ""
-        val sb = StringBuilder()
-        var i = 0
-        while (i < durations.size) {
-            val d = durations[i]
-            var r = 0
-            while (i + r + 1 < durations.size && durations[i + r + 1] == d) r++
-            if (r > 0) sb.append("<S d=\"$d\" r=\"$r\"/>")
-            else sb.append("<S d=\"$d\"/>")
-            i += r + 1
-        }
-        return sb.toString()
     }
 }
