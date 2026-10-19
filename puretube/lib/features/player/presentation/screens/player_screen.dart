@@ -28,6 +28,7 @@ import '../widgets/lyrics_sheet.dart';
 import '../providers/popup_visibility.dart';
 import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/subtitle_sheet.dart';
+import '../widgets/audio_track_sheet.dart';
 import '../../../../features/settings/presentation/screens/settings_screen.dart'
     show doubleTapSecondsProvider;
 
@@ -2871,6 +2872,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     ? _accent
                     : Colors.white),
           ),
+          if (uiState.audioLanguages.length > 1)
+            PressIconButton(
+              tooltip: 'Audio Track',
+              onPressed: () => AudioTrackSheet.show(context),
+              icon: Icon(Icons.audiotrack_outlined,
+                  color: (uiState.activeAudioLanguage != null &&
+                          !uiState.activeAudioLanguage!.isDefault)
+                      ? _accent
+                      : Colors.white),
+            ),
           Builder(
             builder: (btnCtx) => PressScale(
               onTap: () => _showQualityMenu(btnCtx),
