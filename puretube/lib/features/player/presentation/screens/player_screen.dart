@@ -1187,6 +1187,21 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   activeColor: _accent,
                   onChanged: notifier.toggleSkipSponsors,
                 ),
+                if (ui.audioLanguages.length > 1)
+                  ListTile(
+                    leading:
+                        const Icon(Icons.audiotrack_outlined),
+                    title: const Text('Audio Track'),
+                    subtitle: Text(
+                        ui.activeAudioLanguage?.displayName ??
+                            ''),
+                    trailing:
+                        const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      AudioTrackSheet.show(context);
+                    },
+                  ),
                 SwitchListTile(
                   secondary: const Icon(Icons.analytics_outlined),
                   title: const Text('Stats for nerds'),
@@ -2872,16 +2887,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     ? _accent
                     : Colors.white),
           ),
-          if (uiState.audioLanguages.length > 1)
-            PressIconButton(
-              tooltip: 'Audio Track',
-              onPressed: () => AudioTrackSheet.show(context),
-              icon: Icon(Icons.audiotrack_outlined,
-                  color: (uiState.activeAudioLanguage != null &&
-                          !uiState.activeAudioLanguage!.isDefault)
-                      ? _accent
-                      : Colors.white),
-            ),
           Builder(
             builder: (btnCtx) => PressScale(
               onTap: () => _showQualityMenu(btnCtx),
