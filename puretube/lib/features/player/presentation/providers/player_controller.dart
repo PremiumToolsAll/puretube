@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:volume_controller/volume_controller.dart';
 
 import '../../../../core/database/hive_setup.dart';
 import '../../../../core/di/providers.dart';
@@ -288,19 +289,59 @@ class PlayerController extends Notifier<PlayerUiState>
 
   double _hqVolume = 1.0;
 
-  /// Unified volume: HQ engine when active, else mpv. [v] is 0-100.
+  /// Cached system volume (0-100). Synced with the phone's media volume —
+  /// the in-app pill and the hardware buttons control the same value.
+  double _systemVolume = 50;
+
+  /// Unified volume: sets the PHONE's system media volume (0-100), so the
+  /// in-app pill and the hardware volume buttons stay in sync.
+  /// Player-internal volumes are kept at max; the system volume is the
+  /// single source of truth.
   Future<void> setDisplayVolume(double v) async {
     final clamped = v.clamp(0.0, 100.0);
+    _systemVolume = clamped;
+    try {
+      // Hide the system volume popup — our pill shows the level.
+      VolumeController.instance.showSystemUI = false;
+      await VolumeController.instance.setVolume(clamped / 100);
+    } catch (_) {}
+    // Keep player engines at full; system volume controls loudness.
     if (hqActive) {
-      _hqVolume = clamped / 100;
-      await _hq.setVolume(_hqVolume);
-      return;
+      _hqVolume = 1.0;
+      try {
+        await _hq.setVolume(1.0);
+      } catch (_) {}
+    } else {
+      try {
+        await _handler.player.setVolume(100);
+      } catch (_) {}
     }
-    await _handler.player.setVolume(clamped);
   }
 
-  double get displayVolume =>
-      hqActive ? _hqVolume * 100 : _handler.player.state.volume;
+  double get displayVolume => _systemVolume;
+
+  /// Starts listening for hardware volume-button changes so the pill
+  /// reflects the system volume. Call once (e.g. when the player opens).
+  void startSystemVolumeSync() {
+    try {
+      VolumeController.instance.addListener((v) {
+        _systemVolume = (v * 100).clamp(0.0, 100.0);
+      });
+    } catch (_) {}
+    // Prime the cache with the real system volume.
+    try {
+      VolumeController.instance.getVolume().then((v) {
+        _systemVolume = (v * 100).clamp(0.0, 100.0);
+      });
+    } catch (_) {}
+  }
+
+  /// Stops the hardware volume listener.
+  void stopSystemVolumeSync() {
+    try {
+      VolumeController.instance.removeListener();
+    } catch (_) {}
+  }
 
   /// Last persisted audio-only preference (Hive). Applied on the next
   /// loadVideo so a fresh app start restores the user's last mode.
@@ -374,6 +415,8 @@ class PlayerController extends Notifier<PlayerUiState>
     final binding = WidgetsBinding.instance;
     binding.addObserver(this);
     _pip.init();
+    // Sync the in-app volume pill with the phone's system volume.
+    startSystemVolumeSync();
 
     _pipSub = _pip.onPipChanged.listen((inPip) {
       state = state.copyWith(isInPip: inPip);
