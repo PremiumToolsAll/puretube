@@ -1596,6 +1596,8 @@ class PlayerController extends Notifier<PlayerUiState>
         audioSampleRate: target.audioSampleRate,
         startAt: resumeAt,
         speed: state.speed,
+        durationSec:
+            _handler.player.state.duration.inMilliseconds / 1000.0,
       );
       // Verify the native player actually produces a duration.
       const pollInterval = Duration(milliseconds: 500);
