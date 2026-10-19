@@ -1016,28 +1016,62 @@ class PlayerController extends Notifier<PlayerUiState>
     } catch (_) {}
   }
 
-  /// Switches the dubbed audio language, keeping the same video stream.
-  /// Only for DASH (video+separate audio); muxed 360p has embedded audio.
+  /// Switches the dubbed audio language, keeping the same video.
+  /// Works like YouTube: if the current stream is muxed (360p, embedded
+  /// audio), switches to the DASH video-only stream at the same height
+  /// plus the selected language's audio track.
   Future<void> setAudioLanguage(AudioLanguage lang) async {
     final q = state.currentQuality;
-    if (q == null || q.audioUrl == null) return;
+    if (q == null) return;
     if (state.activeAudioLanguage?.id == lang.id) return;
-    // Reuse the quality-switch path with the same video URL but the new
-    // language's audio URL.
-    final updated = MuxedQuality(
-      label: q.label,
-      height: q.height,
-      url: q.url,
-      audioUrl: lang.audioUrl,
-      bitrateKbps: q.bitrateKbps,
-      fps: q.fps,
-      codec: q.codec,
-      fullCodec: q.fullCodec,
-      audioFullCodec: q.audioFullCodec,
-      audioBitrateBps: lang.bitrateBps,
-      audioSampleRate: q.audioSampleRate,
-      isHdr: q.isHdr,
-    );
+
+    MuxedQuality updated;
+    if (q.audioUrl != null) {
+      // DASH: same video stream, new language's audio URL.
+      updated = MuxedQuality(
+        label: q.label,
+        height: q.height,
+        url: q.url,
+        audioUrl: lang.audioUrl,
+        bitrateKbps: q.bitrateKbps,
+        fps: q.fps,
+        codec: q.codec,
+        fullCodec: q.fullCodec,
+        audioFullCodec: q.audioFullCodec,
+        audioBitrateBps: lang.bitrateBps,
+        audioSampleRate: q.audioSampleRate,
+        isHdr: q.isHdr,
+      );
+    } else {
+      // Muxed (embedded audio): find the DASH video-only stream at the
+      // same height, pair it with the selected language's audio.
+      final dash = state.availableQualities
+          .where((o) => o.audioUrl != null && o.height == q.height)
+          .toList();
+      if (dash.isEmpty) return;
+      // Prefer AVC, then highest bitrate.
+      dash.sort((a, b) {
+        final aAvc = a.codec.toLowerCase().contains('avc') ? 0 : 1;
+        final bAvc = b.codec.toLowerCase().contains('avc') ? 0 : 1;
+        if (aAvc != bAvc) return aAvc.compareTo(bAvc);
+        return b.bitrateKbps.compareTo(a.bitrateKbps);
+      });
+      final v = dash.first;
+      updated = MuxedQuality(
+        label: v.label,
+        height: v.height,
+        url: v.url,
+        audioUrl: lang.audioUrl,
+        bitrateKbps: v.bitrateKbps,
+        fps: v.fps,
+        codec: v.codec,
+        fullCodec: v.fullCodec,
+        audioFullCodec: v.audioFullCodec,
+        audioBitrateBps: lang.bitrateBps,
+        audioSampleRate: v.audioSampleRate,
+        isHdr: v.isHdr,
+      );
+    }
     state = state.copyWith(activeAudioLanguage: lang);
     await setQuality(updated);
   }
