@@ -472,16 +472,16 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      */
     private fun fetchSq0(streamUrl: String): Pair<String, String> {
         val base = stripParams(streamUrl, setOf("sq", "rn", "alr"))
-        var lastError = ""
+        val errors = mutableListOf<String>()
         // Strategy 1: POST dance. Strategy 2: GET dance.
         for (usePost in listOf(true, false)) {
             try {
                 return fetchSq0Dance(base, usePost)
             } catch (e: IOException) {
-                lastError = (if (usePost) "POST" else "GET") + ": ${e.message}"
+                errors += (if (usePost) "POST" else "GET") + ": ${e.message}"
             }
         }
-        throw IOException("HQ sq=0: all strategies failed ($lastError)")
+        throw IOException("HQ sq=0: all strategies failed (${errors.joinToString("; ")})")
     }
 
     private fun fetchSq0Dance(base: String, usePost: Boolean): Pair<String, String> {
@@ -491,18 +491,15 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
         var hops = 0
         while (hops < 10) {
+            // Match NewPipe's downloader.post() exactly: only UA + Origin +
+            // Referer. Extra headers (TE, Accept-Encoding, Content-Type) can
+            // trigger 403 on some networks.
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = method
                 setRequestProperty("User-Agent", HQ_UA)
                 setRequestProperty("Origin", "https://www.youtube.com")
                 setRequestProperty("Referer", "https://www.youtube.com")
-                setRequestProperty("TE", "trailers")
-                setRequestProperty("Accept-Encoding", "identity")
-                if (usePost) {
-                    setRequestProperty(
-                        "Content-Type", "application/x-www-form-urlencoded")
-                    doOutput = true
-                }
+                if (usePost) doOutput = true
                 connectTimeout = 15000
                 readTimeout = 15000
                 instanceFollowRedirects = false
