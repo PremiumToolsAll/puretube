@@ -71,6 +71,7 @@ class HqPlayerService {
     required int audioSampleRate,
     Duration startAt = Duration.zero,
     double speed = 1.0,
+    double durationSec = 0,
   }) {
     final id = _textureId;
     if (id == null) throw StateError('HQ player: not created');
@@ -88,6 +89,7 @@ class HqPlayerService {
       'audioSampleRate': audioSampleRate,
       'startPositionMs': startAt.inMilliseconds,
       'speed': speed,
+      'durationSec': durationSec,
     });
   }
 
