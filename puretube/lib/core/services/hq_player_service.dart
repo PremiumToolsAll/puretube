@@ -72,6 +72,15 @@ class HqPlayerService {
     Duration startAt = Duration.zero,
     double speed = 1.0,
     double durationSec = 0,
+    // On-demand DASH byte ranges (SparkTube-style, from player response).
+    int initStart = -1,
+    int initEnd = -1,
+    int indexStart = -1,
+    int indexEnd = -1,
+    int audioInitStart = -1,
+    int audioInitEnd = -1,
+    int audioIndexStart = -1,
+    int audioIndexEnd = -1,
   }) {
     final id = _textureId;
     if (id == null) throw StateError('HQ player: not created');
@@ -90,6 +99,14 @@ class HqPlayerService {
       'startPositionMs': startAt.inMilliseconds,
       'speed': speed,
       'durationSec': durationSec,
+      'initStart': initStart,
+      'initEnd': initEnd,
+      'indexStart': indexStart,
+      'indexEnd': indexEnd,
+      'audioInitStart': audioInitStart,
+      'audioInitEnd': audioInitEnd,
+      'audioIndexStart': audioIndexStart,
+      'audioIndexEnd': audioIndexEnd,
     });
   }
 
