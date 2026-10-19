@@ -321,9 +321,8 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 "rn=${globalRn.getAndIncrement()}"
             val connection =
                 (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                    // NewPipe: "Most clients use POST requests to fetch contents".
-                    requestMethod = "POST"
-                    doOutput = true
+                    // GET: the phone's network 403s POST on googlevideo.
+                    requestMethod = "GET"
                     setRequestProperty("User-Agent", HQ_UA)
                     setRequestProperty("TE", "trailers")
                     setRequestProperty("Accept-Encoding", "identity")
@@ -332,8 +331,6 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     instanceFollowRedirects = true
                 }
             transferInitializing(dataSpec)
-            // 2-byte body, like NewPipe's YoutubeHttpDataSource.
-            connection.outputStream.use { it.write(byteArrayOf(0x78, 0x00)) }
             val code = connection.responseCode
             if (code != HttpURLConnection.HTTP_OK &&
                 code != HttpURLConnection.HTTP_PARTIAL
@@ -486,20 +483,13 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val full = url + (if (url.contains("?")) "&" else "?") +
                 "rn=${globalRn.getAndIncrement()}"
         val conn = (URL(full).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
+            requestMethod = "GET"
             setRequestProperty("User-Agent", HQ_UA)
             setRequestProperty("Origin", "https://www.youtube.com")
             setRequestProperty("Referer", "https://www.youtube.com")
-            doOutput = true
             connectTimeout = 15000
             readTimeout = 15000
             instanceFollowRedirects = true
-        }
-        try {
-            conn.outputStream.use { it.write(byteArrayOf(0x78, 0x00)) }
-        } catch (e: Exception) {
-            conn.disconnect()
-            throw IOException("$tag probe: body failed")
         }
         val code = conn.responseCode
         if (code != HttpURLConnection.HTTP_OK &&
