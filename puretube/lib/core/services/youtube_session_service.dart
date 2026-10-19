@@ -179,6 +179,18 @@ class YoutubeSessionService {
     return int.tryParse(v?.toString() ?? '') ?? 0;
   }
 
+  /// Parses initRange/indexRange: {"start": "0", "end": "743"} → start.
+  static int _rangeStart(Object? v) {
+    if (v is Map) return _num(v['start']);
+    return -1;
+  }
+
+  /// Parses initRange/indexRange: {"start": "0", "end": "743"} → end.
+  static int _rangeEnd(Object? v) {
+    if (v is Map) return _num(v['end']);
+    return -1;
+  }
+
   static Duration? _secs(Object? v) {
     // YouTube sometimes sends these as strings ("213").
     final n = v is num
@@ -319,6 +331,14 @@ class YoutubeSessionService {
           audioFullCodec: audioFullCodec,
           audioBitrateBps: audioBitrateBps,
           audioSampleRate: audioSampleRate,
+          initStart: _rangeStart(s['initRange']),
+          initEnd: _rangeEnd(s['initRange']),
+          indexStart: _rangeStart(s['indexRange']),
+          indexEnd: _rangeEnd(s['indexRange']),
+          audioInitStart: _rangeStart(audioPick['initRange']),
+          audioInitEnd: _rangeEnd(audioPick['initRange']),
+          audioIndexStart: _rangeStart(audioPick['indexRange']),
+          audioIndexEnd: _rangeEnd(audioPick['indexRange']),
         ));
       }
     }
