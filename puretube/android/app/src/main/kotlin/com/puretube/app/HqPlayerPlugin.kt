@@ -20,6 +20,14 @@ import java.io.ByteArrayInputStream
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.dash.DashMediaSource
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+// NewPipeExtractor downloader (SparkTube-style).
+import org.schabi.newpipe.extractor.downloader.Downloader
+import org.schabi.newpipe.extractor.downloader.Request
+import org.schabi.newpipe.extractor.downloader.Response
+import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.TextureRegistry
@@ -87,6 +95,62 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 val id = nextId++
                 players[id] = HqPlayer(id, entry)
                 result.success(id)
+            }
+            "getNewPipeStreams" -> {
+                val videoId = call.argument<String>("videoId")
+                if (videoId.isNullOrEmpty()) {
+                    result.error("NP_NO_ID", "Missing videoId", null)
+                    return
+                }
+                Thread {
+                    try {
+                        // Init NewPipe once (like SparkTube).
+                        try {
+                            org.schabi.newpipe.extractor.NewPipe.init(
+                                SparkTubeDownloader(),
+                                org.schabi.newpipe.extractor.localization.Localization("en", "US")
+                            )
+                        } catch (_: Exception) { /* already init */ }
+                        val service = org.schabi.newpipe.extractor.ServiceList.YouTube
+                        val extractor = service.getStreamExtractor("https://www.youtube.com/watch?v=$videoId")
+                        extractor.fetchPage()
+                        val videoStreams = extractor.videoStreams
+                        val audioStreams = extractor.audioStreams
+                        val videos = videoStreams.map { v ->
+                            mapOf(
+                                "url" to v.content,
+                                "height" to v.height,
+                                "codec" to (v.codec ?: ""),
+                                "bitrate" to v.bitrate,
+                                "fps" to v.fps,
+                                "initStart" to v.initStart,
+                                "initEnd" to v.initEnd,
+                                "indexStart" to v.indexStart,
+                                "indexEnd" to v.indexEnd,
+                                "itag" to v.itag
+                            )
+                        }
+                        val audios = audioStreams.map { a ->
+                            mapOf(
+                                "url" to a.content,
+                                "codec" to (a.codec ?: ""),
+                                "bitrate" to a.bitrate,
+                                "initStart" to a.initStart,
+                                "initEnd" to a.initEnd,
+                                "indexStart" to a.indexStart,
+                                "indexEnd" to a.indexEnd,
+                                "itag" to a.itag
+                            )
+                        }
+                        mainHandler.post {
+                            result.success(mapOf("video" to videos, "audio" to audios))
+                        }
+                    } catch (e: Exception) {
+                        mainHandler.post {
+                            result.error("NP_FAILED", "${e.javaClass.simpleName}: ${e.message}", null)
+                        }
+                    }
+                }.start()
             }
             "loadDash" -> {
                 val id = (call.argument<Number>("textureId"))?.toLong()
@@ -180,28 +244,15 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         fun loadDash(args: Map<String, Any?>, result: MethodChannel.Result) {
             // Heavy work off the main thread.
             loadThread = thread(isDaemon = true, name = "hq-load-$id") {
-                try {
-                    // Check if we have init/index ranges for DASH.
-                    val vInitS = (args["initStart"] as? Number)?.toLong() ?: -1L
-                    val hasRanges = vInitS >= 0
-                    mainHandler.post {
-                        try {
-                            if (hasRanges) {
-                                // SparkTube-style on-demand DASH.
-                                val mpd = buildOtfManifest(args)
-                                prepareAndPlay(mpd, args)
-                            } else {
-                                // Fallback: merge video+audio progressive streams.
-                                // No manifest needed, works without ranges.
-                                prepareMerged(args)
-                            }
-                            result.success(null)
-                        } catch (e: Exception) {
-                            fail(result, "HQ_PREPARE_FAILED", e)
-                        }
+                mainHandler.post {
+                    try {
+                        // Merged video+audio progressive streams.
+                        // URLs now come from NewPipeExtractor (SparkTube-style).
+                        prepareMerged(args)
+                        result.success(null)
+                    } catch (e: Exception) {
+                        fail(result, "HQ_PREPARE_FAILED", e)
                     }
-                } catch (e: Exception) {
-                    mainHandler.post { fail(result, "HQ_MANIFEST_FAILED", e) }
                 }
             }
         }
@@ -676,5 +727,43 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "140", "139" -> "mp4a.40.2"
             else -> if (video) "avc1.4d401f" else "mp4a.40.2"
         }
+    }
+}
+
+// NewPipeExtractor Downloader (SparkTube's OkHttpDownloader ported to
+// HttpURLConnection to avoid the OkHttp dependency).
+private class SparkTubeDownloader : Downloader() {
+    companion object {
+        const val USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
+    }
+
+    @Throws(IOException::class, ReCaptchaException::class)
+    override fun execute(request: Request): Response {
+        val url = URL(request.url())
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = request.httpMethod()
+            setRequestProperty("User-Agent", USER_AGENT)
+            request.headers().forEach { (name, values) ->
+                values.forEach { value -> addRequestProperty(name, value) }
+            }
+            connectTimeout = 15000
+            readTimeout = 25000
+            instanceFollowRedirects = true
+        }
+        if (request.dataToSend() != null) {
+            conn.doOutput = true
+            conn.outputStream.use { it.write(request.dataToSend()) }
+        }
+        val code = conn.responseCode
+        val message = conn.responseMessage ?: ""
+        val stream = if (code >= 400) conn.errorStream else conn.inputStream
+        val body = stream?.readBytes()?.toString(Charsets.UTF_8) ?: ""
+        val headers = conn.headerFields
+            .filterKeys { it != null }
+            .mapValues { it.value }
+        conn.disconnect()
+        return Response(code, message, headers, body, request.url())
     }
 }
