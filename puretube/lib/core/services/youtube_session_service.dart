@@ -495,4 +495,56 @@ class YoutubeSessionService {
   }
 
   void dispose() => _client.close();
+
+  /// Dubbed audio languages (YouTube's "Audio Track" feature).
+  /// Returns one entry per language; empty when the video has a single track.
+  Future<List<AudioLanguage>> getAudioLanguages(String videoId) async {
+    final json = await _playerJson(videoId);
+    final sd = json['streamingData'];
+    if (sd is! Map<String, dynamic>) return const [];
+    final audio = _asMaps(sd['adaptiveFormats'])
+        .where((s) =>
+            (s['mimeType']?.toString() ?? '').startsWith('audio/') &&
+            (s['url']?.toString() ?? '').isNotEmpty)
+        .toList();
+    // Group by audioTrack id; keep the highest-bitrate URL per language.
+    final byLang = <String, Map<String, dynamic>>{};
+    for (final s in audio) {
+      final at = s['audioTrack'];
+      final String langId;
+      final String name;
+      final bool isDefault;
+      if (at is Map<String, dynamic>) {
+        langId = at['id']?.toString() ?? 'default';
+        name = at['displayName']?.toString() ?? langId;
+        isDefault = at['audioIsDefault'] == true;
+      } else {
+        langId = 'default';
+        name = 'Original';
+        isDefault = true;
+      }
+      final prev = byLang[langId];
+      if (prev == null || _num(s['bitrate']) > _num(prev['bitrate'])) {
+        byLang[langId] = {
+          'name': name,
+          'isDefault': isDefault,
+          'url': s['url'].toString(),
+          'bitrate': _num(s['bitrate']),
+        };
+      }
+    }
+    if (byLang.length <= 1) return const [];
+    final out = byLang.entries.map((e) => AudioLanguage(
+          id: e.key,
+          displayName: e.value['name'] as String,
+          isDefault: e.value['isDefault'] as bool,
+          audioUrl: e.value['url'] as String,
+          bitrateBps: e.value['bitrate'] as int,
+        )).toList()
+      ..sort((a, b) {
+        if (a.isDefault != b.isDefault) return a.isDefault ? -1 : 1;
+        return a.displayName.compareTo(b.displayName);
+      });
+    return out;
+  }
 }
