@@ -45,6 +45,8 @@ class PlayerUiState {
   final CaptionTrack? activeSubtitle;
   final List<MuxedQuality> availableQualities;
   final MuxedQuality? currentQuality;
+  final List<AudioLanguage> audioLanguages;
+  final AudioLanguage? activeAudioLanguage;
   final List<VideoDetails> relatedVideos;
   final bool relatedFailed;
   final LyricsResult? lyricsResult;
@@ -82,6 +84,8 @@ class PlayerUiState {
     this.activeSubtitle,
     this.availableQualities = const [],
     this.currentQuality,
+    this.audioLanguages = const [],
+    this.activeAudioLanguage,
     this.relatedVideos = const [],
     this.relatedFailed = false,
     this.lyricsResult,
@@ -112,6 +116,9 @@ class PlayerUiState {
     bool clearSubtitle = false,
     List<MuxedQuality>? availableQualities,
     MuxedQuality? currentQuality,
+    List<AudioLanguage>? audioLanguages,
+    AudioLanguage? activeAudioLanguage,
+    bool clearAudioLanguage = false,
     List<VideoDetails>? relatedVideos,
     bool? relatedFailed,
     LyricsResult? lyricsResult,
@@ -151,6 +158,10 @@ class PlayerUiState {
       availableQualities:
           availableQualities ?? this.availableQualities,
       currentQuality: currentQuality ?? this.currentQuality,
+      audioLanguages: audioLanguages ?? this.audioLanguages,
+      activeAudioLanguage: clearAudioLanguage
+          ? null
+          : activeAudioLanguage ?? this.activeAudioLanguage,
       relatedVideos: relatedVideos ?? this.relatedVideos,
       relatedFailed: relatedFailed ?? this.relatedFailed,
       lyricsResult:
@@ -938,7 +949,54 @@ class PlayerController extends Notifier<PlayerUiState>
         availableQualities: options,
         currentQuality: current,
       );
+      // Dubbed audio languages (YouTube "Audio Track"). Loaded alongside
+      // qualities; empty for single-language videos.
+      _loadAudioLanguages(id);
     } catch (_) {}
+  }
+
+  /// Loads dubbed audio languages for the "Audio Track" menu.
+  Future<void> _loadAudioLanguages(String videoId) async {
+    try {
+      final langs =
+          await _extractor.session.getAudioLanguages(videoId);
+      if (state.videoId != videoId) return;
+      state = state.copyWith(
+        audioLanguages: langs,
+        activeAudioLanguage:
+            langs.isEmpty ? null : langs.firstWhere(
+              (l) => l.isDefault,
+              orElse: () => langs.first,
+            ),
+        clearAudioLanguage: langs.isEmpty,
+      );
+    } catch (_) {}
+  }
+
+  /// Switches the dubbed audio language, keeping the same video stream.
+  /// Only for DASH (video+separate audio); muxed 360p has embedded audio.
+  Future<void> setAudioLanguage(AudioLanguage lang) async {
+    final q = state.currentQuality;
+    if (q == null || q.audioUrl == null) return;
+    if (state.activeAudioLanguage?.id == lang.id) return;
+    // Reuse the quality-switch path with the same video URL but the new
+    // language's audio URL.
+    final updated = MuxedQuality(
+      label: q.label,
+      height: q.height,
+      url: q.url,
+      audioUrl: lang.audioUrl,
+      bitrateKbps: q.bitrateKbps,
+      fps: q.fps,
+      codec: q.codec,
+      fullCodec: q.fullCodec,
+      audioFullCodec: q.audioFullCodec,
+      audioBitrateBps: lang.bitrateBps,
+      audioSampleRate: q.audioSampleRate,
+      isHdr: q.isHdr,
+    );
+    state = state.copyWith(activeAudioLanguage: lang);
+    await setQuality(updated);
   }
 
   /// Loads Up Next suggestions in the background. The section below the
