@@ -12,6 +12,7 @@ import androidx.media3.common.Player
 import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.dash.DashMediaSource
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -199,7 +200,13 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             releasePlayerOnly()
             val appContext = this@HqPlayerPlugin.appContext
                 ?: throw IllegalStateException("HQ plugin not attached")
-            val dataSourceFactory = DataSource.Factory { HqDataSource() }
+            // SparkTube-style: ExoPlayer's own DefaultHttpDataSource with
+            // Chrome UA. No custom headers, no custom params.
+            val dataSourceFactory = DefaultHttpDataSource.Factory()
+                .setUserAgent(CHROME_UA)
+                .setConnectTimeoutMs(15000)
+                .setReadTimeoutMs(20000)
+                .setAllowCrossProtocolRedirects(true)
             val dashFactory = DashMediaSource.Factory(dataSourceFactory)
             val mpdBase64 = Base64.encodeToString(
                 mpdXml.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
