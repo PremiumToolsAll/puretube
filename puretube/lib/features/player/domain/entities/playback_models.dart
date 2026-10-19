@@ -296,3 +296,20 @@ class ChannelInfo {
     required this.subscriberCount,
   });
 }
+
+/// A dubbed audio language track (YouTube's "Audio Track" feature).
+class AudioLanguage {
+  final String id; // e.g. "b+4"
+  final String displayName; // e.g. "Bangla", "English original"
+  final bool isDefault;
+  final String audioUrl;
+  final int bitrateBps;
+
+  const AudioLanguage({
+    required this.id,
+    required this.displayName,
+    required this.isDefault,
+    required this.audioUrl,
+    required this.bitrateBps,
+  });
+}
