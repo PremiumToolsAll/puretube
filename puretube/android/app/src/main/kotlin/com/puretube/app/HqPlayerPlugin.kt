@@ -281,6 +281,13 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         private const val HQ_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) " +
                 "Gecko/20100101 Firefox/140.0"
+
+        // SparkTube's UA for on-demand DASH: plain Chrome, no special
+        // headers. This is what their working HQ playback uses.
+        private const val CHROME_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                "Chrome/132.0.0.0 Safari/537.36"
     }
 
     // ------------------------------------------------------------------
@@ -305,27 +312,23 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 openedUri = uri
                 return bytesRemaining
             }
-            var urlStr = stripParams(uri.toString(), setOf("rn"))
-            // Ranges become &range= for DASH (never a Range header).
-            val pos = dataSpec.position
-            val len = dataSpec.length
-            if (pos > 0 || len > 0) {
-                val rangeParam = if (len > 0) {
-                    "range=$pos-${pos + len - 1}"
-                } else {
-                    "range=$pos-"
-                }
-                urlStr += (if (urlStr.contains("?")) "&" else "?") + rangeParam
-            }
-            urlStr += (if (urlStr.contains("?")) "&" else "?") +
-                "rn=${globalRn.getAndIncrement()}"
+            var urlStr = stripParams(uri.toString(), setOf("sq", "rn", "alr"))
             val connection =
                 (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                    // GET: the phone's network 403s POST on googlevideo.
+                    // SparkTube-style: plain GET with Chrome UA and standard
+                    // HTTP Range headers (on-demand DASH).
                     requestMethod = "GET"
-                    setRequestProperty("User-Agent", HQ_UA)
-                    setRequestProperty("TE", "trailers")
-                    setRequestProperty("Accept-Encoding", "identity")
+                    setRequestProperty("User-Agent", CHROME_UA)
+                    val pos = dataSpec.position
+                    val len = dataSpec.length
+                    if (pos > 0 || len > 0) {
+                        val rangeHeader = if (len > 0) {
+                            "bytes=$pos-${pos + len - 1}"
+                        } else {
+                            "bytes=$pos-"
+                        }
+                        setRequestProperty("Range", rangeHeader)
+                    }
                     connectTimeout = 15000
                     readTimeout = 30000
                     instanceFollowRedirects = true
@@ -384,25 +387,17 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     // by parsing tfdt boxes from media segments (sq=1, sq=2) fetched through
     // the same POST path the player itself uses, and build the manifest with
     // a fixed SegmentTemplate duration.
+    // On-demand DASH manifest (SparkTube-style, ports their DashSources).
+    // ------------------------------------------------------------------
+    // Uses isoff-on-demand profile with SegmentBase + indexRange. The
+    // init/index byte ranges come straight from the player response
+    // (initRange/indexRange) — NOTHING is fetched to build the manifest,
+    // so there is no probe that can 403. Plain GET requests only.
     private fun buildOtfManifest(args: Map<String, Any?>): String {
         val videoUrl = args["videoUrl"] as? String
             ?: throw IllegalArgumentException("HQ: missing videoUrl")
         val audioUrl = args["audioUrl"] as? String
             ?: throw IllegalArgumentException("HQ: missing audioUrl")
-        val videoBase = stripParams(videoUrl, setOf("sq", "rn", "alr"))
-        val audioBase = stripParams(audioUrl, setOf("sq", "rn", "alr"))
-
-        // Measure segment durations from real media segments.
-        val vSegMs = try {
-            measureSegmentMs(videoBase, "video")
-        } catch (e: IOException) {
-            throw IOException("HQ video segprobe: ${e.message}")
-        }
-        val aSegMs = try {
-            measureSegmentMs(audioBase, "audio")
-        } catch (e: IOException) {
-            throw IOException("HQ audio segprobe: ${e.message}")
-        }
 
         val vCodec = (args["videoCodec"] as? String).orEmpty()
             .ifEmpty { codecForItag(itagOf(videoUrl), true) }
@@ -416,49 +411,66 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val sampleRate = (args["audioSampleRate"] as? Number)?.toInt()
             .let { if (it == null || it <= 0) 44100 else it }
 
-        val totalSec = (args["durationSec"] as? Number)?.toDouble() ?: 0.0
-        val mpdDuration = if (totalSec > 0) "PT%.3fS".format(totalSec) else "PT0S"
+        // Byte ranges from the extractor (initRange/indexRange).
+        val vInitS = (args["initStart"] as? Number)?.toLong() ?: -1L
+        val vInitE = (args["initEnd"] as? Number)?.toLong() ?: -1L
+        val vIdxS = (args["indexStart"] as? Number)?.toLong() ?: -1L
+        val vIdxE = (args["indexEnd"] as? Number)?.toLong() ?: -1L
+        val aInitS = (args["audioInitStart"] as? Number)?.toLong() ?: -1L
+        val aInitE = (args["audioInitEnd"] as? Number)?.toLong() ?: -1L
+        val aIdxS = (args["audioIndexStart"] as? Number)?.toLong() ?: -1L
+        val aIdxE = (args["audioIndexEnd"] as? Number)?.toLong() ?: -1L
+        if (vInitS < 0 || vInitE <= vInitS || vIdxS <= 0 || vIdxE <= vIdxS) {
+            throw IOException("HQ: missing video init/index ranges")
+        }
+        if (aInitS < 0 || aInitE <= aInitS || aIdxS <= 0 || aIdxE <= aIdxS) {
+            throw IOException("HQ: missing audio init/index ranges")
+        }
+
+        val totalSec = (args["durationSec"] as? Number)?.toLong() ?: 0L
+        if (totalSec <= 0) throw IOException("HQ: missing duration")
+        val mpdDuration = "PT${totalSec}S"
         val itagV = itagOf(videoUrl).ifEmpty { "0" }
         val itagA = itagOf(audioUrl).ifEmpty { "0" }
-        val dollar = "$"
-        val numToken = "$dollar${"Number"}$dollar" // literal $Number$
 
         fun esc(s: String): String = s
             .replace("&", "&amp;")
             .replace("<", "&lt;")
             .replace("\"", "&quot;")
 
-        val vInit = esc("$videoBase&sq=0")
-        val vMedia = esc("$videoBase&sq=$numToken")
-        val aInit = esc("$audioBase&sq=0")
-        val aMedia = esc("$audioBase&sq=$numToken")
         val fpsAttr = if (fps > 0) " frameRate=\"$fps\"" else ""
-
-        return """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<MPD xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="urn:mpeg:DASH:schema:MPD:2011" xsi:schemaLocation="urn:mpeg:DASH:schema:MPD:2011 DASH-MPD.xsd" minBufferTime="PT1.500S" profiles="urn:mpeg:dash:profile:full:2011" type="static" mediaPresentationDuration="$mpdDuration">
-<Period>
-<AdaptationSet id="0" mimeType="video/mp4" subsegmentAlignment="true">
-<Role schemeIdUri="urn:mpeg:DASH:role:2011" value="main"/>
-<Representation id="$itagV" codecs="$vCodec" startWithSAP="1" maxPlayoutRate="1" bandwidth="$vBitrate" width="$width" height="$height"$fpsAttr>
-<SegmentTemplate startNumber="1" timescale="1000" duration="$vSegMs" initialization="$vInit" media="$vMedia"/>
-</Representation>
-</AdaptationSet>
-<AdaptationSet id="1" mimeType="audio/mp4" subsegmentAlignment="true">
-<Representation id="$itagA" codecs="$aCodec" startWithSAP="1" maxPlayoutRate="1" bandwidth="$aBitrate" audioSamplingRate="$sampleRate">
-<AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>
-<SegmentTemplate startNumber="1" timescale="1000" duration="$aSegMs" initialization="$aInit" media="$aMedia"/>
-</Representation>
-</AdaptationSet>
-</Period>
-</MPD>"""
+        val sb = StringBuilder(2048)
+        sb.append("<?xml version=\"1.0\" encoding=\"utf-8\"?>")
+        sb.append("<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\" ")
+        sb.append("profiles=\"urn:mpeg:dash:profile:isoff-on-demand:2011\" type=\"static\" ")
+        sb.append("mediaPresentationDuration=\"").append(mpdDuration).append("\" minBufferTime=\"PT1.5S\">")
+        sb.append("<Period id=\"0\" duration=\"").append(mpdDuration).append("\">")
+        // Video
+        sb.append("<AdaptationSet id=\"0\" mimeType=\"video/mp4\" subsegmentAlignment=\"true\" startWithSAP=\"1\">")
+        sb.append("<Representation id=\"").append(itagV).append("\" codecs=\"")
+            .append(esc(vCodec)).append("\" bandwidth=\"").append(vBitrate)
+            .append("\" width=\"").append(width).append("\" height=\"").append(height).append("\"")
+        sb.append(fpsAttr).append(">")
+        sb.append("<BaseURL>").append(esc(videoUrl)).append("</BaseURL>")
+        sb.append("<SegmentBase indexRange=\"").append(vIdxS).append('-').append(vIdxE)
+            .append("\"><Initialization range=\"").append(vInitS).append('-').append(vInitE)
+            .append("\"/></SegmentBase>")
+        sb.append("</Representation></AdaptationSet>")
+        // Audio
+        sb.append("<AdaptationSet id=\"1\" mimeType=\"audio/mp4\" subsegmentAlignment=\"true\" startWithSAP=\"1\">")
+        sb.append("<Representation id=\"").append(itagA).append("\" codecs=\"")
+            .append(esc(aCodec)).append("\" bandwidth=\"").append(aBitrate)
+            .append("\" audioSamplingRate=\"").append(sampleRate).append("\">")
+        sb.append("<AudioChannelConfiguration schemeIdUri=\"urn:mpeg:dash:23003:3:audio_channel_configuration:2011\" value=\"2\"/>")
+        sb.append("<BaseURL>").append(esc(audioUrl)).append("</BaseURL>")
+        sb.append("<SegmentBase indexRange=\"").append(aIdxS).append('-').append(aIdxE)
+            .append("\"><Initialization range=\"").append(aInitS).append('-').append(aInitE)
+            .append("\"/></SegmentBase>")
+        sb.append("</Representation></AdaptationSet>")
+        sb.append("</Period></MPD>")
+        return sb.toString()
     }
 
-    /**
-     * Measures one segment's duration in milliseconds by parsing tfdt
-     * (track fragment decode time) boxes from media segments sq=1 and sq=2,
-     * fetched with the same POST shape the player uses for segments.
-     * durationMs = (tfdt2 - tfdt1) / timescale * 1000.
-     */
     private fun measureSegmentMs(base: String, tag: String): Long {
         val initBytes = fetchSegmentBytes("$base&sq=0", tag, 8192)
         val timescale = parseMdhdTimescale(initBytes)
