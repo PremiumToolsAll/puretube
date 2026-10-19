@@ -63,6 +63,10 @@ class _IosPill extends StatelessWidget {
   final VoidCallback? onIncrease;
   final VoidCallback? onDecrease;
 
+  /// Called with a -1..1 delta while the user drags vertically on the
+  /// pill (up = positive). Enables hand-drag volume/brightness control.
+  final ValueChanged<double>? onDrag;
+
   /// Key used to translate a tap position into upper/lower half.
   final GlobalKey _pillKey = GlobalKey();
 
@@ -71,6 +75,7 @@ class _IosPill extends StatelessWidget {
     required this.kind,
     this.onIncrease,
     this.onDecrease,
+    this.onDrag,
   });
 
   @override
@@ -103,6 +108,12 @@ class _IosPill extends StatelessWidget {
             } else {
               onDecrease?.call();
             }
+          },
+          onVerticalDragUpdate: (details) {
+            // Drag up = increase, drag down = decrease.
+            // ~80px drag covers the full 0..1 range (fast).
+            if (onDrag == null) return;
+            onDrag!(-details.delta.dy / 80.0);
           },
           child: Container(
             key: _pillKey,
@@ -795,6 +806,41 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _hideGaugeSoon();
   }
 
+  /// Fast drag path: updates the pill UI instantly (synchronous setState)
+  /// and fires the volume change without awaiting — no lag during drag.
+  void _setVolumeGaugeFast(double v) {
+    v = v.clamp(0.0, 100.0);
+    // Fire-and-forget: don't block the drag on the platform call.
+    ref.read(playerControllerProvider.notifier).setDisplayVolume(v);
+    if (v > 0) _lastVolume = v;
+    _gauge = _Gauge(
+      icon: v <= 10
+          ? Icons.volume_off
+          : (v <= 50 ? Icons.volume_down : Icons.volume_up),
+      label: v == 0 ? 'Muted' : 'Volume ${v.round()}%',
+      value: v / 100,
+      kind: _GaugeKind.volume,
+    );
+    setState(() {});
+    _hideGaugeSoon();
+  }
+
+  /// Fast drag path for brightness: same instant-UI pattern.
+  void _setBrightnessGaugeFast(double b) {
+    b = b.clamp(0.05, 1.0);
+    try {
+      ScreenBrightness().setScreenBrightness(b);
+    } catch (_) {}
+    _gauge = _Gauge(
+      icon: b <= 0.15 ? Icons.brightness_low : Icons.brightness_6,
+      label: 'Brightness ${(b * 100).round()}%',
+      value: b,
+      kind: _GaugeKind.brightness,
+    );
+    setState(() {});
+    _hideGaugeSoon();
+  }
+
   /// Set brightness from the gauge's min / max buttons.
   Future<void> _setBrightnessGauge(double b) async {
     b = b.clamp(0.05, 1.0);
@@ -884,6 +930,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             kind: g.kind,
             onIncrease: () => _setVolumeGauge(v + 5),
             onDecrease: () => _setVolumeGauge(v - 5),
+            onDrag: (delta) => _setVolumeGaugeFast(v + delta * 100),
           ),
         ),
       );
@@ -899,6 +946,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             kind: g.kind,
             onIncrease: () => _setBrightnessGauge(b + 0.05),
             onDecrease: () => _setBrightnessGauge(b - 0.05),
+            onDrag: (delta) => _setBrightnessGaugeFast(b + delta),
           ),
         ),
       );
