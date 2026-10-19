@@ -203,6 +203,19 @@ class MuxedQuality {
   /// Audio sample rate in Hz (DASH entries), e.g. 44100. 0 when unknown.
   final int audioSampleRate;
 
+  /// Byte ranges for on-demand DASH (SparkTube-style SegmentBase).
+  /// From the player response's initRange/indexRange; -1 when unknown.
+  final int initStart;
+  final int initEnd;
+  final int indexStart;
+  final int indexEnd;
+
+  /// Audio track's init/index ranges (for the audio AdaptationSet).
+  final int audioInitStart;
+  final int audioInitEnd;
+  final int audioIndexStart;
+  final int audioIndexEnd;
+
   /// True when the stream carries HDR (PQ/HLG) metadata, detected from
   /// the stream's quality label when the extractor exposes it.
   /// youtube_explode_dart does not surface per-stream color info, so
@@ -224,6 +237,14 @@ class MuxedQuality {
     this.audioFullCodec = '',
     this.audioBitrateBps = 0,
     this.audioSampleRate = 0,
+    this.initStart = -1,
+    this.initEnd = -1,
+    this.indexStart = -1,
+    this.indexEnd = -1,
+    this.audioInitStart = -1,
+    this.audioInitEnd = -1,
+    this.audioIndexStart = -1,
+    this.audioIndexEnd = -1,
   });
 
   /// True when this is a video-only DASH stream needing external audio.
