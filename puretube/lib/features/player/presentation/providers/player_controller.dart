@@ -1711,6 +1711,48 @@ class PlayerController extends Notifier<PlayerUiState>
       _onPlaybackCompleted();
     };
 
+    // Prefer NewPipeExtractor streams (same as SparkTube) — their URLs
+    // are accepted by YouTube where the session-service URLs get 403.
+    var videoUrl = target.url;
+    var audioUrl = target.audioUrl!;
+    var usedNewPipe = false;
+    if (videoId != null) {
+      try {
+        final np = await _hq.getNewPipeStreams(videoId);
+        final npVideos = np['video'] ?? const <Map<String, dynamic>>[];
+        final npAudios = np['audio'] ?? const <Map<String, dynamic>>[];
+        // Find the video stream at the target height (prefer AVC).
+        Map<String, dynamic>? best;
+        for (final v in npVideos) {
+          final h = (v['height'] as num?)?.toInt() ?? 0;
+          if (h != target.height) continue;
+          if (best == null) {
+            best = v;
+          } else {
+            final vc = (v['codec'] as String? ?? '').toLowerCase();
+            final bc = (best['codec'] as String? ?? '').toLowerCase();
+            if (vc.startsWith('avc') && !bc.startsWith('avc')) best = v;
+          }
+        }
+        if (best != null && npAudios.isNotEmpty) {
+          // Highest-bitrate audio.
+          var bestAudio = npAudios.first;
+          for (final a in npAudios) {
+            final br = (a['bitrate'] as num?)?.toInt() ?? 0;
+            final bbr = (bestAudio['bitrate'] as num?)?.toInt() ?? 0;
+            if (br > bbr) bestAudio = a;
+          }
+          videoUrl = best['url'] as String;
+          audioUrl = bestAudio['url'] as String;
+          usedNewPipe = true;
+        }
+      } catch (_) {
+        // NewPipe unavailable: fall back to the session-service URLs.
+      }
+    }
+    // ignore: unused_local_variable
+    final npUsed = usedNewPipe;
+
     try {
       final texId = await _hq.create();
       if (token != _qualitySwitchToken || state.videoId != videoId) {
@@ -1719,8 +1761,8 @@ class PlayerController extends Notifier<PlayerUiState>
       }
       state = state.copyWith(hqTextureId: texId);
       await _hq.loadDash(
-        videoUrl: target.url,
-        audioUrl: target.audioUrl!,
+        videoUrl: videoUrl,
+        audioUrl: audioUrl,
         videoCodec: target.fullCodec,
         width: (target.height * 16) ~/ 9,
         height: target.height,
