@@ -14,6 +14,28 @@ class HqPlayerService {
   int? _textureId;
   bool _handlerSet = false;
 
+  /// Gets stream URLs via NewPipeExtractor (same as SparkTube).
+  /// Returns {'video': [...], 'audio': [...]} with url/height/codec/etc.
+  Future<Map<String, List<Map<String, dynamic>>>> getNewPipeStreams(
+      String videoId) async {
+    final result = await _ch.invokeMethod('getNewPipeStreams', {
+      'videoId': videoId,
+    });
+    final map = Map<String, dynamic>.from(result as Map);
+    List<Map<String, dynamic>> parseList(Object? v) {
+      if (v is! List) return [];
+      return v
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    }
+
+    return {
+      'video': parseList(map['video']),
+      'audio': parseList(map['audio']),
+    };
+  }
+
   /// Raw native error message (already loud — surface it, don't downgrade).
   void Function(String message)? onError;
 
