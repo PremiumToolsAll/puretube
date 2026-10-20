@@ -31,10 +31,6 @@ import java.net.URL
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.TextureRegistry
-import java.io.ByteArrayInputStream
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import kotlin.concurrent.thread
 
 /**
