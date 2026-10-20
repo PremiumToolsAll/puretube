@@ -141,9 +141,12 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         mainHandler.post {
                             result.success(mapOf("video" to videos, "audio" to audios))
                         }
-                    } catch (e: Exception) {
+                    } catch (t: Throwable) {
+                        // Throwable, not Exception: a linkage Error here
+                        // (e.g. a missing extractor dependency class) must
+                        // surface as a channel error, never kill the app.
                         mainHandler.post {
-                            result.error("NP_FAILED", "${e.javaClass.simpleName}: ${e.message}", null)
+                            result.error("NP_FAILED", "${t.javaClass.simpleName}: ${t.message}", null)
                         }
                     }
                 }.start()
@@ -246,14 +249,14 @@ class HqPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         // URLs now come from NewPipeExtractor (SparkTube-style).
                         prepareMerged(args)
                         result.success(null)
-                    } catch (e: Exception) {
-                        fail(result, "HQ_PREPARE_FAILED", e)
+                    } catch (t: Throwable) {
+                        fail(result, "HQ_PREPARE_FAILED", t)
                     }
                 }
             }
         }
 
-        private fun fail(result: MethodChannel.Result, code: String, e: Exception) {
+        private fun fail(result: MethodChannel.Result, code: String, e: Throwable) {
             result.error(code, "${e.javaClass.simpleName}: ${e.message}", null)
         }
 
