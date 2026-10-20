@@ -67,4 +67,14 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-dash:1.6.1")
     // NewPipeExtractor for stream URLs (same as SparkTube).
     implementation(files("libs/newpipeextractor-0.26.5-android-compat.jar"))
+    // NewPipeExtractor's runtime dependencies (same set SparkTube declares;
+    // the vendored JAR does NOT bundle them — without jsoup/nanojson the
+    // extractor dies with NoClassDefFoundError and takes the app down).
+    implementation("org.jsoup:jsoup:1.22.2")
+    implementation("org.mozilla:rhino:1.8.1")
+    implementation("org.mozilla:rhino-engine:1.8.1")
+    implementation("com.google.protobuf:protobuf-javalite:4.35.1")
+    implementation("com.google.code.findbugs:jsr305:3.0.2")
+    implementation("com.github.TeamNewPipe:nanojson:e9d656ddb49a412a5a0a5d5ef20ca7ef09549996")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
