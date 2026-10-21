@@ -41,8 +41,6 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        // Native HQ player (ExoPlayer) for 1080p+ DASH — app-local plugin.
-        flutterEngine.plugins.add(HqPlayerPlugin())
         pipChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger, "pure_tube/pip"
         )
