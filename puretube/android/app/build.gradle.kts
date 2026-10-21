@@ -68,11 +68,13 @@ dependencies {
     // Native HQ player (ExoPlayer) for 1080p+ DASH.
     implementation("androidx.media3:media3-exoplayer:1.6.1")
     implementation("androidx.media3:media3-exoplayer-dash:1.6.1")
-    // NewPipeExtractor for stream URLs (same as SparkTube).
-    implementation(files("libs/newpipeextractor-0.26.5-android-compat.jar"))
     // NewPipeExtractor's runtime dependencies (same set SparkTube declares;
     // the vendored JAR does NOT bundle them — without jsoup/nanojson the
     // extractor dies with NoClassDefFoundError and takes the app down).
+    // NOTE: the extractor JAR itself is NOT declared here — the
+    // puretube_playback plugin bundles it, and having both copies made
+    // the release build fail with duplicate classes (build #542). The
+    // plugin's copy is on this app's classpath anyway.
     implementation("org.jsoup:jsoup:1.22.2")
     implementation("org.mozilla:rhino:1.8.1")
     implementation("org.mozilla:rhino-engine:1.8.1")
