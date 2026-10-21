@@ -60,6 +60,12 @@ class PlayerUiState {
   /// it used to be a texture id.)
   final int? hqTextureId;
 
+  /// SparkTube-style quality selection: true after the user picks
+  /// "Auto" in the quality menu — adaptive playback (the HQ plugin
+  /// runs DASH with no height cap). An explicit height pick clears it.
+  /// Survives video changes, like SparkTube's session selection.
+  final bool autoQuality;
+
   /// HQ video aspect ratio (width/height) from the native player.
   /// 0 = unknown (UI falls back to 16:9).
   final double hqAspectRatio;
@@ -95,6 +101,7 @@ class PlayerUiState {
     this.lyricsLoading = false,
     this.autoplay = true,
     this.hqTextureId,
+    this.autoQuality = false,
     this.hqAspectRatio = 0,
   });
 
@@ -129,6 +136,7 @@ class PlayerUiState {
     bool clearLyrics = false,
     bool? autoplay,
     int? hqTextureId,
+    bool? autoQuality,
     bool clearHq = false,
     double? hqAspectRatio,
   }) {
@@ -171,6 +179,7 @@ class PlayerUiState {
           clearLyrics ? null : (lyricsResult ?? this.lyricsResult),
       lyricsLoading: lyricsLoading ?? this.lyricsLoading,
       autoplay: autoplay ?? this.autoplay,
+      autoQuality: autoQuality ?? this.autoQuality,
       hqTextureId: clearHq ? null : (hqTextureId ?? this.hqTextureId),
       hqAspectRatio: clearHq ? 0 : (hqAspectRatio ?? this.hqAspectRatio),
     );
@@ -262,6 +271,9 @@ class PlayerController extends Notifier<PlayerUiState>
   PureTubeController? _pt;
   bool _ptEndedHandled = false;
   String? _lastPluginError;
+  // Video id for which the persistent-Auto hook already engaged the
+  // HQ engine (prevents a fail/retry loop within one video).
+  String? _autoHqEngagedFor;
 
   PureTubeController get _plugin {
     var c = _pt;
@@ -642,6 +654,9 @@ class PlayerController extends Notifier<PlayerUiState>
       audioOnly: keepAudioOnly,
       // Keep the autoplay preference across video loads.
       autoplay: _autoplay,
+      // SparkTube behavior: an explicit Auto quality pick survives
+      // video changes (session-level selection).
+      autoQuality: state.autoQuality,
       // The sleep timer survives track changes (wall-clock based).
       sleepRemaining: state.sleepRemaining,
       sleepTotal: state.sleepTotal,
@@ -1042,6 +1057,18 @@ class PlayerController extends Notifier<PlayerUiState>
         availableQualities: options,
         currentQuality: current,
       );
+      // SparkTube behavior: an explicit "Auto" pick survives video
+      // changes — re-engage the adaptive HQ engine for the new video
+      // (at most once per video; a failed attempt stays on mpv with
+      // its loud error instead of looping).
+      if (state.autoQuality &&
+          !state.audioOnly &&
+          !hqActive &&
+          _autoHqEngagedFor != id &&
+          options.any((q) => q.isDash && q.height >= 1080)) {
+        _autoHqEngagedFor = id;
+        unawaited(setQualityAuto());
+      }
       // Dubbed audio languages (YouTube "Audio Track"). Loaded alongside
       // qualities; empty for single-language videos.
       _loadAudioLanguages(id);
@@ -1074,6 +1101,22 @@ class PlayerController extends Notifier<PlayerUiState>
     final q = state.currentQuality;
     if (q == null) return;
     if (state.activeAudioLanguage?.id == lang.id) return;
+
+    // HQ engine active: switch the track natively — the plugin
+    // rebuilds from its cached catalog with the chosen dub, position
+    // preserved, no mpv detour and no full reload.
+    if (hqActive) {
+      state = state.copyWith(activeAudioLanguage: lang);
+      final pt = _plugin;
+      try {
+        final catalog = pt.catalog ??
+            await pt.resolve(
+                'https://www.youtube.com/watch?v=${state.videoId}');
+        final trackId = _matchPluginTrack(catalog, lang);
+        if (trackId != null) await pt.setAudioTrack(trackId);
+      } catch (_) {}
+      return;
+    }
 
     MuxedQuality updated;
     if (q.audioUrl != null) {
@@ -1505,6 +1548,9 @@ class PlayerController extends Notifier<PlayerUiState>
   /// 'auto' never forces a switch.
   Future<void> applyFullscreenQuality(bool isFullscreen) async {
     if (state.status != PlayerStatus.ready || state.audioOnly) return;
+    // SparkTube rule: an explicit "Auto" pick beats the settings
+    // defaults for this session — fullscreen changes don't override it.
+    if (state.autoQuality) return;
     final videoId = state.videoId;
     if (videoId == null) return;
     final onWifi = await _isOnWifi();
@@ -1539,6 +1585,46 @@ class PlayerController extends Notifier<PlayerUiState>
     }
   }
 
+  /// SparkTube-style "Auto" quality: adaptive playback.
+  ///
+  /// With 1080p+ streams available, the HQ plugin runs an adaptive
+  /// DASH session with NO height cap — it starts with small segments
+  /// at a quality the connection can carry and adapts per segment,
+  /// like the official player. Without HQ streams, SparkTube's
+  /// settings-default behavior applies: the best stream at or below
+  /// 720p via mpv. The pick survives video changes (see loadQualities).
+  Future<void> setQualityAuto() async {
+    if (state.status != PlayerStatus.ready || state.videoId == null) {
+      return;
+    }
+    if (state.audioOnly) return;
+    final token = ++_qualitySwitchToken;
+    state = state.copyWith(autoQuality: true);
+    final options = state.availableQualities;
+    final hqOptions =
+        options.where((q) => q.isDash && q.height >= 1080).toList();
+    if (hqOptions.isNotEmpty) {
+      hqOptions.sort((a, b) => b.height.compareTo(a.height));
+      final top = hqOptions.first;
+      if (hqActive) {
+        // Already on the plugin: just lift the cap — the cached
+        // catalog rebuilds adaptively, position preserved.
+        try {
+          await _plugin.setQuality(null);
+        } catch (_) {}
+        state = state.copyWith(currentQuality: top);
+        return;
+      }
+      await _playHq(top, token, cap: null);
+      return;
+    }
+    // No HQ streams: best stream at or below the 720p default.
+    if (options.isEmpty) return;
+    final match = _pickClosestOption(options, 720);
+    if (match == null) return;
+    await setQuality(match, keepAuto: true);
+  }
+
   /// Switches to a different quality, preserving the current position
   /// and play state (via handler.switchStream).
   ///
@@ -1547,7 +1633,8 @@ class PlayerController extends Notifier<PlayerUiState>
   /// verified after switching; on failure the previous quality is
   /// restored and the REAL failure reason is shown loudly (user
   /// directive 2026-10-17: never silently fall back to 360p).
-  Future<void> setQuality(MuxedQuality quality) async {
+  Future<void> setQuality(MuxedQuality quality,
+      {bool keepAuto = false}) async {
     final videoId = state.videoId;
     if (state.status != PlayerStatus.ready || videoId == null) {
       return;
@@ -1564,12 +1651,32 @@ class PlayerController extends Notifier<PlayerUiState>
     // codec variant separately). Automatic selection uses _pickDashOption
     // which prefers AVC.
     var target = quality;
+    // An explicit height pick ends Auto mode (SparkTube semantics);
+    // internal re-applications (Auto's own mpv pick) keep it.
+    if (!keepAuto && state.autoQuality) {
+      state = state.copyWith(autoQuality: false);
+    }
+    // Already on the HQ plugin with another HQ target: SparkTube-style
+    // rebuild from the plugin's cached catalog at the new cap —
+    // position preserved, no re-extraction, no mpv detour.
+    if (hqActive && target.isDash && target.height >= 1080) {
+      var rebuilt = false;
+      try {
+        await _plugin.setQuality(target.height);
+        rebuilt = true;
+      } catch (_) {}
+      if (rebuilt) {
+        state = state.copyWith(currentQuality: target);
+        return;
+      }
+      // Rebuild failed — fall through to the full _playHq reload.
+    }
     // 1080p+ DASH goes straight to the native HQ (ExoPlayer) engine —
     // mpv cannot play these streams on this phone (user directive
     // 2026-10-17: "Java code দিয়ে ফোর্স করো"). Everything below 1080p
     // keeps the proven mpv path.
     if (target.isDash && target.height >= 1080) {
-      await _playHq(target, token);
+      await _playHq(target, token, cap: target.height);
       return;
     }
     // Leaving the HQ engine: stop it before mpv takes over.
@@ -1732,7 +1839,8 @@ class PlayerController extends Notifier<PlayerUiState>
   /// mpv cannot play these streams on this phone, so they go straight to
   /// the Java player. On failure the REAL reason is surfaced loudly —
   /// never a silent downgrade (user directive 2026-10-17).
-  Future<void> _playHq(MuxedQuality target, int token) async {
+  Future<void> _playHq(MuxedQuality target, int token,
+      {required int? cap}) async {
     final videoId = state.videoId;
     if (videoId == null) return;
     // Pause mpv so it doesn't double-play under the HQ engine.
@@ -1762,7 +1870,7 @@ class PlayerController extends Notifier<PlayerUiState>
     try {
       await pt.load(
         url,
-        height: target.height,
+        height: cap,
         audioTrackId: audioTrackId,
         position: resumeAt,
         autoplay: true,

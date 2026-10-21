@@ -1132,11 +1132,60 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             Flexible(
               child: ListView.builder(
                 shrinkWrap: true,
-                itemCount: qualities.length,
+                itemCount: qualities.length + 1,
                 itemBuilder: (ctx, i) {
-                  final q = qualities[i];
-                  // YouTube-style: selected if same height.
-                  final selected = current != null &&
+                  if (i == 0) {
+                    // SparkTube-style Auto row: adaptive quality.
+                    final selected = uiState.autoQuality;
+                    return InkWell(
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        if (mounted) notifier.setQualityAuto();
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 22,
+                              height: 22,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: selected
+                                      ? _accent
+                                      : Colors.white38,
+                                  width: 2,
+                                ),
+                                color: selected
+                                    ? _accent
+                                    : Colors.transparent,
+                              ),
+                              child: selected
+                                  ? const Icon(Icons.check,
+                                      color: Colors.white, size: 14)
+                                  : null,
+                            ),
+                            const SizedBox(width: 16),
+                            const Expanded(
+                              child: Text(
+                                'Auto',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+                  final q = qualities[i - 1];
+                  // YouTube-style: selected if same height (and not Auto).
+                  final selected = !uiState.autoQuality &&
+                      current != null &&
                       current.height == q.height;
                   return InkWell(
                     onTap: () {
@@ -2865,11 +2914,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   Widget _buildTopBar(PlayerUiState uiState) {
-    final qualityLabel = uiState.currentQuality != null
-        ? uiState.currentQuality!.resolutionLabel
-        : (uiState.streams != null
-            ? '${uiState.streams!.muxedHeight}p'
-            : 'Auto');
+    final qualityLabel = uiState.autoQuality
+        ? 'Auto'
+        : (uiState.currentQuality != null
+            ? uiState.currentQuality!.resolutionLabel
+            : (uiState.streams != null
+                ? '${uiState.streams!.muxedHeight}p'
+                : 'Auto'));
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(

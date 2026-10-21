@@ -78,7 +78,9 @@ dependencies {
     implementation("org.mozilla:rhino-engine:1.8.1")
     implementation("com.google.protobuf:protobuf-javalite:4.35.1")
     implementation("com.google.code.findbugs:jsr305:3.0.2")
-    implementation("com.github.TeamNewPipe:nanojson:e9d656ddb49a412a5a0a5d5ef20ca7ef09549996")
+    // nanojson intentionally NOT declared here: the puretube_playback
+    // plugin bundles the same nanojson JAR, and declaring both made
+    // the release build fail with duplicate classes (build #541).
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // Core library desugaring for the puretube_playback plugin.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
