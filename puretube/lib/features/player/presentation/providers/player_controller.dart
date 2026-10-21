@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:puretube_playback/puretube_playback.dart';
 import 'package:volume_controller/volume_controller.dart';
 
 import '../../../../core/database/hive_setup.dart';
@@ -14,7 +15,6 @@ import '../../../../core/di/providers.dart';
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/services/pip_service.dart';
 import '../../../../core/services/sponsorblock_service.dart';
-import '../../../../core/services/hq_player_service.dart';
 import '../../../../core/services/lyrics_service.dart';
 import '../../../../core/services/watch_category_tracker.dart';
 import '../../../../core/services/youtube_extractor_service.dart';
@@ -53,9 +53,11 @@ class PlayerUiState {
   final LyricsResult? lyricsResult;
   final bool lyricsLoading;
 
-  /// Native HQ (ExoPlayer) texture id. Non-null means 1080p+ DASH is
-  /// playing through the Java engine instead of mpv — the UI renders a
-  /// [Texture] and routes transport through [HqPlayerService].
+  /// Native HQ engine marker. Non-null means 1080p+ is playing through
+  /// the puretube_playback plugin (NewPipeExtractor + Media3) instead of
+  /// mpv — the UI renders a PureTubeVideoView and routes transport
+  /// through the plugin controller. (The value itself is unused now;
+  /// it used to be a texture id.)
   final int? hqTextureId;
 
   /// HQ video aspect ratio (width/height) from the native player.
@@ -251,10 +253,58 @@ class PlayerController extends Notifier<PlayerUiState>
   /// falling back to 360p. Reset at the start of every DASH switch.
   String? _dashVerifyError;
 
-  // ---------------- native HQ player (1080p+ DASH) ----------------
-  // The Java/ExoPlayer engine for high quality. Active only when
+  // ---------------- native HQ player (1080p+) ----------------
+  // The puretube_playback plugin (NewPipeExtractor + Media3, SparkTube-
+  // style DASH with merged/muxed fallbacks). Active only when
   // state.hqTextureId != null; everything else stays on mpv.
-  final HqPlayerService _hq = HqPlayerService();
+  // The plugin allows ONE live controller per engine, so it is created
+  // lazily on first HQ use and reused for the provider's lifetime.
+  PureTubeController? _pt;
+  bool _ptEndedHandled = false;
+  String? _lastPluginError;
+
+  PureTubeController get _plugin {
+    var c = _pt;
+    if (c == null) {
+      c = PureTubeController();
+      c.addListener(_onPluginChanged);
+      _pt = c;
+    }
+    return c;
+  }
+
+  /// Mirrors plugin state into the HQ display fields and forwards the
+  /// ended event into the normal completion flow (Next / autoplay).
+  void _onPluginChanged() {
+    final c = _pt;
+    if (c == null || !hqActive) return;
+    if (c.duration > Duration.zero && c.duration != _hqDuration) {
+      _hqDuration = c.duration;
+      _hqDurationCtrl.add(c.duration);
+    }
+    // Loud HQ errors (never silent): native playback/resolve failures
+    // land in c.error. 'superseded' is just a raced load — ignore it.
+    final err = c.error;
+    if (err != null &&
+        err != _lastPluginError &&
+        !err.contains('superseded')) {
+      _lastPluginError = err;
+      state = state.copyWith(
+        errorMessage: 'HQ প্লেব্যাক সমস্যা: ${_shortenError(err)}',
+      );
+    } else if (err == null) {
+      _lastPluginError = null;
+    }
+    if (c.ended) {
+      if (!_ptEndedHandled) {
+        _ptEndedHandled = true;
+        _onPlaybackCompleted();
+      }
+    } else {
+      _ptEndedHandled = false;
+    }
+  }
+
   Timer? _hqPollTimer;
   Duration _hqPosition = Duration.zero;
   Duration _hqDuration = Duration.zero;
@@ -287,8 +337,6 @@ class PlayerController extends Notifier<PlayerUiState>
   Duration get displayDuration =>
       hqActive ? _hqDuration : _handler.player.state.duration;
 
-  double _hqVolume = 1.0;
-
   /// Cached system volume (0-100). Synced with the phone's media volume —
   /// the in-app pill and the hardware buttons control the same value.
   double _systemVolume = 50;
@@ -306,12 +354,9 @@ class PlayerController extends Notifier<PlayerUiState>
       await VolumeController.instance.setVolume(clamped / 100);
     } catch (_) {}
     // Keep player engines at full; system volume controls loudness.
-    if (hqActive) {
-      _hqVolume = 1.0;
-      try {
-        await _hq.setVolume(1.0);
-      } catch (_) {}
-    } else {
+    // (The plugin engine has no volume API — it always plays at full
+    // volume, so the system volume set above is the loudness control.)
+    if (!hqActive) {
       try {
         await _handler.player.setVolume(100);
       } catch (_) {}
@@ -465,7 +510,9 @@ class PlayerController extends Notifier<PlayerUiState>
       _completedSub?.cancel();
       _cancelSleepTimer();
       _hqPollTimer?.cancel();
-      unawaited(_hq.dispose());
+      final pt = _pt;
+      _pt = null;
+      if (pt != null) unawaited(pt.close());
       _hqPositionCtrl.close();
       _hqDurationCtrl.close();
       _hqPlayingCtrl.close();
@@ -519,12 +566,9 @@ class PlayerController extends Notifier<PlayerUiState>
   Future<void> _hqToBackground() async {
     if (!hqActive || _hqBackgrounded) return;
     _hqBackgrounded = true;
-    Duration pos = Duration.zero;
+    final pos = _pt?.position ?? Duration.zero;
     try {
-      pos = await _hq.position();
-    } catch (_) {}
-    try {
-      await _hq.pause();
+      await _pt?.pause();
     } catch (_) {}
     final audioUrl = state.currentQuality?.audioUrl;
     if (audioUrl == null) return;
@@ -546,8 +590,8 @@ class PlayerController extends Notifier<PlayerUiState>
       await _handler.pause();
     } catch (_) {}
     try {
-      await _hq.seekTo(pos);
-      await _hq.play();
+      await _pt?.seek(pos);
+      await _pt?.play();
       _hqPlaying = true;
       _hqPlayingCtrl.add(true);
     } catch (_) {}
@@ -882,10 +926,12 @@ class PlayerController extends Notifier<PlayerUiState>
       // Optimistic flip for a snappy icon; the poll corrects it.
       _hqPlaying = !_hqPlaying;
       _hqPlayingCtrl.add(_hqPlaying);
+      final pt = _pt;
+      if (pt == null) return;
       if (_hqPlaying) {
-        await _hq.play();
+        await pt.play();
       } else {
-        await _hq.pause();
+        await pt.pause();
       }
       return;
     }
@@ -920,7 +966,11 @@ class PlayerController extends Notifier<PlayerUiState>
 
   Future<void> setSpeed(double speed) async {
     final s = speed.clamp(0.25, 4.0);
-    if (hqActive) await _hq.setSpeed(s);
+    if (hqActive) {
+      try {
+        await _pt?.setSpeed(s.clamp(0.25, 3.0));
+      } catch (_) {}
+    }
     await _handler.setSpeed(s);
     state = state.copyWith(speed: s);
   }
@@ -1684,139 +1734,56 @@ class PlayerController extends Notifier<PlayerUiState>
   /// never a silent downgrade (user directive 2026-10-17).
   Future<void> _playHq(MuxedQuality target, int token) async {
     final videoId = state.videoId;
+    if (videoId == null) return;
     // Pause mpv so it doesn't double-play under the HQ engine.
     try {
       await _handler.pause();
     } catch (_) {}
     final resumeAt = _handler.player.state.position;
+    final url = 'https://www.youtube.com/watch?v=$videoId';
+    final pt = _plugin;
 
-    String? hqError;
-    var hqFailed = false;
-    _hq.onError = (msg) {
-      if (token != _qualitySwitchToken || state.videoId != videoId) return;
-      hqError = msg;
-      hqFailed = true;
-    };
-    _hq.onReady = (dur, w, h) {
-      if (dur > Duration.zero) {
-        _hqDuration = dur;
-        _hqDurationCtrl.add(dur);
-      }
-      if (w > 0 && h > 0) {
-        state = state.copyWith(hqAspectRatio: w / h);
-      }
-    };
-    _hq.onCompleted = () {
-      if (token != _qualitySwitchToken || state.videoId != videoId) return;
-      _onPlaybackCompleted();
-    };
-
-    // Prefer NewPipeExtractor streams (same as SparkTube) — their URLs
-    // are accepted by YouTube where the session-service URLs get 403.
-    var videoUrl = target.url;
-    var audioUrl = target.audioUrl!;
-    var usedNewPipe = false;
-    if (videoId != null) {
+    // If a dubbed audio language is selected, find the matching plugin
+    // track first (the plugin groups tracks by NewPipe's track id /
+    // name; the app's AudioLanguage only carries a display name).
+    String? audioTrackId;
+    final lang = state.activeAudioLanguage;
+    if (lang != null) {
       try {
-        final np = await _hq.getNewPipeStreams(videoId);
-        final npVideos = np['video'] ?? const <Map<String, dynamic>>[];
-        final npAudios = np['audio'] ?? const <Map<String, dynamic>>[];
-        // Find the video stream at the target height (prefer AVC).
-        Map<String, dynamic>? best;
-        for (final v in npVideos) {
-          final h = (v['height'] as num?)?.toInt() ?? 0;
-          if (h != target.height) continue;
-          if (best == null) {
-            best = v;
-          } else {
-            final vc = (v['codec'] as String? ?? '').toLowerCase();
-            final bc = (best['codec'] as String? ?? '').toLowerCase();
-            if (vc.startsWith('avc') && !bc.startsWith('avc')) best = v;
-          }
-        }
-        if (best != null && npAudios.isNotEmpty) {
-          // Highest-bitrate audio.
-          var bestAudio = npAudios.first;
-          for (final a in npAudios) {
-            final br = (a['bitrate'] as num?)?.toInt() ?? 0;
-            final bbr = (bestAudio['bitrate'] as num?)?.toInt() ?? 0;
-            if (br > bbr) bestAudio = a;
-          }
-          videoUrl = best['url'] as String;
-          audioUrl = bestAudio['url'] as String;
-          usedNewPipe = true;
-        }
-      } catch (_) {
-        // NewPipe unavailable: fall back to the session-service URLs.
-      }
+        final catalog = await pt.resolve(url);
+        audioTrackId = _matchPluginTrack(catalog, lang);
+      } catch (_) {}
+      if (token != _qualitySwitchToken || state.videoId != videoId) return;
     }
-    // ignore: unused_local_variable
-    final npUsed = usedNewPipe;
 
+    // Mount the native view BEFORE loading: the plugin binds its
+    // ExoPlayer to the mounted PlayerView.
+    state = state.copyWith(hqTextureId: 1);
     try {
-      final texId = await _hq.create();
+      await pt.load(
+        url,
+        height: target.height,
+        audioTrackId: audioTrackId,
+        position: resumeAt,
+        autoplay: true,
+      );
       if (token != _qualitySwitchToken || state.videoId != videoId) {
-        await _hq.dispose();
+        await pt.stop();
         return;
       }
-      state = state.copyWith(hqTextureId: texId);
-      await _hq.loadDash(
-        videoUrl: videoUrl,
-        audioUrl: audioUrl,
-        videoCodec: target.fullCodec,
-        width: (target.height * 16) ~/ 9,
-        height: target.height,
-        fps: target.fps,
-        videoBitrateBps: (target.bitrateKbps * 1000).round(),
-        audioCodec: target.audioFullCodec,
-        audioBitrateBps: target.audioBitrateBps,
-        audioSampleRate: target.audioSampleRate,
-        startAt: resumeAt,
-        speed: state.speed,
-        durationSec:
-            _handler.player.state.duration.inMilliseconds / 1000.0,
-        initStart: target.initStart,
-        initEnd: target.initEnd,
-        indexStart: target.indexStart,
-        indexEnd: target.indexEnd,
-        audioInitStart: target.audioInitStart,
-        audioInitEnd: target.audioInitEnd,
-        audioIndexStart: target.audioIndexStart,
-        audioIndexEnd: target.audioIndexEnd,
-      );
-      // Verify the native player actually produces a duration.
-      const pollInterval = Duration(milliseconds: 500);
-      final deadline =
-          DateTime.now().add(const Duration(seconds: 20));
-      var loaded = false;
-      while (DateTime.now().isBefore(deadline)) {
-        if (token != _qualitySwitchToken || state.videoId != videoId) {
-          return;
-        }
-        if (hqFailed) break;
-        if (_hqDuration > Duration.zero) {
-          loaded = true;
-          break;
-        }
+      if (state.speed != 1.0) {
         try {
-          final d = await _hq.duration();
-          if (d > Duration.zero) {
-            _hqDuration = d;
-            _hqDurationCtrl.add(d);
-            loaded = true;
-            break;
-          }
+          await pt.setSpeed(state.speed.clamp(0.25, 3.0));
         } catch (_) {}
-        await Future.delayed(pollInterval);
       }
-      if (token != _qualitySwitchToken || state.videoId != videoId) return;
-      if (!loaded || hqFailed) {
-        final reason = hqError ?? 'no data within 20s (timeout)';
-        throw StateError(reason);
+      if (pt.duration > Duration.zero) {
+        _hqDuration = pt.duration;
+        _hqDurationCtrl.add(pt.duration);
       }
-      // Success: adopt the quality and start polling position.
       _hqPosition = resumeAt;
       _hqPositionCtrl.add(resumeAt);
+      _hqPlaying = true;
+      _hqPlayingCtrl.add(true);
       _startHqPoll();
       final s = state.streams;
       state = state.copyWith(
@@ -1839,7 +1806,7 @@ class PlayerController extends Notifier<PlayerUiState>
       try {
         await _handler.play();
       } catch (_) {}
-      final raw = hqError ?? e.toString();
+      final raw = pt.error ?? e.toString();
       state = state.copyWith(
         errorMessage:
             '${target.resolutionLabel} চালানো যায়নি: ${_shortenError(raw)}',
@@ -1847,7 +1814,29 @@ class PlayerController extends Notifier<PlayerUiState>
     }
   }
 
+  /// Best-effort match between the app's [AudioLanguage] (display name
+  /// only) and the plugin's track list (NewPipe ids / names).
+  String? _matchPluginTrack(PureTubeCatalog catalog, AudioLanguage lang) {
+    if (catalog.audioTracks.isEmpty) return null;
+    if (lang.isDefault) {
+      for (final t in catalog.audioTracks) {
+        if (t.isOriginal) return t.id;
+      }
+      return catalog.audioTracks.first.id;
+    }
+    final wanted = lang.displayName.toLowerCase().split(' ').first;
+    for (final t in catalog.audioTracks) {
+      if (t.label.toLowerCase().contains(wanted) ||
+          t.id.toLowerCase().startsWith(wanted)) {
+        return t.id;
+      }
+    }
+    return null;
+  }
+
   /// Stops the HQ engine and clears its state. Does not touch mpv.
+  /// The plugin controller itself is kept alive for reuse (it allows
+  /// only one live controller per engine); stop() halts its player.
   Future<void> _stopHq() async {
     _hqPollTimer?.cancel();
     _hqPollTimer = null;
@@ -1855,32 +1844,40 @@ class PlayerController extends Notifier<PlayerUiState>
     _hqPosition = Duration.zero;
     _hqDuration = Duration.zero;
     _hqPlaying = false;
-    _hq.onError = null;
-    _hq.onReady = null;
-    _hq.onCompleted = null;
-    await _hq.dispose();
+    _ptEndedHandled = false;
+    _lastPluginError = null;
+    try {
+      await _pt?.stop();
+    } catch (_) {}
     if (state.hqTextureId != null) {
       state = state.copyWith(clearHq: true);
     }
   }
 
   /// Polls HQ position/playing state for the UI + SponsorBlock.
+  /// The plugin controller already holds fresh values (its native side
+  /// ticks at 500ms), so this just mirrors them into the display
+  /// streams the UI listens to.
   void _startHqPoll() {
     _hqPollTimer?.cancel();
     _hqPollTimer =
-        Timer.periodic(const Duration(milliseconds: 500), (_) async {
+        Timer.periodic(const Duration(milliseconds: 500), (_) {
       if (state.hqTextureId == null) return;
-      try {
-        final pos = await _hq.position();
-        _hqPosition = pos;
-        _hqPositionCtrl.add(pos);
-        final playing = await _hq.isPlaying();
-        if (playing != _hqPlaying) {
-          _hqPlaying = playing;
-          _hqPlayingCtrl.add(playing);
-        }
-        _maybeSkipSponsor(pos);
-      } catch (_) {}
+      final pt = _pt;
+      if (pt == null) return;
+      final pos = pt.position;
+      _hqPosition = pos;
+      _hqPositionCtrl.add(pos);
+      if (pt.duration > Duration.zero && pt.duration != _hqDuration) {
+        _hqDuration = pt.duration;
+        _hqDurationCtrl.add(pt.duration);
+      }
+      final playing = pt.isPlaying;
+      if (playing != _hqPlaying) {
+        _hqPlaying = playing;
+        _hqPlayingCtrl.add(playing);
+      }
+      _maybeSkipSponsor(pos);
     });
   }
 
@@ -1889,7 +1886,9 @@ class PlayerController extends Notifier<PlayerUiState>
     if (hqActive) {
       _hqPosition = target;
       _hqPositionCtrl.add(target);
-      return _hq.seekTo(target);
+      final pt = _pt;
+      if (pt == null) return Future.value();
+      return pt.seek(target);
     }
     return _handler.seek(target);
   }

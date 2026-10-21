@@ -21,6 +21,11 @@ dependencies:
   media_kit_video: ^1.2.0
   media_kit_libs_video: ^1.0.0
 
+  # Native HQ playback engine (NewPipeExtractor + Media3, SparkTube-style
+  # DASH/merged playback) — used for 1080p+ selections.
+  puretube_playback:
+    path: ./puretube_playback
+
   # Hidden WebView player (browser engine for high-quality playback)
   webview_flutter: ^4.7.0
 

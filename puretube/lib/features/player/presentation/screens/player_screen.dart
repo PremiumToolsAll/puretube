@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:puretube_playback/puretube_playback.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shimmer/shimmer.dart';
@@ -1775,7 +1776,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   aspectRatio: uiState.hqAspectRatio > 0
                       ? uiState.hqAspectRatio
                       : 16 / 9,
-                  child: Texture(textureId: uiState.hqTextureId!),
+                  child: const PureTubeVideoView(),
                 )
               : Video(
                   controller: _videoController!,
@@ -2656,12 +2657,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             if (uiState.audioOnly && uiState.video != null)
               _buildAudioArt(uiState)
             else if (uiState.hqTextureId != null)
-              // Native HQ (ExoPlayer) engine: renders into a Flutter texture.
+              // Native HQ engine (puretube_playback plugin): Media3
+              // PlayerView rendered as a platform view.
               AspectRatio(
                 aspectRatio: uiState.hqAspectRatio > 0
                     ? uiState.hqAspectRatio
                     : 16 / 9,
-                child: Texture(textureId: uiState.hqTextureId!),
+                child: const PureTubeVideoView(),
               )
             else if (_videoController != null)
               Video(
