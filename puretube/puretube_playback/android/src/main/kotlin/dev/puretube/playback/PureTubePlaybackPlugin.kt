@@ -18,6 +18,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.source.MediaSource
@@ -109,6 +110,11 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     private fun ensurePlayer(): ExoPlayer {
         return player ?: ExoPlayer.Builder(context)
             .setRenderersFactory(DefaultRenderersFactory(context).setEnableDecoderFallback(true))
+            // Start optimistic: assume a fast line until measurements say
+            // otherwise, so adaptive playback OPENS at a high quality
+            // instead of crawling up from the bottom while the picture
+            // looks blurry. A slow line downshifts within a few segments.
+            .setBandwidthMeter(DefaultBandwidthMeter.Builder(context).setInitialBitrateEstimate(10_000_000L).build())
             .setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(45_000, 120_000, 1_000, 5_000).setBackBuffer(30_000, true).build())
             .build().also { player = it; it.setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true); it.setHandleAudioBecomingNoisy(true); it.addListener(playerListener); playerView?.player = it }
     }
@@ -186,8 +192,20 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
             when {
                 chosenVideo != null && selected != null -> {
                     val videoItem = MediaItem.fromUri(chosenVideo.content)
-                    DashSources.create(factory, videoItem, eligible, selected, c.info.duration)
-                        ?: MergingMediaSource(ProgressiveMediaSource.Factory(factory).createMediaSource(videoItem), ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(selected.content)))
+                    if (height != null) {
+                        // Explicit pick (SparkTube semantics): play that
+                        // EXACT stream merged with audio — no adaptive
+                        // downshift, so the quality the user selected is
+                        // the quality that reaches the screen. (Adaptive
+                        // DASH kept starting low and staying low on a
+                        // conservatively-estimated line: "1080 selected
+                        // but the picture is blurry".)
+                        MergingMediaSource(ProgressiveMediaSource.Factory(factory).createMediaSource(videoItem), ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(selected.content)))
+                    } else {
+                        // Auto: adaptive DASH across every height.
+                        DashSources.create(factory, videoItem, eligible, selected, c.info.duration)
+                            ?: MergingMediaSource(ProgressiveMediaSource.Factory(factory).createMediaSource(videoItem), ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(selected.content)))
+                    }
                 }
                 muxed != null -> ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(muxed.content))
                 selected != null -> ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(selected.content))

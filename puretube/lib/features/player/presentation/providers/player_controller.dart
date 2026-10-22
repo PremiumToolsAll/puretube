@@ -274,6 +274,7 @@ class PlayerController extends Notifier<PlayerUiState>
   // Video id for which the persistent-Auto hook already engaged the
   // HQ engine (prevents a fail/retry loop within one video).
   String? _autoHqEngagedFor;
+  String? _pluginEngagedFor;
 
   PureTubeController get _plugin {
     var c = _pt;
@@ -1058,16 +1059,32 @@ class PlayerController extends Notifier<PlayerUiState>
         currentQuality: current,
       );
       // SparkTube behavior: an explicit "Auto" pick survives video
-      // changes — re-engage the adaptive HQ engine for the new video
-      // (at most once per video; a failed attempt stays on mpv with
-      // its loud error instead of looping).
+      // changes — re-engage the adaptive plugin engine for the new
+      // video (at most once per video; a failed attempt stays on mpv
+      // instead of looping).
       if (state.autoQuality &&
           !state.audioOnly &&
           !hqActive &&
           _autoHqEngagedFor != id &&
-          options.any((q) => q.isDash && q.height >= 1080)) {
+          options.isNotEmpty) {
         _autoHqEngagedFor = id;
         unawaited(setQualityAuto());
+      }
+      // The plugin engine owns video playback at EVERY quality now —
+      // mpv's DASH path kept failing (720p "Failed to open" on the
+      // user's test video). Engage it once per video at the resolved
+      // current quality; a failure stays quietly on mpv (same quality,
+      // no scary error for an invisible engine swap). Explicit picks
+      // still report failures loudly via setQuality.
+      if (!state.autoQuality &&
+          !state.audioOnly &&
+          !hqActive &&
+          _pluginEngagedFor != id &&
+          options.isNotEmpty) {
+        _pluginEngagedFor = id;
+        final engageToken = ++_qualitySwitchToken;
+        unawaited(_playHq(current, engageToken,
+            cap: current.height, loud: false));
       }
       // Dubbed audio languages (YouTube "Audio Track"). Loaded alongside
       // qualities; empty for single-language videos.
@@ -1587,12 +1604,12 @@ class PlayerController extends Notifier<PlayerUiState>
 
   /// SparkTube-style "Auto" quality: adaptive playback.
   ///
-  /// With 1080p+ streams available, the HQ plugin runs an adaptive
-  /// DASH session with NO height cap — it starts with small segments
-  /// at a quality the connection can carry and adapts per segment,
-  /// like the official player. Without HQ streams, SparkTube's
-  /// settings-default behavior applies: the best stream at or below
-  /// 720p via mpv. The pick survives video changes (see loadQualities).
+  /// SparkTube "Auto": the plugin runs an adaptive DASH session with
+  /// NO height cap — it opens high (optimistic bandwidth estimate)
+  /// and adapts per segment, like the official player. If the plugin
+  /// cannot start, mpv takes the best stream at or below the 720p
+  /// settings default. The pick survives video changes (see
+  /// loadQualities).
   Future<void> setQualityAuto() async {
     if (state.status != PlayerStatus.ready || state.videoId == null) {
       return;
@@ -1601,25 +1618,21 @@ class PlayerController extends Notifier<PlayerUiState>
     final token = ++_qualitySwitchToken;
     state = state.copyWith(autoQuality: true);
     final options = state.availableQualities;
-    final hqOptions =
-        options.where((q) => q.isDash && q.height >= 1080).toList();
-    if (hqOptions.isNotEmpty) {
-      hqOptions.sort((a, b) => b.height.compareTo(a.height));
-      final top = hqOptions.first;
-      if (hqActive) {
-        // Already on the plugin: just lift the cap — the cached
-        // catalog rebuilds adaptively, position preserved.
-        try {
-          await _plugin.setQuality(null);
-        } catch (_) {}
-        state = state.copyWith(currentQuality: top);
-        return;
-      }
-      await _playHq(top, token, cap: null);
+    if (options.isEmpty) return;
+    final top = options.first; // sorted height desc — bookkeeping only
+    if (hqActive) {
+      // Already on the plugin: just lift the cap — the cached
+      // catalog rebuilds adaptively, position preserved.
+      try {
+        await _plugin.setQuality(null);
+      } catch (_) {}
+      state = state.copyWith(currentQuality: top);
       return;
     }
-    // No HQ streams: best stream at or below the 720p default.
-    if (options.isEmpty) return;
+    final ok = await _playHq(top, token, cap: null, loud: false);
+    if (ok) return;
+    if (token != _qualitySwitchToken) return;
+    // Plugin could not start: best stream at or below the 720p default.
     final match = _pickClosestOption(options, 720);
     if (match == null) return;
     await setQuality(match, keepAuto: true);
@@ -1656,10 +1669,10 @@ class PlayerController extends Notifier<PlayerUiState>
     if (!keepAuto && state.autoQuality) {
       state = state.copyWith(autoQuality: false);
     }
-    // Already on the HQ plugin with another HQ target: SparkTube-style
+    // Already on the plugin with another target: SparkTube-style
     // rebuild from the plugin's cached catalog at the new cap —
     // position preserved, no re-extraction, no mpv detour.
-    if (hqActive && target.isDash && target.height >= 1080) {
+    if (hqActive) {
       var rebuilt = false;
       try {
         await _plugin.setQuality(target.height);
@@ -1671,12 +1684,15 @@ class PlayerController extends Notifier<PlayerUiState>
       }
       // Rebuild failed — fall through to the full _playHq reload.
     }
-    // 1080p+ DASH goes straight to the native HQ (ExoPlayer) engine —
-    // mpv cannot play these streams on this phone (user directive
-    // 2026-10-17: "Java code দিয়ে ফোর্স করো"). Everything below 1080p
-    // keeps the proven mpv path.
-    if (target.isDash && target.height >= 1080) {
-      await _playHq(target, token, cap: target.height);
+    // Every quality goes through the plugin engine first now: it
+    // plays any height reliably (exact stream for an explicit pick),
+    // where mpv's DASH path kept failing ("Failed to open"). A plugin
+    // failure falls through to the mpv path below instead of giving
+    // up — and the mpv path reports its own failures loudly.
+    final pluginOk =
+        await _playHq(target, token, cap: target.height, loud: false);
+    if (pluginOk) return;
+    if (token != _qualitySwitchToken || state.videoId != videoId) {
       return;
     }
     // Leaving the HQ engine: stop it before mpv takes over.
@@ -1839,10 +1855,16 @@ class PlayerController extends Notifier<PlayerUiState>
   /// mpv cannot play these streams on this phone, so they go straight to
   /// the Java player. On failure the REAL reason is surfaced loudly —
   /// never a silent downgrade (user directive 2026-10-17).
-  Future<void> _playHq(MuxedQuality target, int token,
-      {required int? cap}) async {
+  /// Loads [target] on the plugin engine at [cap] (null = adaptive
+  /// Auto). Returns true when the plugin is playing the target.
+  /// On failure mpv is resumed at whatever it was playing; with
+  /// [loud] the failure is also surfaced as an error message
+  /// (explicit user picks), without it the swap fails silently
+  /// (automatic engine engages / callers with their own fallback).
+  Future<bool> _playHq(MuxedQuality target, int token,
+      {required int? cap, bool loud = true}) async {
     final videoId = state.videoId;
-    if (videoId == null) return;
+    if (videoId == null) return false;
     // Pause mpv so it doesn't double-play under the HQ engine.
     try {
       await _handler.pause();
@@ -1861,7 +1883,9 @@ class PlayerController extends Notifier<PlayerUiState>
         final catalog = await pt.resolve(url);
         audioTrackId = _matchPluginTrack(catalog, lang);
       } catch (_) {}
-      if (token != _qualitySwitchToken || state.videoId != videoId) return;
+      if (token != _qualitySwitchToken || state.videoId != videoId) {
+        return false;
+      }
     }
 
     // Mount the native view BEFORE loading: the plugin binds its
@@ -1877,7 +1901,7 @@ class PlayerController extends Notifier<PlayerUiState>
       );
       if (token != _qualitySwitchToken || state.videoId != videoId) {
         await pt.stop();
-        return;
+        return false;
       }
       if (state.speed != 1.0) {
         try {
@@ -1907,18 +1931,23 @@ class PlayerController extends Notifier<PlayerUiState>
                 fetchedAt: s.fetchedAt,
               ),
       );
+      return true;
     } catch (e) {
-      if (token != _qualitySwitchToken || state.videoId != videoId) return;
+      if (token != _qualitySwitchToken || state.videoId != videoId) {
+        return false;
+      }
       await _stopHq();
       // Resume the previous (working) mpv stream so the video keeps playing.
       try {
         await _handler.play();
       } catch (_) {}
+      if (!loud) return false;
       final raw = pt.error ?? e.toString();
       state = state.copyWith(
         errorMessage:
             '${target.resolutionLabel} চালানো যায়নি: ${_shortenError(raw)}',
       );
+      return false;
     }
   }
 
