@@ -60,6 +60,14 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     private var currentUrl: String? = null
     private var requestedHeight: Int? = null
     private var resizeMode: Int = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+    // First-frame watchdog (SparkTube's VideoFramePolicy): playback can
+    // report READY from audio alone while the video surface stays black.
+    // If no frame renders within 8s of a load that should be visible,
+    // recover in steps: rebind the output view, retry the source, then
+    // surface a loud error.
+    private var firstFrameSeen = true
+    private var frameWaitStartMs = 0L
+    private var frameRecoveryStep = 0
     private var selectedAudioId: String? = null
     private var audioOnly = false
     private var shouldAutoplay = true
@@ -82,6 +90,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) = emitState()
         override fun onPlaybackStateChanged(playbackState: Int) { emitState() }
+        override fun onRenderedFirstFrame() { firstFrameSeen = true; frameRecoveryStep = 0 }
         override fun onPlayerError(error: PlaybackException) {
             val p = player
             if (!retryingExpiry && error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS && currentUrl != null) {
@@ -169,6 +178,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
                     if (id != generation.get() || disposed) { result?.error("superseded", "Load was superseded", null); return@post }
                     if (c.info.duration <= 0) { result?.error("unsupported_live", "Live streams are not supported", null); return@post }
                     catalog = c
+                    frameRecoveryStep = 0
                     try { install(c, height, track, onlyAudio, pos, shouldAutoplay); emit(mapOf("type" to "catalog") + c.toMap()); result?.success(c.toMap()) }
                     catch (t: Throwable) { result?.error("load_failed", t.message ?: "Unable to load", null); emit(mapOf("type" to "error", "code" to "load_failed", "message" to (t.message ?: "Unable to load"))) }
                 }
@@ -215,6 +225,15 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
             }
         }
         fallbackStage = 0
+        // Arm the first-frame watchdog for video loads (audio-only
+        // loads have no frame to wait for). The recovery STEP is not
+        // reset here: install() also serves rebuilds (quality/track
+        // switches and the watchdog's own retry), and resetting the
+        // step there would loop rebind/retry forever without ever
+        // reaching the error step. Fresh loads reset it in
+        // resolveAndLoad.
+        firstFrameSeen = onlyAudio
+        frameWaitStartMs = System.currentTimeMillis()
         p.setMediaSource(source); p.prepare(); if (pos > 0) p.seekTo(pos); if (autoplay && resumed && !stopped) p.play() else p.pause()
     }
     private fun tryFallback(): Boolean {
@@ -240,7 +259,33 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         try { rebuildPreserving(); result.success(null) } catch (t: Throwable) { result.error("load_failed", t.message ?: "Unable to rebuild playback", null) }
     }
     private fun rebuildPreserving() { val c = catalog ?: return; val pos = player?.currentPosition ?: 0L; val play = shouldAutoplay && (player?.playWhenReady ?: false); install(c, requestedHeight, selectedAudioId, audioOnly, pos, play) }
-    private fun emitState() { val p = player ?: return; emit(mapOf("type" to "state", "isPlaying" to p.isPlaying, "buffering" to (p.playbackState == Player.STATE_BUFFERING), "positionMs" to p.currentPosition.coerceAtLeast(0), "durationMs" to (p.duration.takeIf { it >= 0 } ?: 0L), "bufferedPositionMs" to p.bufferedPosition.coerceAtLeast(0), "ended" to (p.playbackState == Player.STATE_ENDED))) }
+    private fun emitState() { val p = player ?: return; checkFrameWatchdog(p); emit(mapOf("type" to "state", "isPlaying" to p.isPlaying, "buffering" to (p.playbackState == Player.STATE_BUFFERING), "positionMs" to p.currentPosition.coerceAtLeast(0), "durationMs" to (p.duration.takeIf { it >= 0 } ?: 0L), "bufferedPositionMs" to p.bufferedPosition.coerceAtLeast(0), "ended" to (p.playbackState == Player.STATE_ENDED))) }
+
+    /** SparkTube VideoFramePolicy: 8s without a rendered frame while
+     *  playback should be visible → rebind output, retry source, error. */
+    private fun checkFrameWatchdog(p: ExoPlayer) {
+        if (firstFrameSeen || audioOnly || stopped || !shouldAutoplay || !p.playWhenReady) return
+        if (p.playbackState != Player.STATE_READY && p.playbackState != Player.STATE_BUFFERING) return
+        val now = System.currentTimeMillis()
+        if (now - frameWaitStartMs < 8_000L) return
+        when (frameRecoveryStep) {
+            0 -> {
+                // The surface binding is the usual suspect: re-attach.
+                val v = playerView
+                if (v != null) { v.player = null; v.player = p }
+                frameWaitStartMs = now; frameRecoveryStep = 1
+            }
+            1 -> {
+                try { rebuildPreserving() } catch (_: Throwable) {}
+                frameWaitStartMs = now; frameRecoveryStep = 2
+            }
+            2 -> {
+                emit(mapOf("type" to "error", "code" to "no_video_frame", "message" to "ভিডিওর ছবি আসছে না"))
+                frameRecoveryStep = 3
+            }
+            else -> Unit
+        }
+    }
     private fun emit(map: Map<String, Any?>) { main.post { sink?.success(map) } }
     private fun pauseForBackground() { shouldAutoplay = false; player?.pause() }
     private fun disposePlayback() { generation.incrementAndGet(); playerView?.player = null; player?.removeListener(playerListener); player?.release(); player = null; catalog = null; currentUrl = null; stopped = true; shouldAutoplay = false; disposed = true }

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:puretube_playback/puretube_playback.dart';
 
 import '../../../../core/database/hive_setup.dart';
 import '../../../../core/di/providers.dart';
@@ -106,10 +107,17 @@ class _LiveCornerPlayerState
         ref.read(playerControllerProvider).video?.id;
     _hide();
     if (videoId == null || !mounted) return;
-    // If paused, resume so tapping the popup always plays.
-    final player = ref.read(mediaKitPlayerProvider);
-    if (!player.state.playing) {
-      ref.read(playerControllerProvider.notifier).togglePlayPause();
+    // If paused, resume so tapping the popup always plays. Ask the
+    // ENGINE THAT IS ACTUALLY PLAYING: when the plugin owns playback
+    // mpv sits paused, and reading mpv's state here would toggle the
+    // playing plugin video OFF.
+    final ui = ref.read(playerControllerProvider);
+    final notifier = ref.read(playerControllerProvider.notifier);
+    final playing = ui.hqTextureId != null
+        ? notifier.hqIsPlaying
+        : ref.read(mediaKitPlayerProvider).state.playing;
+    if (!playing) {
+      notifier.togglePlayPause();
     }
     // PlayerScreen skips loadVideo when the id is unchanged,
     // so playback position is preserved.
@@ -181,12 +189,12 @@ class _LiveCornerPlayerState
                         Container(color: Colors.black),
                   )
                 else if (uiState.hqTextureId != null)
-                  AspectRatio(
-                    aspectRatio: uiState.hqAspectRatio > 0
-                        ? uiState.hqAspectRatio
-                        : 16 / 9,
-                    child: Texture(textureId: uiState.hqTextureId!),
-                  )
+                  // Plugin engine: its native view, same as the full
+                  // player. (This branch used to render a Texture
+                  // from the retired HQ engine — no such texture
+                  // exists anymore, so the popup showed black and
+                  // looked like the video had restarted.)
+                  const PureTubeVideoView()
                 else if (_videoController != null)
                   Video(
                     controller: _videoController!,
