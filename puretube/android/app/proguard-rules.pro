@@ -1,42 +1,17 @@
-# PureTube ProGuard/R8 rules — keep rules to prevent release crashes.
+# PureTube release rules (R8).
+#
+# The Play Core classes Flutter references for deferred components are
+# not on the classpath of a plain APK build — warn-free ignore (this
+# was the failure that kept R8 disabled before).
+-dontwarn com.google.android.play.core.**
 
-# ── Flutter ──────────────────────────────────────────────────
--keep class io.flutter.app.** { *; }
--keep class io.flutter.plugin.** { *; }
--keep class io.flutter.util.** { *; }
--keep class io.flutter.view.** { *; }
--keep class io.flutter.embedding.** { *; }
-
-# ── audio_service / audio_session (MediaSession) ───────────────
--keep class com.ryanheise.** { *; }
--dontwarn com.ryanheise.**
-
-# ── media_kit (JNI) ──────────────────────────────────────────
--keep class com.alexmercerind.mediakit.** { *; }
--dontwarn com.alexmercerind.**
-
-# ── isar (native) ────────────────────────────────────────────
--keep class isar.** { *; }
--dontwarn isar.**
-
-# ── youtube_explode_dart (no native, but keep models) ─────────
--keep class com.puretube.app.** { *; }
-
-# ── flutter_downloader ───────────────────────────────────────
--keep class vn.hunghd.flutterdownloader.** { *; }
--dontwarn vn.hunghd.**
-
-# ── workmanager ──────────────────────────────────────────────
--keep class be.tramckrijte.workmanager.** { *; }
-
-# ── system_alert_window ──────────────────────────────────────
--keep class in.jvapps.system_alert_window.** { *; }
-
-# ── Gson / JSON (used by several plugins) ────────────────────
--keep class com.google.gson.** { *; }
--keepattributes Signature, *Annotation*
-
-# ── Keep native method names ─────────────────────────────────
--keepclasseswithmembernames class * {
-    native <methods>;
-}
+# Reflection-driven libraries: keep whole. NewPipeExtractor builds its
+# services and parses YouTube's JS-driven responses reflectively;
+# Rhino interprets that JS; protobuf-lite messages are instantiated
+# reflectively. Shrinking or renaming inside these packages risks the
+# exact NoClassDefFoundError class of failure that killed build #539.
+-keep class org.schabi.newpipe.** { *; }
+-keep class org.mozilla.** { *; }
+-keep class com.google.protobuf.** { *; }
+-keep class com.grack.nanojson.** { *; }
+-keep class org.jsoup.** { *; }

@@ -191,6 +191,14 @@ class PureTubeController extends ChangeNotifier {
     await _invoke<void>('setQuality', {'height': height});
   }
 
+  /// Sets the native view's resize mode (Media3 PlayerView constants:
+  /// 0 = FIT/contain, 3 = FILL/stretch, 4 = ZOOM/cover). The mode is
+  /// stored natively and re-applied whenever the view is (re)created,
+  /// so it survives fullscreen and rotation changes.
+  Future<void> setResizeMode(int mode) async {
+    await _invoke<void>('setResizeMode', {'mode': mode});
+  }
+
   Future<void> setAudioTrack(String id) async {
     await _invoke<void>('setAudioTrack', {'id': id});
   }

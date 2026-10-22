@@ -245,6 +245,13 @@ class PlayerController extends Notifier<PlayerUiState>
   Timer? _sleepCountdown;
   DateTime? _sleepEndsAt;
   bool _skipInProgress = false;
+
+  /// Sponsor segments already skipped for the current video
+  /// ("videoId:start:end"). A segment is never skipped twice: if a
+  /// seek lands a hair before the segment end (keyframe rounding),
+  /// the position poll would otherwise re-trigger the skip every
+  /// 500ms and the video would keep jumping a few seconds at a time.
+  final Set<String> _skippedSegmentKeys = {};
   int _recoveryAttempts = 0;
 
   /// Bumps on every setQuality call; lets in-flight verifications detect
@@ -275,6 +282,23 @@ class PlayerController extends Notifier<PlayerUiState>
   // HQ engine (prevents a fail/retry loop within one video).
   String? _autoHqEngagedFor;
   String? _pluginEngagedFor;
+
+  /// Media3 PlayerView resize mode mirroring the screen's video fit
+  /// choice (0 = contain, 3 = fill, 4 = cover). The mpv widget obeys
+  /// the screen's BoxFit directly, but the plugin's native view only
+  /// listens to this — without it the fit button and the landscape
+  /// frame did nothing while the plugin engine was playing.
+  int _pluginResizeMode = 0;
+
+  /// Called by the player screen whenever the video fit changes
+  /// (fit button cycle, entering/leaving fullscreen).
+  void setVideoFitMode(int mode) {
+    _pluginResizeMode = mode;
+    final pt = _pt;
+    if (pt != null && hqActive) {
+      unawaited(pt.setResizeMode(mode).catchError((_) {}));
+    }
+  }
 
   PureTubeController get _plugin {
     var c = _pt;
@@ -631,6 +655,8 @@ class PlayerController extends Notifier<PlayerUiState>
     // autoplay re-entry guard.
     _sleepFinishedAt = null;
     _autoplayBusy = false;
+    // Fresh video: its sponsor segments may be skipped again.
+    _skippedSegmentKeys.clear();
     // Navigating away cancels any in-flight pre-load pass.
     _precacheToken++;
     // Navigating away also cancels any in-flight lyrics auto-fetch.
@@ -1072,10 +1098,14 @@ class PlayerController extends Notifier<PlayerUiState>
       }
       // The plugin engine owns video playback at EVERY quality now —
       // mpv's DASH path kept failing (720p "Failed to open" on the
-      // user's test video). Engage it once per video at the resolved
-      // current quality; a failure stays quietly on mpv (same quality,
-      // no scary error for an invisible engine swap). Explicit picks
-      // still report failures loudly via setQuality.
+      // user's test video). Engage it once per video at the user's
+      // DEFAULT target quality for this context — NOT the anchor
+      // height, which is whatever mpv happened to open with (often
+      // the 360p muxed instant-start stream, so the title showed
+      // "360p" first and playback stayed low). A failure stays
+      // quietly on mpv (same stream, no scary error for an invisible
+      // engine swap). Explicit picks still report failures loudly
+      // via setQuality.
       if (!state.autoQuality &&
           !state.audioOnly &&
           !hqActive &&
@@ -1083,8 +1113,20 @@ class PlayerController extends Notifier<PlayerUiState>
           options.isNotEmpty) {
         _pluginEngagedFor = id;
         final engageToken = ++_qualitySwitchToken;
-        unawaited(_playHq(current, engageToken,
-            cap: current.height, loud: false));
+        final onWifi = await _isOnWifi();
+        if (state.videoId != id) return;
+        final targetH =
+            _targetVideoHeight(onWifi: onWifi, fullscreen: false);
+        if (targetH == null) {
+          // Settings say "auto": engage adaptively, no cap.
+          unawaited(_playHq(options.first, engageToken,
+              cap: null, loud: false));
+        } else {
+          final pick = _pickClosestOption(options, targetH) ??
+              options.first;
+          unawaited(_playHq(pick, engageToken,
+              cap: pick.height, loud: false));
+        }
       }
       // Dubbed audio languages (YouTube "Audio Track"). Loaded alongside
       // qualities; empty for single-language videos.
@@ -1908,6 +1950,10 @@ class PlayerController extends Notifier<PlayerUiState>
           await pt.setSpeed(state.speed.clamp(0.25, 3.0));
         } catch (_) {}
       }
+      // Re-apply the screen's fit choice to the fresh native view.
+      try {
+        await pt.setResizeMode(_pluginResizeMode);
+      } catch (_) {}
       if (pt.duration > Duration.zero) {
         _hqDuration = pt.duration;
         _hqDurationCtrl.add(pt.duration);
@@ -2359,6 +2405,9 @@ class PlayerController extends Notifier<PlayerUiState>
     if (state.status != PlayerStatus.ready) return;
     for (final seg in state.sponsorSegments) {
       if (seg.contains(position)) {
+        final key =
+            '${state.videoId}:${seg.start}:${seg.end}';
+        if (!_skippedSegmentKeys.add(key)) break; // already skipped once
         _skipInProgress = true;
         _seekInternal(
                 Duration(milliseconds: (seg.end * 1000).toInt() + 250))

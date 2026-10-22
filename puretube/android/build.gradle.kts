@@ -2,8 +2,6 @@ allprojects {
     repositories {
         google()
         mavenCentral()
-        // JitPack: hosts com.github.TeamNewPipe:nanojson (NewPipeExtractor dep).
-        maven { url = uri("https://jitpack.io") }
     }
 }
 

@@ -59,6 +59,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     private var catalog: Catalog? = null
     private var currentUrl: String? = null
     private var requestedHeight: Int? = null
+    private var resizeMode: Int = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
     private var selectedAudioId: String? = null
     private var audioOnly = false
     private var shouldAutoplay = true
@@ -131,6 +132,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
                 resolveAndLoad(url, requestedHeight, selectedAudioId, audioOnly, (a["positionMs"] as? Number)?.toLong() ?: 0L, shouldAutoplay, id, result)
             }
             "setQuality" -> { requestedHeight = (a["height"] as? Number)?.toInt(); safeRebuild(result) }
+            "setResizeMode" -> { resizeMode = (a["mode"] as? Number)?.toInt() ?: androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT; playerView?.resizeMode = resizeMode; result.success(null) }
             "setAudioTrack" -> { selectedAudioId = a["id"] as? String; safeRebuild(result) }
             "setAudioOnly" -> { audioOnly = a["enabled"] as? Boolean ?: false; safeRebuild(result) }
             "play" -> { stopped = false; shouldAutoplay = true; if (resumed) player?.play(); result.success(null) }
@@ -257,7 +259,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     }
     private inner class PlaybackView(ctx: Context) : PlatformView {
         private val view = LayoutInflater.from(ctx).inflate(R.layout.puretube_player, null, false) as PlayerView
-        init { view.useController = false; view.setKeepContentOnPlayerReset(true); view.player = ensurePlayer(); playerView = view }
+        init { view.useController = false; view.setKeepContentOnPlayerReset(true); view.resizeMode = resizeMode; view.player = ensurePlayer(); playerView = view }
         override fun getView(): View = view
         override fun dispose() { if (playerView === view) { view.player = null; playerView = null } }
     }

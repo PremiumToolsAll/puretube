@@ -601,6 +601,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         _videoFit = BoxFit.contain;
       }
     });
+    _pushFitToPlugin();
     if (_isFullscreen) {
       await SystemChrome.setEnabledSystemUIMode(
           SystemUiMode.immersiveSticky);
@@ -632,7 +633,24 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               ? BoxFit.fill
               : BoxFit.contain;
     });
+    _pushFitToPlugin();
     _restartHideTimer();
+  }
+
+  /// Forwards the current fit to the plugin engine's native view
+  /// (Media3 resize modes: contain=0 FIT, fill=3 FILL, cover=4 ZOOM).
+  /// The mpv widget follows [_videoFit] on its own; the plugin view
+  /// only obeys this channel — without it the fit button and the
+  /// landscape frame size did nothing in plugin playback.
+  void _pushFitToPlugin() {
+    final mode = _videoFit == BoxFit.cover
+        ? 4
+        : _videoFit == BoxFit.fill
+            ? 3
+            : 0;
+    try {
+      ref.read(playerControllerProvider.notifier).setVideoFitMode(mode);
+    } catch (_) {}
   }
 
   // ---------------- prev / next ----------------

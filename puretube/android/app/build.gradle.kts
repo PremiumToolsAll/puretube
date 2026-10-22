@@ -33,10 +33,17 @@ android {
 
     buildTypes {
         release {
-            // Disable R8: newer AGP + Flutter triggers missing Play Core
-            // classes during minification. APK is slightly larger but builds.
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // R8 enabled for size (the dexes were ~20MB unshrunk). The
+            // Play Core warnings that once blocked this are dontwarn'd
+            // in proguard-rules.pro, and the reflection-heavy libraries
+            // (NewPipeExtractor, Rhino, protobuf, nanojson) are kept
+            // whole there — shrinking must never break extraction.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
@@ -65,25 +72,12 @@ flutter {
 }
 
 dependencies {
-    // Native HQ player (ExoPlayer) for 1080p+ DASH.
-    implementation("androidx.media3:media3-exoplayer:1.6.1")
-    implementation("androidx.media3:media3-exoplayer-dash:1.6.1")
-    // NewPipeExtractor's runtime dependencies (same set SparkTube declares;
-    // the vendored JAR does NOT bundle them — without jsoup/nanojson the
-    // extractor dies with NoClassDefFoundError and takes the app down).
-    // NOTE: the extractor JAR itself is NOT declared here — the
-    // puretube_playback plugin bundles it, and having both copies made
-    // the release build fail with duplicate classes (build #542). The
-    // plugin's copy is on this app's classpath anyway.
-    implementation("org.jsoup:jsoup:1.22.2")
-    implementation("org.mozilla:rhino:1.8.1")
-    implementation("org.mozilla:rhino-engine:1.8.1")
-    implementation("com.google.protobuf:protobuf-javalite:4.35.1")
-    implementation("com.google.code.findbugs:jsr305:3.0.2")
-    // nanojson intentionally NOT declared here: the puretube_playback
-    // plugin bundles the same nanojson JAR, and declaring both made
-    // the release build fail with duplicate classes (build #541).
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // The puretube_playback plugin declares everything the HQ engine
+    // needs (media3, NewPipeExtractor + its 7 runtime deps) in its own
+    // module — the app module must NOT repeat them: duplicate copies
+    // failed the release build twice (#541 nanojson, #542 extractor
+    // JAR), and the app's media3 1.6.1 pin was silently overriding
+    // the plugin's tested 1.3.1.
     // Core library desugaring for the puretube_playback plugin.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }
