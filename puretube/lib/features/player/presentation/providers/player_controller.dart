@@ -156,19 +156,16 @@ class PlayerUiState {
       // clearSleep still clears it (cancel/finish paths).
       sleepRemaining:
           clearSleep ? null : (sleepRemaining ?? this.sleepRemaining),
-      sleepTotal:
-          clearSleep ? null : (sleepTotal ?? this.sleepTotal),
-      sleepEndOfVideo: clearSleep
-          ? false
-          : (sleepEndOfVideo ?? this.sleepEndOfVideo),
+      sleepTotal: clearSleep ? null : (sleepTotal ?? this.sleepTotal),
+      sleepEndOfVideo:
+          clearSleep ? false : (sleepEndOfVideo ?? this.sleepEndOfVideo),
       sponsorSegments: sponsorSegments ?? this.sponsorSegments,
       skipSponsors: skipSponsors ?? this.skipSponsors,
       pipSupported: pipSupported ?? this.pipSupported,
       subtitleTracks: subtitleTracks ?? this.subtitleTracks,
       activeSubtitle:
           clearSubtitle ? null : activeSubtitle ?? this.activeSubtitle,
-      availableQualities:
-          availableQualities ?? this.availableQualities,
+      availableQualities: availableQualities ?? this.availableQualities,
       currentQuality: currentQuality ?? this.currentQuality,
       audioLanguages: audioLanguages ?? this.audioLanguages,
       activeAudioLanguage: clearAudioLanguage
@@ -176,8 +173,7 @@ class PlayerUiState {
           : activeAudioLanguage ?? this.activeAudioLanguage,
       relatedVideos: relatedVideos ?? this.relatedVideos,
       relatedFailed: relatedFailed ?? this.relatedFailed,
-      lyricsResult:
-          clearLyrics ? null : (lyricsResult ?? this.lyricsResult),
+      lyricsResult: clearLyrics ? null : (lyricsResult ?? this.lyricsResult),
       lyricsLoading: lyricsLoading ?? this.lyricsLoading,
       autoplay: autoplay ?? this.autoplay,
       autoQuality: autoQuality ?? this.autoQuality,
@@ -220,12 +216,9 @@ class PrecachedData {
 
 class PlayerController extends Notifier<PlayerUiState>
     with WidgetsBindingObserver {
-  PureTubeAudioHandler get _handler =>
-      ref.read(audioHandlerProvider);
-  YoutubeExtractorService get _extractor =>
-      ref.read(extractorProvider);
-  SponsorBlockService get _sponsorBlock =>
-      ref.read(sponsorBlockProvider);
+  PureTubeAudioHandler get _handler => ref.read(audioHandlerProvider);
+  YoutubeExtractorService get _extractor => ref.read(extractorProvider);
+  SponsorBlockService get _sponsorBlock => ref.read(sponsorBlockProvider);
 
   /// Reads the "Prefer AVC" setting (default true).
   bool _preferAvc = true;
@@ -237,11 +230,25 @@ class PlayerController extends Notifier<PlayerUiState>
       if (v != null) _preferAvc = v;
     } catch (_) {}
   }
+
   PipService get _pip => ref.read(pipServiceProvider);
 
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<String>? _errorSub;
   StreamSubscription<bool>? _pipSub;
+  StreamSubscription<String>? _pipActionSub;
+  StreamSubscription<bool>? _mpvPlayingSub;
+  bool? _lastPipPlaying;
+
+  /// Keeps the system PiP window's play/pause action in sync with
+  /// whichever engine is actually playing — one transport state
+  /// shared by the main player, the popup, the notification and
+  /// the PiP window.
+  void _syncPipPlaying(bool playing, {bool force = false}) {
+    if (!force && _lastPipPlaying == playing) return;
+    _lastPipPlaying = playing;
+    unawaited(_pip.setPlaying(playing));
+  }
 
   Timer? _sleepCountdown;
   DateTime? _sleepEndsAt;
@@ -373,6 +380,7 @@ class PlayerController extends Notifier<PlayerUiState>
   }
 
   void _pushMirrorState() {
+    _syncPipPlaying(_hqPlaying);
     if (!_handler.externalMode) return;
     final pt = _pt;
     _handler.setExternalState(
@@ -415,9 +423,7 @@ class PlayerController extends Notifier<PlayerUiState>
     // Loud HQ errors (never silent): native playback/resolve failures
     // land in c.error. 'superseded' is just a raced load — ignore it.
     final err = c.error;
-    if (err != null &&
-        err != _lastPluginError &&
-        !err.contains('superseded')) {
+    if (err != null && err != _lastPluginError && !err.contains('superseded')) {
       _lastPluginError = err;
       state = state.copyWith(
         errorMessage: 'HQ প্লেব্যাক সমস্যা: ${_shortenError(err)}',
@@ -603,6 +609,25 @@ class PlayerController extends Notifier<PlayerUiState>
         ref.read(popupVisibleProvider.notifier).state = false;
       }
     });
+    // PiP window transport buttons (Previous / Play-Pause / Next)
+    // drive the SAME controller paths as every other surface.
+    _pipActionSub = _pip.onPipAction.listen((action) {
+      switch (action) {
+        case 'playPause':
+          togglePlayPause();
+          break;
+        case 'next':
+          unawaited(playNext());
+          break;
+        case 'previous':
+          unawaited(playPrevious());
+          break;
+      }
+    });
+    // mpv (audio mode / fallback) play state → PiP icon sync.
+    _mpvPlayingSub = _handler.player.stream.playing.listen((p) {
+      if (!hqActive) _syncPipPlaying(p);
+    });
     _positionSub = _handler.player.stream.position.listen((pos) {
       _maybeSkipSponsor(pos);
       _maybePersistLastVideo(pos);
@@ -612,8 +637,7 @@ class PlayerController extends Notifier<PlayerUiState>
     // Both video and audio mode share this one media_kit Player, so a
     // single listener covers both.
     try {
-      _completedSub =
-          _handler.player.stream.completed.listen((_) {
+      _completedSub = _handler.player.stream.completed.listen((_) {
         _onPlaybackCompleted();
       });
     } catch (_) {}
@@ -637,6 +661,8 @@ class PlayerController extends Notifier<PlayerUiState>
     ref.onDispose(() {
       binding.removeObserver(this);
       _pipSub?.cancel();
+      _pipActionSub?.cancel();
+      _mpvPlayingSub?.cancel();
       _positionSub?.cancel();
       _errorSub?.cancel();
       _completedSub?.cancel();
@@ -829,10 +855,8 @@ class PlayerController extends Notifier<PlayerUiState>
         final savedSecs =
             ref.read(historyRepositoryProvider).getPosition(videoId);
         final totalSecs = video.duration?.inSeconds ?? 0;
-        if (savedSecs > 5 &&
-            (totalSecs <= 0 || savedSecs < totalSecs - 10)) {
-          await _handler.player
-              .seek(Duration(seconds: savedSecs));
+        if (savedSecs > 5 && (totalSecs <= 0 || savedSecs < totalSecs - 10)) {
+          await _handler.player.seek(Duration(seconds: savedSecs));
         }
       } else {
         // Video mode: DIRECT plugin start (SparkTube system) — the
@@ -855,16 +879,14 @@ class PlayerController extends Notifier<PlayerUiState>
         final pending = _pendingResumeOnce;
         _pendingResumeOnce = null;
         final resumeAt = pending ??
-            ((savedSecs > 5 &&
-                    (totalSecs <= 0 || savedSecs < totalSecs - 10))
+            ((savedSecs > 5 && (totalSecs <= 0 || savedSecs < totalSecs - 10))
                 ? Duration(seconds: savedSecs)
                 : Duration.zero);
         // loadQualities must not re-engage: the direct start below
         // owns this video's engine engage.
         _pluginEngagedFor = videoId;
         if (state.autoQuality) _autoHqEngagedFor = videoId;
-        unawaited(_directStart(videoId,
-            streams: streams, resumeAt: resumeAt));
+        unawaited(_directStart(videoId, streams: streams, resumeAt: resumeAt));
       }
       // Load captions in the background; UI updates when ready.
       unawaited(loadSubtitles());
@@ -881,15 +903,14 @@ class PlayerController extends Notifier<PlayerUiState>
       // Auto-generate lyrics for the AI Lyrics cards (both modes) —
       // no user tap needed. Cached per video id; cancelled on
       // navigation by [_lyricsToken].
-      unawaited(_autoFetchLyrics(videoId,
-          title: video.title, author: video.author));
+      unawaited(
+          _autoFetchLyrics(videoId, title: video.title, author: video.author));
     } on PureTubeException catch (e) {
-      state = state.copyWith(
-          status: PlayerStatus.error, errorMessage: e.message);
+      state =
+          state.copyWith(status: PlayerStatus.error, errorMessage: e.message);
     } catch (e) {
       state = state.copyWith(
-          status: PlayerStatus.error,
-          errorMessage: 'Playback failed: $e');
+          status: PlayerStatus.error, errorMessage: 'Playback failed: $e');
     }
   }
 
@@ -994,8 +1015,7 @@ class PlayerController extends Notifier<PlayerUiState>
     if (state.sleepEndOfVideo) return;
     final finishedAt = _sleepFinishedAt;
     if (finishedAt != null &&
-        DateTime.now().difference(finishedAt) <
-            const Duration(seconds: 10)) {
+        DateTime.now().difference(finishedAt) < const Duration(seconds: 10)) {
       return;
     }
     if (_autoplayBusy) return;
@@ -1080,8 +1100,7 @@ class PlayerController extends Notifier<PlayerUiState>
   /// audio immediately — switching to the audio-only URL was unreliable
   /// (stale/expired URLs, delayed start, position reset).
   Future<void> toggleAudioOnly() async {
-    if (state.status != PlayerStatus.ready ||
-        state.videoId == null) {
+    if (state.status != PlayerStatus.ready || state.videoId == null) {
       return;
     }
     final goingAudioOnly = !state.audioOnly;
@@ -1110,6 +1129,11 @@ class PlayerController extends Notifier<PlayerUiState>
 
   Future<void> enterPip() async {
     if (state.pipSupported && state.status == PlayerStatus.ready) {
+      // Enter PiP with the transport icon already correct.
+      _syncPipPlaying(
+        hqActive ? hqIsPlaying : _handler.player.state.playing,
+        force: true,
+      );
       await _pip.enterPip();
     }
   }
@@ -1124,8 +1148,7 @@ class PlayerController extends Notifier<PlayerUiState>
     try {
       final options = await _extractor.getQualityOptions(id);
       if (state.videoId != id || options.isEmpty) return;
-      final anchor =
-          initialHeight ?? state.currentQuality?.height;
+      final anchor = initialHeight ?? state.currentQuality?.height;
       // getQualityOptions sorts height desc, then fps desc, so the
       // auto default (options.first) is the top height at its highest
       // fps, and an anchor height resolves to its highest-fps variant.
@@ -1173,17 +1196,14 @@ class PlayerController extends Notifier<PlayerUiState>
         final engageToken = ++_qualitySwitchToken;
         final onWifi = await _isOnWifi();
         if (state.videoId != id) return;
-        final targetH =
-            _targetVideoHeight(onWifi: onWifi, fullscreen: false);
+        final targetH = _targetVideoHeight(onWifi: onWifi, fullscreen: false);
         if (targetH == null) {
           // Settings say "auto": engage adaptively, no cap.
-          unawaited(_playHq(options.first, engageToken,
-              cap: null, loud: false));
+          unawaited(
+              _playHq(options.first, engageToken, cap: null, loud: false));
         } else {
-          final pick = _pickClosestOption(options, targetH) ??
-              options.first;
-          unawaited(_playHq(pick, engageToken,
-              cap: pick.height, loud: false));
+          final pick = _pickClosestOption(options, targetH) ?? options.first;
+          unawaited(_playHq(pick, engageToken, cap: pick.height, loud: false));
         }
       }
       // Dubbed audio languages (YouTube "Audio Track"). Loaded alongside
@@ -1195,16 +1215,16 @@ class PlayerController extends Notifier<PlayerUiState>
   /// Loads dubbed audio languages for the "Audio Track" menu.
   Future<void> _loadAudioLanguages(String videoId) async {
     try {
-      final langs =
-          await _extractor.session.getAudioLanguages(videoId);
+      final langs = await _extractor.session.getAudioLanguages(videoId);
       if (state.videoId != videoId) return;
       state = state.copyWith(
         audioLanguages: langs,
-        activeAudioLanguage:
-            langs.isEmpty ? null : langs.firstWhere(
-              (l) => l.isDefault,
-              orElse: () => langs.first,
-            ),
+        activeAudioLanguage: langs.isEmpty
+            ? null
+            : langs.firstWhere(
+                (l) => l.isDefault,
+                orElse: () => langs.first,
+              ),
         clearAudioLanguage: langs.isEmpty,
       );
     } catch (_) {}
@@ -1227,8 +1247,8 @@ class PlayerController extends Notifier<PlayerUiState>
       final pt = _plugin;
       try {
         final catalog = pt.catalog ??
-            await pt.resolve(
-                'https://www.youtube.com/watch?v=${state.videoId}');
+            await pt
+                .resolve('https://www.youtube.com/watch?v=${state.videoId}');
         final trackId = _matchPluginTrack(catalog, lang);
         if (trackId != null) await pt.setAudioTrack(trackId);
       } catch (_) {}
@@ -1302,9 +1322,7 @@ class PlayerController extends Notifier<PlayerUiState>
         ...historyTop.where((c) => c != currentCat),
       ];
       final videos = await _extractor.getRelatedVideos(videoId,
-          titleHint: titleHint,
-          authorHint: authorHint,
-          boostCategories: boost);
+          titleHint: titleHint, authorHint: authorHint, boostCategories: boost);
       if (state.videoId != videoId) return;
       // Never offer already-played videos (or the current one) again —
       // this keeps Next/autoplay moving forward forever.
@@ -1330,8 +1348,7 @@ class PlayerController extends Notifier<PlayerUiState>
     if (id == null) return;
     state = state.copyWith(relatedFailed: false);
     final v = state.video;
-    await _loadRelated(id,
-        titleHint: v?.title, authorHint: v?.author);
+    await _loadRelated(id, titleHint: v?.title, authorHint: v?.author);
   }
 
   /// Reorders the Up Next queue (drag-to-reorder in the queue sheet).
@@ -1421,8 +1438,7 @@ class PlayerController extends Notifier<PlayerUiState>
     // Honor the user's quality preference for pre-cached videos too
     // (muxed range only — DASH targets are fetched fresh on load).
     final onWifi = await _isOnWifi();
-    final targetHeight =
-        _targetVideoHeight(onWifi: onWifi, fullscreen: false);
+    final targetHeight = _targetVideoHeight(onWifi: onWifi, fullscreen: false);
     final worstAudio = _wantWorstAudio(onWifi);
     final ids = <String>[];
     for (final v in state.relatedVideos) {
@@ -1486,8 +1502,7 @@ class PlayerController extends Notifier<PlayerUiState>
     final cached = _lyricsCache[videoId];
     if (cached != null) {
       if (state.videoId == videoId) {
-        state = state.copyWith(
-            lyricsResult: cached, lyricsLoading: false);
+        state = state.copyWith(lyricsResult: cached, lyricsLoading: false);
       }
       return;
     }
@@ -1497,8 +1512,7 @@ class PlayerController extends Notifier<PlayerUiState>
     try {
       LyricsResult result;
       // 1. YouTube's own captions (free AI transcript) — primary source.
-      final transcript =
-          await _extractor.getCaptionTranscript(videoId);
+      final transcript = await _extractor.getCaptionTranscript(videoId);
       if (token != _lyricsToken) return; // user moved on
       if (transcript != null && transcript.trim().isNotEmpty) {
         result = LyricsResult(
@@ -1526,8 +1540,7 @@ class PlayerController extends Notifier<PlayerUiState>
       }
       _lyricsCache[videoId] = result;
       if (state.videoId == videoId) {
-        state = state.copyWith(
-            lyricsResult: result, lyricsLoading: false);
+        state = state.copyWith(lyricsResult: result, lyricsLoading: false);
       }
     } catch (_) {
       if (token != _lyricsToken) return;
@@ -1565,24 +1578,20 @@ class PlayerController extends Notifier<PlayerUiState>
   /// Desired initial video height for the current network, or null for
   /// "auto" (current behavior). When not fullscreen, the no-fullscreen
   /// choice wins unless it is 'same' (mirror fullscreen).
-  int? _targetVideoHeight(
-      {required bool onWifi, required bool fullscreen}) {
+  int? _targetVideoHeight({required bool onWifi, required bool fullscreen}) {
     final nofs = ref.read(onWifi
         ? wifiNoFullscreenQualityProvider
         : mobileNoFullscreenQualityProvider);
-    final full = ref.read(onWifi
-        ? wifiVideoQualityProvider
-        : mobileVideoQualityProvider);
+    final full = ref
+        .read(onWifi ? wifiVideoQualityProvider : mobileVideoQualityProvider);
     final value = (!fullscreen && nofs != 'same') ? nofs : full;
     return qualityValueToHeight(value);
   }
 
   /// True when the user picked the data-saver audio tier.
   bool _wantWorstAudio(bool onWifi) =>
-      ref
-          .read(onWifi
-              ? wifiAudioQualityProvider
-              : mobileAudioQualityProvider) ==
+      ref.read(
+          onWifi ? wifiAudioQualityProvider : mobileAudioQualityProvider) ==
       'worst';
 
   /// Codec preference rank for DASH: AVC (H.264) is the most compatible
@@ -1595,8 +1604,7 @@ class PlayerController extends Notifier<PlayerUiState>
     return 0;
   }
 
-  bool _isAvc(String codec) =>
-      codec.toLowerCase().contains('avc');
+  bool _isAvc(String codec) => codec.toLowerCase().contains('avc');
 
   /// Best DASH option at-or-below [targetHeight].
   ///
@@ -1605,8 +1613,7 @@ class PlayerController extends Notifier<PlayerUiState>
   /// highest AVC at-or-below target; only if no AVC exists at all does
   /// it fall back to best-height VP9/AV1.
   /// When OFF: picks by height first, then codec rank, then fps.
-  MuxedQuality? _pickDashOption(
-      List<MuxedQuality> options, int targetHeight) {
+  MuxedQuality? _pickDashOption(List<MuxedQuality> options, int targetHeight) {
     if (_preferAvc) {
       MuxedQuality? bestAvc;
       for (final q in options) {
@@ -1627,11 +1634,9 @@ class PlayerController extends Notifier<PlayerUiState>
       if (best == null ||
           q.height > best.height ||
           (q.height == best.height &&
-              _dashCodecRank(q.codec) >
-                  _dashCodecRank(best.codec)) ||
+              _dashCodecRank(q.codec) > _dashCodecRank(best.codec)) ||
           (q.height == best.height &&
-              _dashCodecRank(q.codec) ==
-                  _dashCodecRank(best.codec) &&
+              _dashCodecRank(q.codec) == _dashCodecRank(best.codec) &&
               q.fps > best.fps)) {
         best = q;
       }
@@ -1673,8 +1678,7 @@ class PlayerController extends Notifier<PlayerUiState>
     final videoId = state.videoId;
     if (videoId == null) return;
     final onWifi = await _isOnWifi();
-    final target =
-        _targetVideoHeight(onWifi: onWifi, fullscreen: isFullscreen);
+    final target = _targetVideoHeight(onWifi: onWifi, fullscreen: isFullscreen);
     if (target == null) return; // 'auto' — leave the stream alone.
     if (state.currentQuality?.height == target) return;
     var options = state.availableQualities;
@@ -1750,8 +1754,7 @@ class PlayerController extends Notifier<PlayerUiState>
   /// verified after switching; on failure the previous quality is
   /// restored and the REAL failure reason is shown loudly (user
   /// directive 2026-10-17: never silently fall back to 360p).
-  Future<void> setQuality(MuxedQuality quality,
-      {bool keepAuto = false}) async {
+  Future<void> setQuality(MuxedQuality quality, {bool keepAuto = false}) async {
     final videoId = state.videoId;
     if (state.status != PlayerStatus.ready || videoId == null) {
       return;
@@ -1853,8 +1856,8 @@ class PlayerController extends Notifier<PlayerUiState>
             if (token != _qualitySwitchToken || state.videoId != videoId) {
               return;
             }
-            final match = fresh
-                .where((q) => q.height == quality.height && q.isDash);
+            final match =
+                fresh.where((q) => q.height == quality.height && q.isDash);
             if (match.isNotEmpty) {
               // Retry the same fps variant when it still exists (the
               // list is sorted fps-desc, so first is the best
@@ -1866,8 +1869,7 @@ class PlayerController extends Notifier<PlayerUiState>
               await _handler.switchStream(target.url,
                   audioUrl: target.audioUrl);
               outcome = await _verifyDashLoad(target, token);
-              if (token != _qualitySwitchToken ||
-                  state.videoId != videoId) {
+              if (token != _qualitySwitchToken || state.videoId != videoId) {
                 return;
               }
             }
@@ -1884,11 +1886,9 @@ class PlayerController extends Notifier<PlayerUiState>
           final reason = _dashVerifyError != null
               ? _shortenError(_dashVerifyError!)
               : 'no data within 8s (timeout)';
-          await _rollbackQuality(
-              previous: previous, failed: target);
+          await _rollbackQuality(previous: previous, failed: target);
           state = state.copyWith(
-            errorMessage:
-                '${target.resolutionLabel} চালানো যায়নি: $reason',
+            errorMessage: '${target.resolutionLabel} চালানো যায়নি: $reason',
           );
           return;
         }
@@ -1976,13 +1976,11 @@ class PlayerController extends Notifier<PlayerUiState>
   /// muxed stream on the handler is the emergency fallback so the
   /// video still plays.
   Future<void> _directStart(String videoId,
-      {required PlaybackStreams streams,
-      required Duration resumeAt}) async {
+      {required PlaybackStreams streams, required Duration resumeAt}) async {
     final token = ++_qualitySwitchToken;
     final onWifi = await _isOnWifi();
     if (state.videoId != videoId) return;
-    final targetH =
-        _targetVideoHeight(onWifi: onWifi, fullscreen: false);
+    final targetH = _targetVideoHeight(onWifi: onWifi, fullscreen: false);
     // Quality rule: Auto (fresh start or user-chosen) = adaptive;
     // a manual pick from earlier in this session beats the
     // settings default for every new video.
@@ -1999,8 +1997,8 @@ class PlayerController extends Notifier<PlayerUiState>
       height: cap ?? targetH ?? 720,
       url: streams.muxedUrl,
     );
-    final ok = await _playHq(target, token,
-        cap: cap, loud: false, startAt: resumeAt);
+    final ok =
+        await _playHq(target, token, cap: cap, loud: false, startAt: resumeAt);
     if (ok) return;
     if (token != _qualitySwitchToken ||
         state.videoId != videoId ||
@@ -2199,8 +2197,7 @@ class PlayerController extends Notifier<PlayerUiState>
   /// streams the UI listens to.
   void _startHqPoll() {
     _hqPollTimer?.cancel();
-    _hqPollTimer =
-        Timer.periodic(const Duration(milliseconds: 500), (_) {
+    _hqPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
       if (state.hqTextureId == null) return;
       final pt = _pt;
       if (pt == null) return;
@@ -2245,8 +2242,7 @@ class PlayerController extends Notifier<PlayerUiState>
   }) async {
     final failedName = failed.resolutionLabel;
     if (previous == null) {
-      state = state.copyWith(
-          errorMessage: '$failedName failed to load');
+      state = state.copyWith(errorMessage: '$failedName failed to load');
       return;
     }
     final prevName = previous.resolutionLabel;
@@ -2259,8 +2255,8 @@ class PlayerController extends Notifier<PlayerUiState>
       if (previous.isDash && vid != null) {
         try {
           final fresh = await _extractor.getQualityOptions(vid);
-          final match = fresh
-              .where((q) => q.height == previous.height && q.isDash);
+          final match =
+              fresh.where((q) => q.height == previous.height && q.isDash);
           if (match.isNotEmpty) {
             // Restore the same fps variant when it still exists;
             // the list is sorted fps-desc so the first entry is the
@@ -2362,8 +2358,7 @@ class PlayerController extends Notifier<PlayerUiState>
   }
 
   void _armSleepCountdown() {
-    _sleepCountdown =
-        Timer.periodic(const Duration(seconds: 1), (_) {
+    _sleepCountdown = Timer.periodic(const Duration(seconds: 1), (_) {
       final endsAt = _sleepEndsAt;
       if (endsAt == null) return;
       final left = endsAt.difference(DateTime.now());
@@ -2407,9 +2402,7 @@ class PlayerController extends Notifier<PlayerUiState>
       _sleepEndsAt = endsAt;
       state = state.copyWith(
         sleepRemaining: left,
-        sleepTotal: totalMs != null
-            ? Duration(milliseconds: totalMs)
-            : left,
+        sleepTotal: totalMs != null ? Duration(milliseconds: totalMs) : left,
         sleepEndOfVideo: endOfVideo,
       );
       _armSleepCountdown();
@@ -2440,8 +2433,7 @@ class PlayerController extends Notifier<PlayerUiState>
     try {
       // Dynamic box: stores plain values (bool), unlike the Map boxes.
       final box = Hive.box(HiveBoxes.playerPrefs);
-      _prefAudioOnly =
-          box.get(_kAudioOnlyKey) as bool? ?? false;
+      _prefAudioOnly = box.get(_kAudioOnlyKey) as bool? ?? false;
       // Autoplay (default ON) — pushed to state so the Up Next toggle
       // reflects the persisted value.
       _autoplay = box.get(_kAutoplayKey) as bool? ?? true;
@@ -2454,8 +2446,7 @@ class PlayerController extends Notifier<PlayerUiState>
 
   Future<void> _saveAudioOnlyPref(bool value) async {
     try {
-      await Hive.box(HiveBoxes.playerPrefs)
-          .put(_kAudioOnlyKey, value);
+      await Hive.box(HiveBoxes.playerPrefs).put(_kAudioOnlyKey, value);
     } catch (_) {}
   }
 
@@ -2509,15 +2500,13 @@ class PlayerController extends Notifier<PlayerUiState>
   /// Throttled last-video saver: at most once every 10s and only when
   /// the position actually advanced (avoids Hive churn on pause).
   void _maybePersistLastVideo(Duration pos) {
-    if (state.status != PlayerStatus.ready ||
-        state.videoId == null) {
+    if (state.status != PlayerStatus.ready || state.videoId == null) {
       return;
     }
     final secs = pos.inSeconds;
     if (secs < 3 || secs == _lastVideoSavedSecs) return;
     final last = _lastVideoSavedAt;
-    if (last != null &&
-        DateTime.now().difference(last).inSeconds < 10) {
+    if (last != null && DateTime.now().difference(last).inSeconds < 10) {
       return;
     }
     unawaited(_saveLastVideo());
@@ -2545,13 +2534,11 @@ class PlayerController extends Notifier<PlayerUiState>
   Future<void> selectSubtitle(CaptionTrack? track) async {
     try {
       if (track == null) {
-        await _handler.player
-            .setSubtitleTrack(SubtitleTrack.no());
+        await _handler.player.setSubtitleTrack(SubtitleTrack.no());
         state = state.copyWith(clearSubtitle: true);
       } else {
         await _handler.player.setSubtitleTrack(
-            SubtitleTrack.uri(track.url,
-                title: track.language));
+            SubtitleTrack.uri(track.url, title: track.language));
         state = state.copyWith(activeSubtitle: track);
       }
     } catch (_) {}
@@ -2562,12 +2549,10 @@ class PlayerController extends Notifier<PlayerUiState>
     if (state.status != PlayerStatus.ready) return;
     for (final seg in state.sponsorSegments) {
       if (seg.contains(position)) {
-        final key =
-            '${state.videoId}:${seg.start}:${seg.end}';
+        final key = '${state.videoId}:${seg.start}:${seg.end}';
         if (!_skippedSegmentKeys.add(key)) break; // already skipped once
         _skipInProgress = true;
-        _seekInternal(
-                Duration(milliseconds: (seg.end * 1000).toInt() + 250))
+        _seekInternal(Duration(milliseconds: (seg.end * 1000).toInt() + 250))
             .whenComplete(() => _skipInProgress = false);
         break;
       }
@@ -2581,8 +2566,7 @@ class PlayerController extends Notifier<PlayerUiState>
   /// resuming at the last position. Bounded to 2 attempts, then the
   /// error is surfaced to the UI instead of looping forever.
   Future<void> _onPlayerError(String error) async {
-    if (state.status != PlayerStatus.ready ||
-        state.videoId == null) {
+    if (state.status != PlayerStatus.ready || state.videoId == null) {
       return;
     }
     if (error.trim().isEmpty) return;
@@ -2602,8 +2586,7 @@ class PlayerController extends Notifier<PlayerUiState>
     if (_recoveryAttempts >= 2) {
       state = state.copyWith(
         status: PlayerStatus.error,
-        errorMessage:
-            'Playback failed and could not recover: $error',
+        errorMessage: 'Playback failed and could not recover: $error',
       );
       return;
     }
@@ -2630,8 +2613,7 @@ class PlayerController extends Notifier<PlayerUiState>
           wantedHeight != null &&
           wantedHeight != fresh.muxedHeight) {
         try {
-          final options =
-              await _extractor.getQualityOptions(state.videoId!);
+          final options = await _extractor.getQualityOptions(state.videoId!);
           // Preserve the user's exact (height, fps) variant when it
           // still exists; muxed-only (a DASH match would lose audio).
           // The list is sorted fps-desc, so the first height match is
@@ -2668,21 +2650,18 @@ class PlayerController extends Notifier<PlayerUiState>
       );
       final url = state.audioOnly ? fresh.audioOnlyUrl : muxedUrl;
       await _handler.switchStream(url,
-          audioUrl:
-              state.audioOnly ? null : preservedQuality?.audioUrl,
+          audioUrl: state.audioOnly ? null : preservedQuality?.audioUrl,
           resumeAt: resumeAt);
     } on PureTubeException catch (e) {
       // Most likely NetworkException: user lost internet mid-playback.
-      state = state.copyWith(
-          status: PlayerStatus.error, errorMessage: e.message);
+      state =
+          state.copyWith(status: PlayerStatus.error, errorMessage: e.message);
     } catch (e) {
       state = state.copyWith(
-          status: PlayerStatus.error,
-          errorMessage: 'Playback error: $e');
+          status: PlayerStatus.error, errorMessage: 'Playback error: $e');
     }
   }
 }
 
 final playerControllerProvider =
-    NotifierProvider<PlayerController, PlayerUiState>(
-        PlayerController.new);
+    NotifierProvider<PlayerController, PlayerUiState>(PlayerController.new);
