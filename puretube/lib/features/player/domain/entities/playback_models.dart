@@ -60,8 +60,7 @@ class PlaybackStreams {
     required this.fetchedAt,
   });
 
-  bool get isExpired =>
-      DateTime.now().difference(fetchedAt) > streamTtl;
+  bool get isExpired => DateTime.now().difference(fetchedAt) > streamTtl;
 }
 
 class DownloadOption {
@@ -127,8 +126,7 @@ class DownloadOption {
     }
     if (videoOnly) parts.add('video-only, no audio');
     if (isMuxed) parts.add('with audio');
-    final meta =
-        parts.isEmpty ? '' : ' · ${parts.join(' · ')}';
+    final meta = parts.isEmpty ? '' : ' · ${parts.join(' · ')}';
     if (height >= 1080) return 'High details for full screen play$meta';
     if (height >= 720) return 'Clear view and quick play$meta';
     if (height >= 480) return 'Normal quality for quick play$meta';
@@ -315,6 +313,27 @@ class ChannelInfo {
     required this.logoUrl,
     required this.bannerUrl,
     required this.subscriberCount,
+  });
+}
+
+/// One YouTube comment (read-only viewer data).
+class VideoComment {
+  final String author;
+  final String channelId;
+  final String text;
+  final int likeCount;
+  final String publishedTime; // YouTube's own text, e.g. "2 days ago"
+  final int replyCount;
+  final bool isHearted;
+
+  const VideoComment({
+    required this.author,
+    required this.channelId,
+    required this.text,
+    required this.likeCount,
+    required this.publishedTime,
+    required this.replyCount,
+    required this.isHearted,
   });
 }
 

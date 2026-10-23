@@ -119,12 +119,10 @@ class YoutubeExtractorService {
   /// attempt was rate-limited (HTTP 429), so hammering YouTube again would
   /// only extend the IP block. While blocked, every call goes straight to
   /// the Piped proxy, letting the IP cool down.
-  DateTime _youtubeBlockedUntil =
-      DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _youtubeBlockedUntil = DateTime.fromMillisecondsSinceEpoch(0);
   static const _blockCooldown = Duration(minutes: 15);
 
-  bool get _youtubeBlocked =>
-      DateTime.now().isBefore(_youtubeBlockedUntil);
+  bool get _youtubeBlocked => DateTime.now().isBefore(_youtubeBlockedUntil);
 
   void _markYouTubeBlocked() {
     _youtubeBlockedUntil = DateTime.now().add(_blockCooldown);
@@ -155,8 +153,7 @@ class YoutubeExtractorService {
   }
 
   /// Fallback for video details (same friendly-error contract).
-  Future<VideoDetails> _pipedVideoDetails(String videoId) =>
-      _viaFallbacks(
+  Future<VideoDetails> _pipedVideoDetails(String videoId) => _viaFallbacks(
         () => _session.getVideoDetails(videoId),
         () => _piped.getVideoDetails(videoId),
         () => _invidious.getVideoDetails(videoId),
@@ -164,31 +161,25 @@ class YoutubeExtractorService {
 
   /// Fallback for playback streams (same friendly-error contract).
   Future<PlaybackStreams> _pipedStreams(String videoId,
-          {int maxMuxedHeight = 720,
-          bool preferBestAudio = true}) =>
+          {int maxMuxedHeight = 720, bool preferBestAudio = true}) =>
       _viaFallbacks(
         () => _session.getPlaybackStreams(videoId,
-            maxMuxedHeight: maxMuxedHeight,
-            preferBestAudio: preferBestAudio),
+            maxMuxedHeight: maxMuxedHeight, preferBestAudio: preferBestAudio),
         () => _piped.getPlaybackStreams(videoId,
-            maxMuxedHeight: maxMuxedHeight,
-            preferBestAudio: preferBestAudio),
+            maxMuxedHeight: maxMuxedHeight, preferBestAudio: preferBestAudio),
         () => _invidious.getPlaybackStreams(videoId,
-            maxMuxedHeight: maxMuxedHeight,
-            preferBestAudio: preferBestAudio),
+            maxMuxedHeight: maxMuxedHeight, preferBestAudio: preferBestAudio),
       );
 
   /// Fallback for the quality menu (same friendly-error contract).
-  Future<List<MuxedQuality>> _pipedQualities(String videoId) =>
-      _viaFallbacks(
+  Future<List<MuxedQuality>> _pipedQualities(String videoId) => _viaFallbacks(
         () => _session.getQualityOptions(videoId),
         () => _piped.getQualityOptions(videoId),
         () => _invidious.getQualityOptions(videoId),
       );
 
   /// Fallback for search (same friendly-error contract).
-  Future<List<VideoDetails>> _pipedSearch(String query,
-          {int limit = 25}) =>
+  Future<List<VideoDetails>> _pipedSearch(String query, {int limit = 25}) =>
       _viaFallbacks(
         () => _session.searchVideos(query, limit: limit),
         () => _piped.searchVideos(query, limit: limit),
@@ -253,9 +244,9 @@ class YoutubeExtractorService {
           .timeout(const Duration(seconds: 30));
     } on VideoUnplayableException {
       await _throttle();
-      return await _yt.videos.streamsClient
-          .getManifest(videoId, ytClients: [YoutubeApiClient.tv])
-          .timeout(const Duration(seconds: 30));
+      return await _yt.videos.streamsClient.getManifest(videoId, ytClients: [
+        YoutubeApiClient.tv
+      ]).timeout(const Duration(seconds: 30));
     }
   }
 
@@ -269,8 +260,7 @@ class YoutubeExtractorService {
           await _yt.videos.get(videoId).timeout(const Duration(seconds: 25));
       return VideoDetails.fromExplode(video);
     } on TimeoutException {
-      throw ExtractorException(
-          'YouTube is taking too long to respond. Retry.');
+      throw ExtractorException('YouTube is taking too long to respond. Retry.');
     } on VideoUnplayableException catch (e) {
       throw UnplayableVideoException(videoId, e.message);
     } on PureTubeException {
@@ -280,7 +270,42 @@ class YoutubeExtractorService {
         _markYouTubeBlocked();
         return _pipedVideoDetails(videoId);
       }
-      throw ExtractorException('Could not load video details: ${_friendlyError(e)}');
+      throw ExtractorException(
+          'Could not load video details: ${_friendlyError(e)}');
+    }
+  }
+
+  /// Top comments for a video (read-only; posting needs an account).
+  /// Returns an empty list when comments are disabled/unavailable.
+  Future<List<VideoComment>> getComments(String videoId,
+      {int limit = 60}) async {
+    await _requireNetwork();
+    try {
+      await _throttle();
+      final video =
+          await _yt.videos.get(videoId).timeout(const Duration(seconds: 25));
+      final list = await _yt.videos.comments
+          .getComments(video)
+          .timeout(const Duration(seconds: 25));
+      if (list == null) return const [];
+      return list
+          .take(limit)
+          .map((c) => VideoComment(
+                author: c.author,
+                channelId: c.channelId.value,
+                text: c.text,
+                likeCount: c.likeCount,
+                publishedTime: c.publishedTime,
+                replyCount: c.replyCount,
+                isHearted: c.isHearted,
+              ))
+          .toList();
+    } on TimeoutException {
+      throw ExtractorException('Comments timed out. Retry.');
+    } on PureTubeException {
+      rethrow;
+    } catch (e) {
+      throw ExtractorException('Could not load comments: ${_friendlyError(e)}');
     }
   }
 
@@ -299,15 +324,14 @@ class YoutubeExtractorService {
     // Circuit breaker: don't hammer a blocked IP — go straight to Piped.
     if (_youtubeBlocked) {
       return _pipedStreams(videoId,
-          maxMuxedHeight: maxMuxedHeight,
-          preferBestAudio: preferBestAudio);
+          maxMuxedHeight: maxMuxedHeight, preferBestAudio: preferBestAudio);
     }
     try {
       final manifest = await _getManifestWithAgeBypass(videoId);
 
-      final muxed = [...manifest.muxed]
-        ..sort((a, b) =>
-            b.videoQuality.height.compareTo(a.videoQuality.height));
+      final muxed = [
+        ...manifest.muxed
+      ]..sort((a, b) => b.videoQuality.height.compareTo(a.videoQuality.height));
       final muxedPick =
           muxed.where((s) => s.videoQuality.height <= maxMuxedHeight);
 
@@ -341,8 +365,7 @@ class YoutubeExtractorService {
       if (_isRateLimitError(e)) {
         _markYouTubeBlocked();
         return _pipedStreams(videoId,
-            maxMuxedHeight: maxMuxedHeight,
-            preferBestAudio: preferBestAudio);
+            maxMuxedHeight: maxMuxedHeight, preferBestAudio: preferBestAudio);
       }
       throw ExtractorException('Could not extract streams: $e');
     }
@@ -354,8 +377,7 @@ class YoutubeExtractorService {
   /// One entry per distinct (height, fps) pair (NewPipe-style): 720p30
   /// and 720p60 stay as separate options instead of collapsing into
   /// one entry the way a height-only key did.
-  Future<List<MuxedQuality>> getQualityOptions(
-      String videoId) async {
+  Future<List<MuxedQuality>> getQualityOptions(String videoId) async {
     await _requireNetwork();
     // Circuit breaker: during a YouTube block the manifest fetch would
     // just 429 — serve the quality menu from Piped instead.
@@ -365,13 +387,13 @@ class YoutubeExtractorService {
     try {
       final manifest = await _getManifestWithAgeBypass(videoId);
 
-      final muxed = [...manifest.muxed]
-        ..sort((a, b) => b.videoQuality.height
-            .compareTo(a.videoQuality.height));
+      final muxed = [
+        ...manifest.muxed
+      ]..sort((a, b) => b.videoQuality.height.compareTo(a.videoQuality.height));
 
       if (muxed.isEmpty) {
-        throw UnplayableVideoException(videoId,
-            'No playable streams for this video.');
+        throw UnplayableVideoException(
+            videoId, 'No playable streams for this video.');
       }
 
       // Dedup key is (height, fps) — shared across muxed and DASH so a
@@ -399,14 +421,12 @@ class YoutubeExtractorService {
       // DASH video-only streams (1080p/1440p/2160p+) + best separate
       // audio track. mpv plays these by attaching the audio URL via the
       // 'audio-file' property (see PureTubeAudioHandler.switchStream).
-      final audioOnly = [...manifest.audioOnly]
-        ..sort((a, b) =>
-            b.bitrate.bitsPerSecond.compareTo(a.bitrate.bitsPerSecond));
+      final audioOnly = [...manifest.audioOnly]..sort(
+          (a, b) => b.bitrate.bitsPerSecond.compareTo(a.bitrate.bitsPerSecond));
       if (audioOnly.isNotEmpty) {
         final audioUrl = audioOnly.first.url.toString();
-        final videoOnly = [...manifest.videoOnly]
-          ..sort((a, b) => b.videoResolution.height
-              .compareTo(a.videoResolution.height));
+        final videoOnly = [...manifest.videoOnly]..sort((a, b) =>
+            b.videoResolution.height.compareTo(a.videoResolution.height));
         for (final v in videoOnly) {
           final h = v.videoResolution.height;
           final fps = v.framerate.framesPerSecond.round();
@@ -445,13 +465,12 @@ class YoutubeExtractorService {
         return 0;
       });
       if (options.isEmpty) {
-        throw UnplayableVideoException(videoId,
-            'No playable streams for this video.');
+        throw UnplayableVideoException(
+            videoId, 'No playable streams for this video.');
       }
       return options;
     } on TimeoutException {
-      throw ExtractorException(
-          'Timed out fetching qualities. Retry.');
+      throw ExtractorException('Timed out fetching qualities. Retry.');
     } on PureTubeException {
       rethrow;
     } catch (e) {
@@ -464,18 +483,16 @@ class YoutubeExtractorService {
   }
 
   /// Lists every downloadable stream: all muxed qualities + best audio.
-  Future<List<DownloadOption>> getDownloadOptions(
-      String videoId) async {
+  Future<List<DownloadOption>> getDownloadOptions(String videoId) async {
     await _requireNetwork();
     try {
       final manifest = await _getManifestWithAgeBypass(videoId);
 
-      final muxed = [...manifest.muxed]
-        ..sort((a, b) => b.videoQuality.height
-            .compareTo(a.videoQuality.height));
-      final videoOnly = [...manifest.videoOnly]
-        ..sort((a, b) => b.videoResolution.height
-            .compareTo(a.videoResolution.height));
+      final muxed = [
+        ...manifest.muxed
+      ]..sort((a, b) => b.videoQuality.height.compareTo(a.videoQuality.height));
+      final videoOnly = [...manifest.videoOnly]..sort((a, b) =>
+          b.videoResolution.height.compareTo(a.videoResolution.height));
       final audio = [...manifest.audioOnly]
         ..sort((a, b) => b.bitrate.compareTo(a.bitrate));
 
@@ -525,8 +542,8 @@ class YoutubeExtractorService {
         ));
       }
       if (options.isEmpty) {
-        throw UnplayableVideoException(videoId,
-            'No downloadable streams for this video.');
+        throw UnplayableVideoException(
+            videoId, 'No downloadable streams for this video.');
       }
       return options;
     } on TimeoutException {
@@ -545,9 +562,8 @@ class YoutubeExtractorService {
     if (_youtubeBlocked) return _pipedSearch(query, limit: limit);
     try {
       await _throttle();
-      final results = await _yt.search
-          .search(query)
-          .timeout(const Duration(seconds: 25));
+      final results =
+          await _yt.search.search(query).timeout(const Duration(seconds: 25));
       return results
           .whereType<Video>()
           .take(limit)
@@ -576,8 +592,7 @@ class YoutubeExtractorService {
 
   /// Starts a paged search session for infinite scroll.
   /// Returns the first page; call [fetchMoreSearchResults] for more.
-  Future<SearchSession> startPagedSearch(String query,
-      {int limit = 25}) async {
+  Future<SearchSession> startPagedSearch(String query, {int limit = 25}) async {
     await _requireNetwork();
     // Circuit breaker: don't hammer a blocked IP — go straight to Piped.
     if (_youtubeBlocked) {
@@ -588,9 +603,8 @@ class YoutubeExtractorService {
     }
     try {
       await _throttle();
-      final results = await _yt.search
-          .search(query)
-          .timeout(const Duration(seconds: 25));
+      final results =
+          await _yt.search.search(query).timeout(const Duration(seconds: 25));
       final videos = results
           .whereType<Video>()
           .take(limit)
@@ -602,8 +616,7 @@ class YoutubeExtractorService {
       // re-running the same YouTube request — try Piped first, so Retry
       // actually has a chance to load instead of timing out again.
       try {
-        final pipedVideos =
-            await _piped.searchVideos(query, limit: limit);
+        final pipedVideos = await _piped.searchVideos(query, limit: limit);
         // Piped has no paging; the session carries a null list and
         // fetchMoreSearchResults returns an empty list for it.
         return SearchSession._(null, pipedVideos);
@@ -627,16 +640,13 @@ class YoutubeExtractorService {
 
   /// Fetches the next page of a [SearchSession]. Returns empty list
   /// when there are no more pages.
-  Future<List<VideoDetails>> fetchMoreSearchResults(
-      SearchSession session,
+  Future<List<VideoDetails>> fetchMoreSearchResults(SearchSession session,
       {int limit = 25}) async {
     try {
       // Null when the session came from the Piped fallback: no more pages.
       final list = session._list;
       if (list == null) return const [];
-      final next = await list
-          .nextPage()
-          .timeout(const Duration(seconds: 25));
+      final next = await list.nextPage().timeout(const Duration(seconds: 25));
       if (next == null) return const [];
       session._list = next;
       return next
@@ -662,11 +672,9 @@ class YoutubeExtractorService {
 
   /// Lists subtitle/caption tracks for a video. Returns empty list
   /// when the video has no captions (never throws).
-  Future<List<CaptionTrack>> getCaptionTracks(
-      String videoId) async {
+  Future<List<CaptionTrack>> getCaptionTracks(String videoId) async {
     try {
-      final manifest = await _yt
-          .videos.closedCaptions
+      final manifest = await _yt.videos.closedCaptions
           .getManifest(videoId)
           .timeout(const Duration(seconds: 20));
       return manifest.tracks
@@ -692,8 +700,7 @@ class YoutubeExtractorService {
   /// when the video has no usable captions (never throws).
   Future<String?> getCaptionTranscript(String videoId) async {
     try {
-      final manifest = await _yt
-          .videos.closedCaptions
+      final manifest = await _yt.videos.closedCaptions
           .getManifest(videoId)
           .timeout(const Duration(seconds: 20));
       if (manifest.tracks.isEmpty) return null;
@@ -706,12 +713,10 @@ class YoutubeExtractorService {
         });
       for (final info in sorted) {
         try {
-          final track = await _yt
-              .videos.closedCaptions
+          final track = await _yt.videos.closedCaptions
               .get(info)
               .timeout(const Duration(seconds: 20));
-          final text =
-              _formatTranscript(track.captions.map((c) => c.text));
+          final text = _formatTranscript(track.captions.map((c) => c.text));
           if (text != null) return text;
         } catch (_) {
           continue;
@@ -761,15 +766,13 @@ class YoutubeExtractorService {
     } on PureTubeException {
       rethrow;
     } catch (e) {
-      throw ExtractorException(
-          'Could not load channel: ${_friendlyError(e)}');
+      throw ExtractorException('Could not load channel: ${_friendlyError(e)}');
     }
   }
 
   /// Lists recent uploads from a channel. Tries the uploads-page API
   /// first (most reliable), falling back to the UU-playlist method.
-  Future<List<VideoDetails>> getChannelUploads(
-      String channelId,
+  Future<List<VideoDetails>> getChannelUploads(String channelId,
       {int limit = 30}) async {
     await _requireNetwork();
     try {
@@ -778,9 +781,7 @@ class YoutubeExtractorService {
           .timeout(const Duration(seconds: 30));
       final videos = page.take(limit).toList();
       if (videos.isNotEmpty) {
-        return videos
-            .map(VideoDetails.fromExplode)
-            .toList();
+        return videos.map(VideoDetails.fromExplode).toList();
       }
     } catch (_) {
       // Fall through to the UU-playlist method below.
@@ -791,16 +792,13 @@ class YoutubeExtractorService {
           .take(limit)
           .toList()
           .timeout(const Duration(seconds: 30));
-      return uploads
-          .map(VideoDetails.fromExplode)
-          .toList();
+      return uploads.map(VideoDetails.fromExplode).toList();
     } on TimeoutException {
       throw ExtractorException('Channel videos timed out.');
     } on PureTubeException {
       rethrow;
     } catch (e) {
-      throw ExtractorException(
-          'Could not load uploads: ${_friendlyError(e)}');
+      throw ExtractorException('Could not load uploads: ${_friendlyError(e)}');
     }
   }
 
@@ -916,13 +914,54 @@ class YoutubeExtractorService {
 
   /// Words that carry no signal for "more like this" searches.
   static const _relatedStopWords = <String>{
-    'the', 'and', 'for', 'with', 'from', 'this', 'that', 'you',
-    'your', 'are', 'was', 'were', 'has', 'have', 'had', 'will',
-    'would', 'can', 'not', 'but', 'all', 'any', 'out', 'new',
-    'official', 'video', 'full', 'part', 'episode', 'ep', 'hd',
-    '4k', '8k', 'lyrics', 'lyric', 'audio', 'song', 'songs',
-    'music', 'movie', 'film', 'trailer', 'teaser', 'promo',
-    '2024', '2025', '2026', '2027',
+    'the',
+    'and',
+    'for',
+    'with',
+    'from',
+    'this',
+    'that',
+    'you',
+    'your',
+    'are',
+    'was',
+    'were',
+    'has',
+    'have',
+    'had',
+    'will',
+    'would',
+    'can',
+    'not',
+    'but',
+    'all',
+    'any',
+    'out',
+    'new',
+    'official',
+    'video',
+    'full',
+    'part',
+    'episode',
+    'ep',
+    'hd',
+    '4k',
+    '8k',
+    'lyrics',
+    'lyric',
+    'audio',
+    'song',
+    'songs',
+    'music',
+    'movie',
+    'film',
+    'trailer',
+    'teaser',
+    'promo',
+    '2024',
+    '2025',
+    '2026',
+    '2027',
   };
 
   /// Noise tokens stripped when normalizing titles for near-duplicate
@@ -1033,8 +1072,7 @@ class YoutubeExtractorService {
     final normalized = [for (final v in videos) _normalizeTitle(v.title)];
     final cores = [
       for (final v in videos)
-        _coreTitle(v.title,
-            authorTokens: _wordTokens(v.author).toSet()),
+        _coreTitle(v.title, authorTokens: _wordTokens(v.author).toSet()),
     ];
     final kept = <int>[];
     for (var i = 0; i < videos.length; i++) {
