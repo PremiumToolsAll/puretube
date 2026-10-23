@@ -2008,6 +2008,9 @@ class PlayerController extends Notifier<PlayerUiState>
       return;
     }
     // Emergency fallback: play the muxed stream on the handler.
+    // Clear the HQ texture/mirror first — otherwise the UI keeps
+    // showing the (dead) plugin texture while mpv plays the sound.
+    await _stopHq();
     try {
       final v = state.video;
       if (v == null) return;
@@ -2086,7 +2089,10 @@ class PlayerController extends Notifier<PlayerUiState>
         autoplay: true,
       );
       if (token != _qualitySwitchToken || state.videoId != videoId) {
-        await pt.stop();
+        // Superseded by a newer load: the NEW load owns the shared
+        // engine now. Never stop it here — stopping the engine from
+        // a stale load kills the video the user just switched to
+        // (this is what made Next-from-notification/popup hang).
         return false;
       }
       if (state.speed != 1.0) {

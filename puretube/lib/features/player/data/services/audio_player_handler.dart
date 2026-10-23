@@ -129,6 +129,9 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
   /// while the external engine plays.
   void setExternalMediaItem(MediaItem item) {
     mediaItem.add(item);
+    // Publish a one-item queue too: some Android skins only enable
+    // the skip buttons when the session carries a queue.
+    queue.add([item]);
     if (externalMode) _broadcastState();
   }
 
@@ -153,6 +156,7 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
     double speed = 1.0,
   }) async {
     this.mediaItem.add(mediaItem);
+    queue.add([mediaItem]);
     await _player.setRate(speed);
     // DASH (video-only) initial loads need the separate audio track
     // attached via mpv's 'audio-file' property BEFORE opening the media,
@@ -324,6 +328,8 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
             MediaAction.seekForward,
             MediaAction.seekBackward,
             MediaAction.setSpeed,
+            MediaAction.skipToNext,
+            MediaAction.skipToPrevious,
           },
           androidCompactActionIndices: const [1],
           processingState: _extCompleted
@@ -364,6 +370,8 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
           MediaAction.seekForward,
           MediaAction.seekBackward,
           MediaAction.setSpeed,
+          MediaAction.skipToNext,
+          MediaAction.skipToPrevious,
         },
         androidCompactActionIndices: const [1],
         processingState: _mapProcessingState(),

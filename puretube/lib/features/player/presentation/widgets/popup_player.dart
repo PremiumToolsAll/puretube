@@ -217,38 +217,64 @@ class _LiveCornerPlayerState
                     ),
                   ),
                 ),
-                // Center play/pause.
+                // Center transport: previous | play/pause | next —
+                // the mini player can change videos too (wired to
+                // the same controller paths as every other surface).
                 Center(
-                  child: StreamBuilder<bool>(
-                    stream: uiState.hqTextureId != null
-                        ? notifier.hqPlayingStream
-                        : player.stream.playing,
-                    initialData: uiState.hqTextureId != null
-                        ? notifier.hqIsPlaying
-                        : player.state.playing,
-                    builder: (context, snap) {
-                      final playing = snap.data ?? false;
-                      return Container(
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.25),
-                          ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      PressIconButton(
+                        tooltip: 'Previous',
+                        onPressed: () => notifier.playPrevious(),
+                        icon: const Icon(
+                          Icons.skip_previous_rounded,
+                          color: Colors.white,
+                          size: 26,
                         ),
-                        child: PressIconButton(
-                          tooltip: playing ? 'Pause' : 'Play',
-                          onPressed: notifier.togglePlayPause,
-                          icon: Icon(
-                            playing
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
-                            color: Colors.white,
-                            size: 34,
-                          ),
+                      ),
+                      StreamBuilder<bool>(
+                        stream: uiState.hqTextureId != null
+                            ? notifier.hqPlayingStream
+                            : player.stream.playing,
+                        initialData: uiState.hqTextureId != null
+                            ? notifier.hqIsPlaying
+                            : player.state.playing,
+                        builder: (context, snap) {
+                          final playing = snap.data ?? false;
+                          return Container(
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white
+                                    .withValues(alpha: 0.25),
+                              ),
+                            ),
+                            child: PressIconButton(
+                              tooltip: playing ? 'Pause' : 'Play',
+                              onPressed: notifier.togglePlayPause,
+                              icon: Icon(
+                                playing
+                                    ? Icons.pause_rounded
+                                    : Icons.play_arrow_rounded,
+                                color: Colors.white,
+                                size: 34,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      PressIconButton(
+                        tooltip: 'Next',
+                        onPressed: () => notifier.playNext(),
+                        icon: const Icon(
+                          Icons.skip_next_rounded,
+                          color: Colors.white,
+                          size: 26,
                         ),
-                      );
-                    },
+                      ),
+                    ],
                   ),
                 ),
                 // Top-right close.
