@@ -450,7 +450,6 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     override fun onCancel(arguments: Any?) { sink = null }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) { activity = binding.activity; resumed = false; disposed = false }
-    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) { activity = binding.activity }
     override fun onDetachedFromActivityForConfigChanges() { activity?.let { if (!backgroundPlay && resumed) pauseForBackground() }; activity = null; resumed = false }
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) { activity = binding.activity; bindSurface(); refreshService() }
     override fun onDetachedFromActivity() { activity?.let { if (!backgroundPlay && resumed) pauseForBackground() }; activity = null; resumed = false }
