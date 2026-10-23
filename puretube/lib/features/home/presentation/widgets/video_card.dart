@@ -1,18 +1,27 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 
+import '../../../../core/di/providers.dart';
 import '../../../../core/utils/format.dart';
+import '../../../library/domain/entities/library_models.dart';
+import '../../../library/presentation/providers/library_providers.dart';
+import '../../../library/presentation/screens/playlists_screen.dart'
+    show showSaveToPlaylistSheet;
 import '../../../player/domain/entities/playback_models.dart';
 import '../../../player/presentation/screens/player_screen.dart';
-import '../../../player/presentation/screens/hidden_webview_player.dart';
 
 /// Video list card, SparkTube/YouTube-app pattern: full-width 16:9
 /// thumbnail with a duration badge, then a circle channel avatar
 /// beside a 2-line bold title and ONE combined
-/// "Channel • views • time" meta line, with a ⋮ options button.
+/// "Channel • views • time" meta line, with a ⋮ options button
+/// (Share / Download / Watch Later / Save to playlist).
 /// (No channel-avatar URLs in our data — the avatar is the channel
 /// initial on a themed disc, like YouTube's fallback.)
-class VideoCard extends StatelessWidget {
+class VideoCard extends ConsumerWidget {
   final VideoDetails video;
   const VideoCard({super.key, required this.video});
 
@@ -23,18 +32,128 @@ class VideoCard extends StatelessWidget {
     );
   }
 
-  void _openWebView(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => HiddenWebViewPlayer(
-          videoId: video.id,
-          title: video.title,
+  String _sizeText(int? bytes) {
+    if (bytes == null || bytes <= 0) return 'Size unknown';
+    if (bytes >= (1 << 30)) {
+      return '${(bytes / (1 << 30)).toStringAsFixed(1)} GB';
+    }
+    return '${(bytes / (1 << 20)).toStringAsFixed(1)} MB';
+  }
+
+  Future<void> _download(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(
+      content: Text('ডাউনলোডের অপশন আনা হচ্ছে…'),
+      duration: Duration(seconds: 2),
+    ));
+    List<DownloadOption> options;
+    try {
+      options =
+          await ref.read(extractorProvider).getDownloadOptions(video.id);
+    } catch (e) {
+      messenger.showSnackBar(
+          SnackBar(content: Text('অপশন পাওয়া যায়নি: $e')));
+      return;
+    }
+    if (!context.mounted) return;
+    final videoOpts = options.where((o) => !o.audioOnly).toList();
+    final audioOpts = options.where((o) => o.audioOnly).toList();
+    final scheme = Theme.of(context).colorScheme;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: scheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(
+              title: Text('ডাউনলোড',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            for (final o in videoOpts)
+              ListTile(
+                leading: const Icon(Icons.video_file_outlined),
+                title: Text(o.label),
+                subtitle: Text(_sizeText(o.sizeBytes)),
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  unawaited(ref
+                      .read(downloadsControllerProvider.notifier)
+                      .startDownload(
+                        o,
+                        video,
+                        audioOption: o.videoOnly && audioOpts.isNotEmpty
+                            ? audioOpts.first
+                            : null,
+                      ));
+                  messenger.showSnackBar(const SnackBar(
+                      content: Text('ডাউনলোড শুরু হয়েছে')));
+                },
+              ),
+            for (final o in audioOpts)
+              ListTile(
+                leading: const Icon(Icons.audio_file_outlined),
+                title: Text('Audio • ${o.label}'),
+                subtitle: Text(_sizeText(o.sizeBytes)),
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  unawaited(ref
+                      .read(downloadsControllerProvider.notifier)
+                      .startDownload(o, video));
+                  messenger.showSnackBar(const SnackBar(
+                      content: Text('ডাউনলোড শুরু হয়েছে')));
+                },
+              ),
+          ],
         ),
       ),
     );
   }
 
-  void _showOptions(BuildContext context) {
+  Future<void> _watchLater(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final notifier = ref.read(playlistsControllerProvider.notifier);
+    var playlists = ref.read(playlistsControllerProvider);
+    Playlist? wl;
+    for (final p in playlists) {
+      if (p.name == 'Watch Later') {
+        wl = p;
+        break;
+      }
+    }
+    if (wl == null) {
+      await notifier.create('Watch Later');
+      playlists = ref.read(playlistsControllerProvider);
+      for (final p in playlists) {
+        if (p.name == 'Watch Later') {
+          wl = p;
+          break;
+        }
+      }
+    }
+    if (wl == null) return;
+    final added = await notifier.addVideo(
+      wl.id,
+      PlaylistItem(
+        videoId: video.id,
+        title: video.title,
+        author: video.author,
+        thumbnailUrl: video.thumbnailUrl,
+        addedAt: DateTime.now(),
+      ),
+    );
+    messenger.showSnackBar(SnackBar(
+      content: Text(added
+          ? 'Watch Later-এ সেভ হয়েছে'
+          : 'আগেই Watch Later-এ আছে'),
+      duration: const Duration(seconds: 2),
+    ));
+  }
+
+  void _showOptions(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet(
       context: context,
@@ -60,19 +179,36 @@ class VideoCard extends StatelessWidget {
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.play_circle_outline),
-              title: const Text('এখনই চালাও'),
+              leading: const Icon(Icons.share_outlined),
+              title: const Text('শেয়ার'),
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                _open(context);
+                Share.share(
+                    'https://www.youtube.com/watch?v=${video.id}');
               },
             ),
             ListTile(
-              leading: const Icon(Icons.open_in_browser),
-              title: const Text('WebView প্লেয়ারে খুলুন'),
+              leading: const Icon(Icons.download_outlined),
+              title: const Text('ডাউনলোড'),
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                _openWebView(context);
+                unawaited(_download(context, ref));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.watch_later_outlined),
+              title: const Text('Watch Later'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                unawaited(_watchLater(context, ref));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.playlist_add),
+              title: const Text('প্লেলিস্টে সেভ'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                showSaveToPlaylistSheet(context, video);
               },
             ),
             const SizedBox(height: 6),
@@ -83,7 +219,7 @@ class VideoCard extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final ago = timeAgo(video.uploadDate);
     final meta = <String>[
@@ -98,9 +234,6 @@ class VideoCard extends StatelessWidget {
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: () => _open(context),
-      // Long-press opens the hidden WebView player
-      // (browser engine — all qualities work like Chrome).
-      onLongPress: () => _openWebView(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -196,7 +329,7 @@ class VideoCard extends StatelessWidget {
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(
                     minWidth: 36, minHeight: 36),
-                onPressed: () => _showOptions(context),
+                onPressed: () => _showOptions(context, ref),
               ),
             ],
           ),

@@ -6,8 +6,6 @@ import android.content.Context
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.LayoutInflater
-import android.view.View
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -22,16 +20,13 @@ import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.source.MediaSource
-import androidx.media3.ui.PlayerView
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.StandardMessageCodec
-import io.flutter.plugin.platform.PlatformView
-import io.flutter.plugin.platform.PlatformViewFactory
+import io.flutter.view.TextureRegistry
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.stream.AudioStream
@@ -52,7 +47,13 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     private val io = Executors.newSingleThreadExecutor()
     private val generation = AtomicLong(0)
     private var player: ExoPlayer? = null
-    private var playerView: PlayerView? = null
+    // Texture rendering (SparkTube PlaybackCenter model): ONE player,
+    // ONE permanent render surface owned by the engine. Dart Texture
+    // widgets are pure render targets — mounting/unmounting them (full
+    // player, popup, PiP) can never pause, restart or black out the
+    // video, unlike the old PlatformView whose surface lifecycle was
+    // destroyed on every popup transition.
+    private var surfaceProducer: TextureRegistry.SurfaceProducer? = null
     private var activity: Activity? = null
     private var resumed = false
     private var lifecycleApp: Application? = null
@@ -91,6 +92,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         override fun onIsPlayingChanged(isPlaying: Boolean) = emitState()
         override fun onPlaybackStateChanged(playbackState: Int) { emitState() }
         override fun onRenderedFirstFrame() { firstFrameSeen = true; frameRecoveryStep = 0 }
+        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) { if (videoSize.width > 0 && videoSize.height > 0) surfaceProducer?.setSize(videoSize.width, videoSize.height); emitState() }
         override fun onPlayerError(error: PlaybackException) {
             val p = player
             if (!retryingExpiry && error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS && currentUrl != null) {
@@ -108,7 +110,17 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         methods = MethodChannel(binding.binaryMessenger, "puretube_playback/methods")
         events = EventChannel(binding.binaryMessenger, "puretube_playback/events")
         methods.setMethodCallHandler(this); events.setStreamHandler(this)
-        binding.platformViewRegistry.registerViewFactory("puretube_playback/view", ViewFactory())
+        val producer = binding.textureRegistry.createSurfaceProducer()
+        surfaceProducer = producer
+        producer.setCallback(object : TextureRegistry.SurfaceProducer.Callback {
+            override fun onSurfaceAvailable() {
+                val s = surfaceProducer?.surface ?: return
+                player?.setVideoSurface(s)
+            }
+            override fun onSurfaceCleanup() {
+                player?.setVideoSurface(null)
+            }
+        })
         lifecycleApp = context.applicationContext as? Application
         lifecycleApp?.registerActivityLifecycleCallbacks(lifecycleCallbacks)
         ensurePlayer()
@@ -126,7 +138,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
             // looks blurry. A slow line downshifts within a few segments.
             .setBandwidthMeter(DefaultBandwidthMeter.Builder(context).setInitialBitrateEstimate(10_000_000L).build())
             .setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(45_000, 120_000, 1_000, 5_000).setBackBuffer(30_000, true).build())
-            .build().also { player = it; it.setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true); it.setHandleAudioBecomingNoisy(true); it.addListener(playerListener); playerView?.player = it }
+            .build().also { player = it; it.setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true); it.setHandleAudioBecomingNoisy(true); it.addListener(playerListener); surfaceProducer?.surface?.let { s -> it.setVideoSurface(s) } }
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -141,7 +153,8 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
                 resolveAndLoad(url, requestedHeight, selectedAudioId, audioOnly, (a["positionMs"] as? Number)?.toLong() ?: 0L, shouldAutoplay, id, result)
             }
             "setQuality" -> { requestedHeight = (a["height"] as? Number)?.toInt(); safeRebuild(result) }
-            "setResizeMode" -> { resizeMode = (a["mode"] as? Number)?.toInt() ?: androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT; playerView?.resizeMode = resizeMode; result.success(null) }
+            "setResizeMode" -> { resizeMode = (a["mode"] as? Number)?.toInt() ?: androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT; result.success(null) }
+            "textureId" -> result.success(surfaceProducer?.id())
             "setAudioTrack" -> { selectedAudioId = a["id"] as? String; safeRebuild(result) }
             "setAudioOnly" -> { audioOnly = a["enabled"] as? Boolean ?: false; safeRebuild(result) }
             "play" -> { stopped = false; shouldAutoplay = true; if (resumed) player?.play(); result.success(null) }
@@ -259,7 +272,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         try { rebuildPreserving(); result.success(null) } catch (t: Throwable) { result.error("load_failed", t.message ?: "Unable to rebuild playback", null) }
     }
     private fun rebuildPreserving() { val c = catalog ?: return; val pos = player?.currentPosition ?: 0L; val play = shouldAutoplay && (player?.playWhenReady ?: false); install(c, requestedHeight, selectedAudioId, audioOnly, pos, play) }
-    private fun emitState() { val p = player ?: return; checkFrameWatchdog(p); emit(mapOf("type" to "state", "isPlaying" to p.isPlaying, "buffering" to (p.playbackState == Player.STATE_BUFFERING), "positionMs" to p.currentPosition.coerceAtLeast(0), "durationMs" to (p.duration.takeIf { it >= 0 } ?: 0L), "bufferedPositionMs" to p.bufferedPosition.coerceAtLeast(0), "ended" to (p.playbackState == Player.STATE_ENDED))) }
+    private fun emitState() { val p = player ?: return; checkFrameWatchdog(p); emit(mapOf("type" to "state", "isPlaying" to p.isPlaying, "buffering" to (p.playbackState == Player.STATE_BUFFERING), "positionMs" to p.currentPosition.coerceAtLeast(0), "durationMs" to (p.duration.takeIf { it >= 0 } ?: 0L), "bufferedPositionMs" to p.bufferedPosition.coerceAtLeast(0), "ended" to (p.playbackState == Player.STATE_ENDED), "videoWidth" to p.videoSize.width, "videoHeight" to p.videoSize.height)) }
 
     /** SparkTube VideoFramePolicy: 8s without a rendered frame while
      *  playback should be visible → rebind output, retry source, error. */
@@ -271,8 +284,8 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         when (frameRecoveryStep) {
             0 -> {
                 // The surface binding is the usual suspect: re-attach.
-                val v = playerView
-                if (v != null) { v.player = null; v.player = p }
+                val s = surfaceProducer?.surface
+                if (s != null) { p.setVideoSurface(null); p.setVideoSurface(s) }
                 frameWaitStartMs = now; frameRecoveryStep = 1
             }
             1 -> {
@@ -288,26 +301,16 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     }
     private fun emit(map: Map<String, Any?>) { main.post { sink?.success(map) } }
     private fun pauseForBackground() { shouldAutoplay = false; player?.pause() }
-    private fun disposePlayback() { generation.incrementAndGet(); playerView?.player = null; player?.removeListener(playerListener); player?.release(); player = null; catalog = null; currentUrl = null; stopped = true; shouldAutoplay = false; disposed = true }
+    private fun disposePlayback() { generation.incrementAndGet(); player?.setVideoSurface(null); player?.removeListener(playerListener); player?.release(); player = null; catalog = null; currentUrl = null; stopped = true; shouldAutoplay = false; disposed = true }
     private fun validYoutube(raw: String): Boolean = try { val uri = android.net.Uri.parse(raw); uri.scheme == "https" && (uri.host?.lowercase() in setOf("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com", "youtube-nocookie.com", "www.youtube-nocookie.com")) } catch (_: Throwable) { false }
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) { sink = events }
     override fun onCancel(arguments: Any?) { sink = null }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) { activity = binding.activity; resumed = false; disposed = false }
     override fun onDetachedFromActivityForConfigChanges() { activity?.let { if (resumed) pauseForBackground() }; activity = null; resumed = false }
-    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) { activity = binding.activity; playerView?.player = player }
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) { activity = binding.activity; surfaceProducer?.surface?.let { s -> player?.setVideoSurface(s) } }
     override fun onDetachedFromActivity() { activity?.let { if (resumed) pauseForBackground() }; activity = null; resumed = false }
-    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) { disposePlayback(); ticker?.let(main::removeCallbacks); ticker = null; lifecycleApp?.unregisterActivityLifecycleCallbacks(lifecycleCallbacks); lifecycleApp = null; methods.setMethodCallHandler(null); events.setStreamHandler(null); io.shutdownNow() }
-
-    private inner class ViewFactory : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
-        override fun create(context: Context, viewId: Int, args: Any?): PlatformView = PlaybackView(context)
-    }
-    private inner class PlaybackView(ctx: Context) : PlatformView {
-        private val view = LayoutInflater.from(ctx).inflate(R.layout.puretube_player, null, false) as PlayerView
-        init { view.useController = false; view.setKeepContentOnPlayerReset(true); view.resizeMode = resizeMode; view.player = ensurePlayer(); playerView = view }
-        override fun getView(): View = view
-        override fun dispose() { if (playerView === view) { view.player = null; playerView = null } }
-    }
+    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) { disposePlayback(); surfaceProducer?.release(); surfaceProducer = null; ticker?.let(main::removeCallbacks); ticker = null; lifecycleApp?.unregisterActivityLifecycleCallbacks(lifecycleCallbacks); lifecycleApp = null; methods.setMethodCallHandler(null); events.setStreamHandler(null); io.shutdownNow() }
 
     private data class Catalog(val info: StreamInfo) {
         val video: List<VideoStream> = info.videoOnlyStreams.filter { it.isUrl && it.height > 0 }.sortedWith(compareByDescending<VideoStream> { it.height }.thenByDescending { it.fps }.thenByDescending { it.bitrate })

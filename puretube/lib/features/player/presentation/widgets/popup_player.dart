@@ -189,12 +189,16 @@ class _LiveCornerPlayerState
                         Container(color: Colors.black),
                   )
                 else if (uiState.hqTextureId != null)
-                  // Plugin engine: its native view, same as the full
-                  // player. (This branch used to render a Texture
-                  // from the retired HQ engine — no such texture
-                  // exists anymore, so the popup showed black and
-                  // looked like the video had restarted.)
-                  const PureTubeVideoView()
+                  // Plugin engine: the SAME engine-owned texture the
+                  // full player shows. Mounting/unmounting this
+                  // render target never pauses, restarts or blacks
+                  // out the video (the old PlatformView's surface
+                  // was destroyed on every popup transition).
+                  PureTubeVideoView(
+                    textureId: uiState.hqTextureId!,
+                    aspectRatio: uiState.hqAspectRatio,
+                    fit: BoxFit.cover,
+                  )
                 else if (_videoController != null)
                   Video(
                     controller: _videoController!,

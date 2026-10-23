@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/di/providers.dart';
@@ -113,6 +115,35 @@ final playlistsControllerProvider =
 
 class DownloadsController
     extends Notifier<Map<String, DownloadRecord>> {
+  // Auto-retry (SparkTube/NewPipe-style resilience): a failed download
+  // re-extracts fresh stream URLs and resumes by itself — up to 3
+  // attempts with backoff — instead of sitting failed until the user
+  // notices and taps Resume. Manual retry/cancel/remove clear any
+  // pending attempt.
+  final Map<String, int> _autoRetryCounts = {};
+  final Map<String, Timer> _autoRetryTimers = {};
+
+  void _scheduleAutoRetry(String id) {
+    final count = (_autoRetryCounts[id] ?? 0) + 1;
+    if (count > 3) return;
+    _autoRetryCounts[id] = count;
+    _autoRetryTimers[id]?.cancel();
+    final delay =
+        Duration(seconds: count == 1 ? 5 : count == 2 ? 15 : 30);
+    _autoRetryTimers[id] = Timer(delay, () {
+      _autoRetryTimers.remove(id);
+      final cur = state[id];
+      if (cur != null && cur.status == DownloadStatus.failed) {
+        retry(id);
+      }
+    });
+  }
+
+  void _clearAutoRetry(String id) {
+    _autoRetryTimers.remove(id)?.cancel();
+    _autoRetryCounts.remove(id);
+  }
+
   @override
   Map<String, DownloadRecord> build() {
     final map =
@@ -227,6 +258,7 @@ class DownloadsController
       }
       final done = state[id];
       if (done != null) {
+        _clearAutoRetry(id);
         final finished = done.copyWith(
             status: DownloadStatus.completed, progress: 1.0);
         _upsert(finished);
@@ -249,6 +281,7 @@ class DownloadsController
         );
         _upsert(failed);
         await repo.save(failed);
+        _scheduleAutoRetry(id);
       }
     }
   }
@@ -256,6 +289,7 @@ class DownloadsController
   /// Stream URLs expire: re-extract before every (re)start, then resume
   /// into the same deterministic file path.
   Future<void> retry(String id) async {
+    _autoRetryTimers.remove(id)?.cancel();
     final record = state[id];
     if (record == null ||
         record.status == DownloadStatus.downloading) {
@@ -302,6 +336,7 @@ class DownloadsController
   }
 
   Future<void> cancel(String id) async {
+    _clearAutoRetry(id);
     final service = ref.read(downloadServiceProvider);
     service.cancel(id);
     // Paired DASH downloads use suffixed token ids.
@@ -310,6 +345,7 @@ class DownloadsController
   }
 
   Future<void> remove(String id) async {
+    _clearAutoRetry(id);
     final record = state[id];
     cancel(id);
     if (record != null) {

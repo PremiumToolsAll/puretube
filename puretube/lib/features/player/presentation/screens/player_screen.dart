@@ -1844,7 +1844,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   aspectRatio: uiState.hqAspectRatio > 0
                       ? uiState.hqAspectRatio
                       : 16 / 9,
-                  child: const PureTubeVideoView(),
+                  child: PureTubeVideoView(
+                    textureId: uiState.hqTextureId!,
+                    aspectRatio: uiState.hqAspectRatio,
+                  ),
                 )
               : Video(
                   controller: _videoController!,
@@ -2725,13 +2728,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             if (uiState.audioOnly && uiState.video != null)
               _buildAudioArt(uiState)
             else if (uiState.hqTextureId != null)
-              // Native HQ engine (puretube_playback plugin): Media3
-              // PlayerView rendered as a platform view.
+              // Plugin engine (puretube_playback): the shared player
+              // renders into a permanent texture; this widget is a
+              // pure render target, so popup/fullscreen transitions
+              // never disturb playback.
               AspectRatio(
                 aspectRatio: uiState.hqAspectRatio > 0
                     ? uiState.hqAspectRatio
                     : 16 / 9,
-                child: const PureTubeVideoView(),
+                child: PureTubeVideoView(
+                  textureId: uiState.hqTextureId!,
+                  aspectRatio: uiState.hqAspectRatio,
+                  fit: _videoFit,
+                ),
               )
             else if (_videoController != null)
               Video(

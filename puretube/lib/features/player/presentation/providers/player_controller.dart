@@ -276,6 +276,11 @@ class PlayerController extends Notifier<PlayerUiState>
   // The plugin allows ONE live controller per engine, so it is created
   // lazily on first HQ use and reused for the provider's lifetime.
   PureTubeController? _pt;
+
+  /// The plugin's engine-owned render texture id (fetched once when
+  /// the controller is created). Published into
+  /// [PlayerUiState.hqTextureId] while the plugin engine is active.
+  int _pluginTextureId = -1;
   bool _ptEndedHandled = false;
   String? _lastPluginError;
   // Video id for which the persistent-Auto hook already engaged the
@@ -306,6 +311,9 @@ class PlayerController extends Notifier<PlayerUiState>
       c = PureTubeController();
       c.addListener(_onPluginChanged);
       _pt = c;
+      c.textureId.then((id) {
+        if (id > 0) _pluginTextureId = id;
+      }).catchError((_) => -1);
     }
     return c;
   }
@@ -318,6 +326,12 @@ class PlayerController extends Notifier<PlayerUiState>
     if (c.duration > Duration.zero && c.duration != _hqDuration) {
       _hqDuration = c.duration;
       _hqDurationCtrl.add(c.duration);
+    }
+    if (c.videoWidth > 0 && c.videoHeight > 0) {
+      final ar = c.videoWidth / c.videoHeight;
+      if ((ar - state.hqAspectRatio).abs() > 0.01) {
+        state = state.copyWith(hqAspectRatio: ar);
+      }
     }
     // Loud HQ errors (never silent): native playback/resolve failures
     // land in c.error. 'superseded' is just a raced load — ignore it.
@@ -1930,9 +1944,18 @@ class PlayerController extends Notifier<PlayerUiState>
       }
     }
 
-    // Mount the native view BEFORE loading: the plugin binds its
-    // ExoPlayer to the mounted PlayerView.
-    state = state.copyWith(hqTextureId: 1);
+    // The plugin renders into a permanent engine-owned texture, so
+    // there is no view to mount first; publish the real texture id
+    // and the player/popup Texture widgets show the picture. They
+    // are pure render targets — mounting/unmounting them (popup,
+    // PiP, fullscreen) never touches playback.
+    if (_pluginTextureId <= 0) {
+      try {
+        _pluginTextureId = await pt.textureId;
+      } catch (_) {}
+    }
+    state = state.copyWith(
+        hqTextureId: _pluginTextureId > 0 ? _pluginTextureId : 1);
     try {
       await pt.load(
         url,

@@ -2,8 +2,6 @@ library;
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -87,7 +85,16 @@ class PureTubeController extends ChangeNotifier {
   Duration position = Duration.zero,
       duration = Duration.zero,
       bufferedPosition = Duration.zero;
+  int videoWidth = 0, videoHeight = 0;
   String? error;
+
+  Future<int>? _textureIdFuture;
+
+  /// The engine-owned render texture. The native player draws into it
+  /// permanently; any number of [PureTubeVideoView]s may display it and
+  /// mounting/unmounting them never touches playback.
+  Future<int> get textureId =>
+      _textureIdFuture ??= _invoke<int>('textureId').then((v) => v ?? -1);
 
   void _onEvent(dynamic raw) {
     if (_closed || raw is! Map) return;
@@ -101,6 +108,8 @@ class PureTubeController extends ChangeNotifier {
         duration = Duration(milliseconds: _integer(map['durationMs']));
         bufferedPosition =
             Duration(milliseconds: _integer(map['bufferedPositionMs']));
+        videoWidth = _integer(map['videoWidth']);
+        videoHeight = _integer(map['videoHeight']);
       case 'catalog':
         catalog = PureTubeCatalog.fromMap(map);
       case 'error':
@@ -191,10 +200,8 @@ class PureTubeController extends ChangeNotifier {
     await _invoke<void>('setQuality', {'height': height});
   }
 
-  /// Sets the native view's resize mode (Media3 PlayerView constants:
-  /// 0 = FIT/contain, 3 = FILL/stretch, 4 = ZOOM/cover). The mode is
-  /// stored natively and re-applied whenever the view is (re)created,
-  /// so it survives fullscreen and rotation changes.
+  /// Accepted for API compatibility; with texture rendering the fit
+  /// is applied on the Dart side by [PureTubeVideoView]'s `fit`.
   Future<void> setResizeMode(int mode) async {
     await _invoke<void>('setResizeMode', {'mode': mode});
   }
@@ -239,32 +246,46 @@ class PureTubeController extends ChangeNotifier {
   }
 }
 
-/// Native Media3 PlayerView, rendered through Android hybrid composition.
-/// Only mount one PureTubeVideoView at a time for the shared native player.
+/// The shared native player's picture, as a Flutter texture.
+///
+/// The player renders into ONE engine-owned surface (SparkTube's
+/// one-player model): this widget is a pure render target, so the
+/// full player, the popup and PiP can mount/unmount it freely —
+/// playback position and picture survive every transition.
 class PureTubeVideoView extends StatelessWidget {
-  const PureTubeVideoView({super.key});
+  const PureTubeVideoView({
+    super.key,
+    required this.textureId,
+    required this.aspectRatio,
+    this.fit = BoxFit.contain,
+  });
+
+  final int textureId;
+
+  /// Video width / height; <= 0 falls back to 16:9.
+  final double aspectRatio;
+  final BoxFit fit;
+
   @override
   Widget build(BuildContext context) {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
-      return const Center(child: Text('PureTube playback is Android-only.'));
+    if (textureId <= 0 ||
+        kIsWeb ||
+        defaultTargetPlatform != TargetPlatform.android) {
+      return const ColoredBox(color: Color(0xFF000000));
     }
-    return PlatformViewLink(
-      viewType: 'puretube_playback/view',
-      surfaceFactory: (context, controller) => AndroidViewSurface(
-        controller: controller as AndroidViewController,
-        gestureRecognizers: const <Factory<OneSequenceGestureRecognizer>>{},
-        hitTestBehavior: PlatformViewHitTestBehavior.opaque,
+    final ar = aspectRatio > 0 ? aspectRatio : 16 / 9;
+    final texture = Texture(textureId: textureId);
+    if (fit == BoxFit.fill) return texture;
+    return SizedBox.expand(
+      child: FittedBox(
+        fit: fit,
+        clipBehavior: Clip.hardEdge,
+        child: SizedBox(
+          width: ar * 1000,
+          height: 1000,
+          child: texture,
+        ),
       ),
-      onCreatePlatformView: (params) =>
-          PlatformViewsService.initSurfaceAndroidView(
-        id: params.id,
-        viewType: 'puretube_playback/view',
-        layoutDirection: TextDirection.ltr,
-        creationParamsCodec: const StandardMessageCodec(),
-        onFocus: () => params.onFocusChanged(true),
-      )
-            ..addOnPlatformViewCreatedListener(params.onPlatformViewCreated)
-            ..create(),
     );
   }
 }
