@@ -411,11 +411,20 @@ class PlayerController extends Notifier<PlayerUiState>
     _pushMirrorState();
   }
 
+  String _lastMirrorSig = '';
+
   void _pushMirrorState() {
     _syncPipPlaying(_hqPlaying);
     _syncAutoPip();
     if (!_handler.externalMode) return;
     final pt = _pt;
+    // This runs from both the plugin listener and the 500ms poll;
+    // pushing an identical media-session state several times a
+    // second is pure rebuild churn for the notification/mini UI.
+    final sig = '${_hqPlaying}|${pt?.buffering ?? false}|'
+        '${pt?.ended ?? false}|${_hqPosition.inSeconds}|${state.speed}';
+    if (sig == _lastMirrorSig) return;
+    _lastMirrorSig = sig;
     _handler.setExternalState(
       playing: _hqPlaying,
       buffering: pt?.buffering ?? false,

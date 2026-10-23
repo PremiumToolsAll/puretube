@@ -120,6 +120,12 @@ class PureTubeController extends ChangeNotifier {
     return f;
   }
 
+  /// Signature of the last state event listeners were told about.
+  /// Position/buffered fields are excluded — the app polls those
+  /// itself; notifying for them twice a second kept the whole UI
+  /// rebuilding even for a paused video.
+  String _lastStateSig = '';
+
   void _onEvent(dynamic raw) {
     if (_closed || raw is! Map) return;
     final map = Map<Object?, Object?>.from(raw);
@@ -135,6 +141,11 @@ class PureTubeController extends ChangeNotifier {
         videoWidth = _integer(map['videoWidth']);
         videoHeight = _integer(map['videoHeight']);
         stateTextureId = _integer(map['textureId']);
+        final sig =
+            '$isPlaying|$buffering|$ended|${duration.inMilliseconds}|'
+            '$videoWidth|$videoHeight|$stateTextureId';
+        if (sig == _lastStateSig) return;
+        _lastStateSig = sig;
       case 'catalog':
         catalog = PureTubeCatalog.fromMap(map);
       case 'error':

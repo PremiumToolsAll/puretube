@@ -427,7 +427,16 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         try { rebuildPreserving(); result.success(null) } catch (t: Throwable) { result.error("load_failed", t.message ?: "Unable to rebuild playback", null) }
     }
     private fun rebuildPreserving() { val c = catalog ?: return; val pos = player?.currentPosition ?: 0L; val play = shouldAutoplay && (player?.playWhenReady ?: false); install(c, requestedHeight, selectedAudioId, audioOnly, pos, play) }
-    private fun emitState() { val p = player ?: return; checkFrameWatchdog(p); emit(mapOf("type" to "state", "isPlaying" to p.isPlaying, "buffering" to (p.playbackState == Player.STATE_BUFFERING), "positionMs" to p.currentPosition.coerceAtLeast(0), "durationMs" to (p.duration.takeIf { it >= 0 } ?: 0L), "bufferedPositionMs" to p.bufferedPosition.coerceAtLeast(0), "ended" to (p.playbackState == Player.STATE_ENDED), "videoWidth" to p.videoSize.width, "videoHeight" to p.videoSize.height, "textureId" to (textureEntry?.id() ?: -1L), "firstFrame" to firstFrameSeen)) }
+    private var lastStateMap: Map<String, Any?>? = null
+
+    private fun emitState() { val p = player ?: return; checkFrameWatchdog(p); val m = mapOf("type" to "state", "isPlaying" to p.isPlaying, "buffering" to (p.playbackState == Player.STATE_BUFFERING), "positionMs" to p.currentPosition.coerceAtLeast(0), "durationMs" to (p.duration.takeIf { it >= 0 } ?: 0L), "bufferedPositionMs" to p.bufferedPosition.coerceAtLeast(0), "ended" to (p.playbackState == Player.STATE_ENDED), "videoWidth" to p.videoSize.width, "videoHeight" to p.videoSize.height, "textureId" to (textureEntry?.id() ?: -1L), "firstFrame" to firstFrameSeen)
+        // A paused/idle player has nothing new to say: re-emitting the
+        // identical state twice a second kept the whole app UI
+        // rebuilding (the "everything feels laggy" report). The frame
+        // watchdog above still runs on every tick.
+        if (!p.isPlaying && p.playbackState != Player.STATE_BUFFERING && m == lastStateMap) return
+        lastStateMap = m
+        emit(m) }
 
     /** SparkTube VideoFramePolicy: 8s without a rendered frame while
      *  playback should be visible → rebind output, retry source, error. */

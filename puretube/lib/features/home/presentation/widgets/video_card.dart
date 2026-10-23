@@ -292,6 +292,9 @@ class VideoCard extends ConsumerWidget {
               children: [
                 CachedNetworkImage(
                   imageUrl: video.thumbnailUrl,
+                  // Decode near display size: full-res thumbnails in
+                  // a scrolling feed are a classic jank/memory sink.
+                  memCacheWidth: 800,
                   fit: BoxFit.cover,
                   placeholder: (_, __) => Container(
                       color: Theme.of(context).colorScheme.surfaceContainer),
@@ -368,7 +371,7 @@ class VideoCard extends ConsumerWidget {
                       radius: 18,
                       backgroundColor: scheme.primaryContainer,
                       backgroundImage: logo != null
-                          ? CachedNetworkImageProvider(logo)
+                          ? CachedNetworkImageProvider(logo, maxWidth: 160)
                           : null,
                       child: logo == null
                           ? Text(
