@@ -297,6 +297,17 @@ class PlayerController extends Notifier<PlayerUiState>
   /// plugin's NewPipe resolve was blocked). Keeps the stale resolve
   /// error from resurfacing over healthy fallback playback.
   String? _directFallbackFor;
+
+  /// When YouTube last bot-blocked the plugin resolve. While this
+  /// is fresh, fresh engages skip the doomed (and slow) NewPipe
+  /// resolve and go straight to the direct fallback — Next stays
+  /// instant on a blocked network.
+  DateTime? _resolveBlockedAt;
+
+  bool get _resolveBlockedRecently =>
+      _resolveBlockedAt != null &&
+      DateTime.now().difference(_resolveBlockedAt!) <
+          const Duration(minutes: 10);
   // Video id for which the persistent-Auto hook already engaged the
   // HQ engine (prevents a fail/retry loop within one video).
   String? _autoHqEngagedFor;
@@ -437,6 +448,17 @@ class PlayerController extends Notifier<PlayerUiState>
     if (PureTubeController.ownerTag != null &&
         PureTubeController.ownerTag != 'main') {
       return;
+    }
+    // Adopt a recreated render surface's texture id: the native
+    // side replaces a dead surface (new id) and reports it in
+    // state events; republishing rebuilds the Texture widget onto
+    // the fresh surface — the picture comes back by itself.
+    final sid = c.stateTextureId;
+    if (sid > 0 && sid != _pluginTextureId) {
+      _pluginTextureId = sid;
+      if (state.hqTextureId != null && state.hqTextureId != sid) {
+        state = state.copyWith(hqTextureId: sid);
+      }
     }
     if (c.duration > Duration.zero && c.duration != _hqDuration) {
       _hqDuration = c.duration;
@@ -2064,7 +2086,15 @@ class PlayerController extends Notifier<PlayerUiState>
     // a re-engage keeps the position; a fresh video passes 0).
     final resumeAt = startAt ?? _hqPosition;
     final url = 'https://www.youtube.com/watch?v=$videoId';
-    final pt = _plugin;
+        // On a bot-blocked network the NewPipe resolve is doomed and
+    // slow; once it has failed that way, go straight to the direct
+    // fallback so video switches stay instant.
+    if (_resolveBlockedRecently) {
+      final okFb = await _playDirectFallback(videoId, token, resumeAt,
+          audioOnly: false);
+      if (okFb) return true;
+    }
+final pt = _plugin;
 
     // If a dubbed audio language is selected, find the matching plugin
     // track first (the plugin groups tracks by NewPipe's track id /
@@ -2133,6 +2163,7 @@ class PlayerController extends Notifier<PlayerUiState>
       if (playingVideo != null) {
         _engageMirror(playingVideo);
       }
+      _resolveBlockedAt = null;
       final s = state.streams;
       state = state.copyWith(
         currentQuality: target,
@@ -2156,6 +2187,9 @@ class PlayerController extends Notifier<PlayerUiState>
       // a flagged IP)? Fall back to the app's own extraction chain
       // and play its direct URLs through the same engine.
       final rawErr = pt.error ?? e.toString();
+      if (_isResolveBlock(rawErr)) {
+        _resolveBlockedAt = DateTime.now();
+      }
       if (_isResolveBlock(rawErr) &&
           await _playDirectFallback(videoId, token, resumeAt,
               audioOnly: false)) {

@@ -93,6 +93,12 @@ class PureTubeController extends ChangeNotifier {
       duration = Duration.zero,
       bufferedPosition = Duration.zero;
   int videoWidth = 0, videoHeight = 0;
+
+  /// Texture id most recently reported by the native side in a
+  /// state event. The native side recreates the render surface
+  /// when it dies (new id); the app adopts it from here so its
+  /// Texture widget rebuilds onto the fresh surface.
+  int stateTextureId = -1;
   String? error;
 
   Future<int>? _textureIdFuture;
@@ -128,6 +134,7 @@ class PureTubeController extends ChangeNotifier {
             Duration(milliseconds: _integer(map['bufferedPositionMs']));
         videoWidth = _integer(map['videoWidth']);
         videoHeight = _integer(map['videoHeight']);
+        stateTextureId = _integer(map['textureId']);
       case 'catalog':
         catalog = PureTubeCatalog.fromMap(map);
       case 'error':
