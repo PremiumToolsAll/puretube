@@ -163,10 +163,10 @@ class DownloadsController
       state = {...state, r.id: r};
 
   /// Starts a download. When [option] is a video-only DASH stream and
-  /// [audioOption] is given, both files are fetched (video, then audio)
-  /// and the record keeps the audio path so the offline player can
-  /// attach it via mpv's `audio-file` — video plays WITH audio without
-  /// an FFmpeg merge step.
+  /// [audioOption] is given, both files are fetched IN PARALLEL
+  /// (SparkTube-style pair) and the record keeps the audio path so
+  /// the offline player can merge it natively at playback — video
+  /// plays WITH audio without an FFmpeg merge step.
   Future<void> startDownload(DownloadOption option,
       VideoDetails video, {DownloadOption? audioOption}) async {
     final service = ref.read(downloadServiceProvider);
@@ -197,6 +197,10 @@ class DownloadsController
       audioFilePath: audioSavePath,
       videoOnly: option.videoOnly,
       audioQualityLabel: pairAudio?.label,
+      // Carry the previous run's segment checkpoints over: the
+      // engine resumes every segment from its own byte offset.
+      segmentOffsets: state[id]?.segmentOffsets,
+      audioSegmentOffsets: state[id]?.audioSegmentOffsets,
       totalBytes: option.sizeBytes,
       status: DownloadStatus.downloading,
       createdAt: DateTime.now(),
@@ -220,6 +224,25 @@ class DownloadsController
       }
     }
 
+    // Segment checkpoints from the engine, persisted so a pause,
+    // a failure, or an app restart resumes mid-file.
+    void checkpoint(List<int> offsets, int totalBytes,
+        {bool audio = false}) {
+      final cur = state[id];
+      if (cur == null ||
+          cur.status != DownloadStatus.downloading) {
+        return;
+      }
+      final next = audio
+          ? cur.copyWith(audioSegmentOffsets: offsets)
+          : cur.copyWith(
+              segmentOffsets: offsets,
+              totalBytes:
+                  totalBytes > 0 ? totalBytes : cur.totalBytes);
+      _upsert(next);
+      unawaited(repo.save(next));
+    }
+
     try {
       if (pairAudio == null) {
         await service.startDownload(
@@ -229,32 +252,58 @@ class DownloadsController
           totalBytesHint: option.sizeBytes,
           onProgress: reportProgress,
           onSpeed: reportSpeed,
+          resumeOffsets: state[id]?.segmentOffsets,
+          onCheckpoint: (o, t) => checkpoint(o, t),
         );
       } else {
-        // Weighted progress: video ~80%, audio ~20% of the bar.
+        // Pair download, BOTH files in parallel (SparkTube-style),
+        // progress weighted by each file's byte share.
         final videoBytes = option.sizeBytes ?? 0;
         final audioBytes = pairAudio.sizeBytes ?? 0;
         final totalBytes = videoBytes + audioBytes;
         final videoShare = totalBytes > 0
             ? videoBytes / totalBytes
             : 0.8;
-        await service.startDownload(
-          id: '${id}_video',
-          url: option.url,
-          savePath: savePath,
-          totalBytesHint: option.sizeBytes,
-          onProgress: (p) => reportProgress(p * videoShare),
-          onSpeed: reportSpeed,
-        );
-        await service.startDownload(
-          id: '${id}_audio',
-          url: pairAudio.url,
-          savePath: audioSavePath!,
-          totalBytesHint: pairAudio.sizeBytes,
-          onProgress: (p) =>
-              reportProgress(videoShare + p * (1 - videoShare)),
-          onSpeed: reportSpeed,
-        );
+        var vP = 0.0, aP = 0.0, vS = 0.0, aS = 0.0;
+        void combine() {
+          reportProgress(vP * videoShare + aP * (1 - videoShare));
+          reportSpeed(vS + aS);
+        }
+
+        await Future.wait([
+          service.startDownload(
+            id: '${id}_video',
+            url: option.url,
+            savePath: savePath,
+            totalBytesHint: option.sizeBytes,
+            onProgress: (p) {
+              vP = p;
+              combine();
+            },
+            onSpeed: (v) {
+              vS = v;
+              combine();
+            },
+            resumeOffsets: state[id]?.segmentOffsets,
+            onCheckpoint: (o, t) => checkpoint(o, t),
+          ),
+          service.startDownload(
+            id: '${id}_audio',
+            url: pairAudio.url,
+            savePath: audioSavePath!,
+            totalBytesHint: pairAudio.sizeBytes,
+            onProgress: (p) {
+              aP = p;
+              combine();
+            },
+            onSpeed: (v) {
+              aS = v;
+              combine();
+            },
+            resumeOffsets: state[id]?.audioSegmentOffsets,
+            onCheckpoint: (o, t) => checkpoint(o, t, audio: true),
+          ),
+        ]);
       }
       final done = state[id];
       if (done != null) {

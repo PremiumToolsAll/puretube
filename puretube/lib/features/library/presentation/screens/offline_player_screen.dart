@@ -70,7 +70,9 @@ class _OfflinePlayerScreenState
       try {
         await _pt.stop();
       } catch (_) {}
-      await _pt.close();
+      // detach(), NOT close(): close() invokes the native 'dispose',
+      // which releases the ONE shared player for every surface.
+      await _pt.detach();
     }());
     super.dispose();
   }

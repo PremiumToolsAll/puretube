@@ -100,8 +100,19 @@ class PureTubeController extends ChangeNotifier {
   /// The engine-owned render texture. The native player draws into it
   /// permanently; any number of [PureTubeVideoView]s may display it and
   /// mounting/unmounting them never touches playback.
-  Future<int> get textureId =>
-      _textureIdFuture ??= _invoke<int>('textureId').then((v) => v ?? -1);
+  Future<int> get textureId {
+    final f = _textureIdFuture ??=
+        _invoke<int>('textureId').then((v) => v ?? -1);
+    // Never cache a failure: a dead/-1 id would be republished for
+    // the whole session and the video area would stay black while
+    // audio plays. A later read retries the channel call.
+    f.then((v) {
+      if (v <= 0 && identical(_textureIdFuture, f)) _textureIdFuture = null;
+    }, onError: (_) {
+      if (identical(_textureIdFuture, f)) _textureIdFuture = null;
+    });
+    return f;
+  }
 
   void _onEvent(dynamic raw) {
     if (_closed || raw is! Map) return;
@@ -284,6 +295,18 @@ class PureTubeController extends ChangeNotifier {
     } finally {
       _claimed = false;
     }
+  }
+
+  /// Cancels this controller's event subscription WITHOUT touching
+  /// the shared native engine. Secondary surfaces (Shorts, offline
+  /// player) must use this on dispose: [close] invokes the native
+  /// 'dispose', which releases the ONE shared player for everyone.
+  Future<void> detach() async {
+    _closed = true;
+    try {
+      await _subscription.cancel();
+    } catch (_) {}
+    _claimed = false;
   }
 
   @override

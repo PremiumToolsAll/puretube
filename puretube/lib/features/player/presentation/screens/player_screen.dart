@@ -1459,6 +1459,42 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   Future<void> _showDownloadSheet(VideoDetails video) async {
     final extractor = ref.read(extractorProvider);
     final notifier = ref.read(downloadsControllerProvider.notifier);
+    // SparkTube-style: options already on disk are marked and the
+    // exact same selection can't be started twice.
+    final doneRecords = ref
+        .read(downloadsControllerProvider)
+        .values
+        .where((r) =>
+            r.videoId == video.id &&
+            r.status == DownloadStatus.completed)
+        .toList();
+    final doneVideoLabels = <String>{
+      for (final r in doneRecords)
+        if (!r.audioOnly) r.qualityLabel,
+    };
+    final doneAudioLabels = <String>{
+      for (final r in doneRecords)
+        if (r.audioOnly) r.qualityLabel,
+    };
+    bool selectionDownloaded(DownloadOption? v, DownloadOption? a) {
+      if (v == null && a == null) return false;
+      if (v != null && v.isMuxed) {
+        return doneRecords.any((r) =>
+            !r.audioOnly &&
+            r.qualityLabel == v.label &&
+            r.audioFilePath == null);
+      }
+      if (v != null && v.videoOnly) {
+        return doneRecords.any((r) =>
+            !r.audioOnly &&
+            r.qualityLabel == v.label &&
+            (a == null
+                ? r.audioFilePath == null
+                : r.audioQualityLabel == a.label));
+      }
+      if (v != null) return doneVideoLabels.contains(v.label);
+      return doneAudioLabels.contains(a!.label);
+    }
     List<DownloadOption>? options;
     String? error;
     try {
@@ -1624,7 +1660,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       icon: Icons.play_circle_outline,
                       title: o.tierTitle,
                       subtitle: o.tierDescription,
-                      badge: o.tierBadge,
+                      badge: doneVideoLabels.contains(o.label)
+                          ? 'Downloaded'
+                          : o.tierBadge,
                       sizeText: size(o.sizeBytes),
                       selected: selVideo == o,
                       onTap: () => setSheetState(() => selVideo = o),
@@ -1644,7 +1682,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       icon: Icons.music_note_outlined,
                       title: o.tierTitle,
                       subtitle: o.tierDescription,
-                      badge: o.tierBadge,
+                      badge: doneAudioLabels.contains(o.label)
+                          ? 'Downloaded'
+                          : o.tierBadge,
                       sizeText: size(o.sizeBytes),
                       selected: selAudio == o,
                       onTap: () => setSheetState(() => selAudio = o),
@@ -1671,7 +1711,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
                     ),
-                    onPressed: (selVideo == null && selAudio == null)
+                    onPressed: (selVideo == null && selAudio == null) ||
+                            selectionDownloaded(selVideo, selAudio)
                         ? null
                         : () {
                             final v = selVideo;
@@ -1702,8 +1743,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                             }
                           },
                     icon: const Icon(Icons.download),
-                    label: const Text('Download',
-                        style: TextStyle(
+                    label: Text(
+                        selectionDownloaded(selVideo, selAudio)
+                            ? 'Already downloaded'
+                            : 'Download',
+                        style: const TextStyle(
                             fontWeight: FontWeight.bold, fontSize: 16)),
                   ),
                   const Divider(height: 24),

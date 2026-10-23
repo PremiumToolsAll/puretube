@@ -272,6 +272,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         // resolveAndLoad.
         firstFrameSeen = onlyAudio
         frameWaitStartMs = System.currentTimeMillis()
+        bindSurface()
         p.setMediaSource(source); p.prepare(); if (pos > 0) p.seekTo(pos); if (autoplay && !stopped) p.play() else p.pause()
     }
     /** Plays a downloaded file (offline playback). A companion
@@ -291,6 +292,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         }
         firstFrameSeen = onlyAudio
         frameWaitStartMs = System.currentTimeMillis()
+        bindSurface()
         p.setMediaSource(source); p.prepare(); if (pos > 0) p.seekTo(pos); if (autoplay && !stopped) p.play() else p.pause()
         emitState()
     }
@@ -329,9 +331,14 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         if (now - frameWaitStartMs < 8_000L) return
         when (frameRecoveryStep) {
             0 -> {
-                // The surface binding is the usual suspect: re-attach.
+                // The surface binding is the usual suspect: re-attach,
+                // with a beat between detach and attach (some devices
+                // ignore an instant re-set of the same surface).
                 val s = surfaceProducer?.surface
-                if (s != null) { p.setVideoSurface(null); p.setVideoSurface(s) }
+                if (s != null) {
+                    p.setVideoSurface(null)
+                    main.postDelayed({ try { player?.setVideoSurface(s) } catch (_: Throwable) {} }, 200)
+                }
                 frameWaitStartMs = now; frameRecoveryStep = 1
             }
             1 -> {
@@ -358,6 +365,17 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
                 override fun onSurfaceAvailable() { bindSurface() }
                 override fun onSurfaceCleanup() {
                     try { player?.setVideoSurface(null) } catch (_: Throwable) {}
+                    // Self-heal: texture churn (popup/PiP/fullscreen
+                    // transitions, HyperOS texture management) can
+                    // fire cleanup mid-playback. Without a rebind the
+                    // video renders nowhere forever — audio plays,
+                    // the picture stays black. Re-attach shortly
+                    // after, while a load is active.
+                    main.postDelayed({
+                        if (player != null && !stopped) {
+                            bindSurface()
+                        }
+                    }, 300)
                 }
             })
             surfaceProducer = producer

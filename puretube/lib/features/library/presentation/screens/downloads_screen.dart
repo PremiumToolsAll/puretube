@@ -134,12 +134,30 @@ class _DownloadTile extends ConsumerWidget {
   String _statusLabel() => switch (record.status) {
         DownloadStatus.queued => 'Queued',
         DownloadStatus.downloading =>
-          '${(record.progress * 100).round()}% • ${_formatSpeed(record.speedMbps)}',
+          '${(record.progress * 100).round()}% • ${_formatSpeed(record.speedMbps)}${_etaSuffix()}',
         DownloadStatus.paused => 'Paused',
         DownloadStatus.completed => 'Completed',
         DownloadStatus.failed => 'Failed',
         DownloadStatus.canceled => 'Canceled',
       };
+
+  /// " • ~3 min left" while downloading, from the live speed and
+  /// the remaining bytes (SparkTube shows the same metrics trio).
+  String _etaSuffix() {
+    final total = record.totalBytes;
+    if (total == null || total <= 0 || record.speedMbps <= 0) {
+      return '';
+    }
+    final remaining = total * (1 - record.progress);
+    final bytesPerSec = record.speedMbps * 1000000 / 8;
+    if (bytesPerSec <= 0) return '';
+    final secs = (remaining / bytesPerSec).round();
+    if (secs < 5) return ' • almost done';
+    if (secs < 60) return ' • ~$secs sec left';
+    final mins = secs ~/ 60;
+    if (mins < 60) return ' • ~$mins min left';
+    return ' • ~${mins ~/ 60}h ${mins % 60}m left';
+  }
 
   String _formatSpeed(double mbps) {
     if (mbps < 0.1) return '0 Mbps';

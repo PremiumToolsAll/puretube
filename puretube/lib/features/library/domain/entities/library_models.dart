@@ -193,6 +193,14 @@ class DownloadRecord {
   /// Label of the companion audio option for DASH pair downloads
   /// (used to re-match a fresh URL on retry).
   final String? audioQualityLabel;
+
+  /// Per-segment byte checkpoints of the segmented download
+  /// engine (SparkTube-style): segment i resumes at its own
+  /// offset, so a pause/failure/restart never restarts from zero.
+  final List<int>? segmentOffsets;
+
+  /// Same checkpoints for the companion audio file of a pair.
+  final List<int>? audioSegmentOffsets;
   final int? totalBytes;
   final DownloadStatus status;
   final double progress;
@@ -212,6 +220,8 @@ class DownloadRecord {
     this.audioFilePath,
     this.videoOnly = false,
     this.audioQualityLabel,
+    this.segmentOffsets,
+    this.audioSegmentOffsets,
     this.totalBytes,
     required this.status,
     this.progress = 0,
@@ -229,6 +239,8 @@ class DownloadRecord {
     String? audioFilePath,
     bool? videoOnly,
     String? audioQualityLabel,
+    List<int>? segmentOffsets,
+    List<int>? audioSegmentOffsets,
   }) =>
       DownloadRecord(
         id: id,
@@ -243,6 +255,9 @@ class DownloadRecord {
         videoOnly: videoOnly ?? this.videoOnly,
         audioQualityLabel:
             audioQualityLabel ?? this.audioQualityLabel,
+        segmentOffsets: segmentOffsets ?? this.segmentOffsets,
+        audioSegmentOffsets:
+            audioSegmentOffsets ?? this.audioSegmentOffsets,
         totalBytes: totalBytes ?? this.totalBytes,
         status: status ?? this.status,
         progress: progress ?? this.progress,
@@ -263,6 +278,8 @@ class DownloadRecord {
         'audioFilePath': audioFilePath,
         'videoOnly': videoOnly,
         'audioQualityLabel': audioQualityLabel,
+        'segmentOffsets': segmentOffsets,
+        'audioSegmentOffsets': audioSegmentOffsets,
         'totalBytes': totalBytes,
         'status': status.name,
         'progress': progress,
@@ -288,6 +305,12 @@ class DownloadRecord {
       audioFilePath: j['audioFilePath'] as String?,
       videoOnly: j['videoOnly'] as bool? ?? false,
       audioQualityLabel: j['audioQualityLabel'] as String?,
+      segmentOffsets: (j['segmentOffsets'] as List?)
+          ?.map((e) => (e as num).toInt())
+          .toList(),
+      audioSegmentOffsets: (j['audioSegmentOffsets'] as List?)
+          ?.map((e) => (e as num).toInt())
+          .toList(),
       totalBytes: j['totalBytes'] as int?,
       status: status,
       progress: (j['progress'] as num?)?.toDouble() ?? 0,

@@ -334,6 +334,29 @@ class PlayerController extends Notifier<PlayerUiState>
     return c;
   }
 
+  /// Publishes the plugin's REAL texture id once the channel
+  /// answers, replacing the -1 "engaged" placeholder. Retries a few
+  /// times — the producer is created lazily natively, so the first
+  /// read can race it.
+  Future<void> _publishTextureId() async {
+    for (final wait in const [
+      Duration.zero,
+      Duration(milliseconds: 800),
+      Duration(milliseconds: 2500),
+    ]) {
+      if (_pluginTextureId > 0) break;
+      if (wait > Duration.zero) await Future.delayed(wait);
+      try {
+        _pluginTextureId = await _plugin.textureId;
+      } catch (_) {}
+    }
+    if (_pluginTextureId > 0 &&
+        state.hqTextureId != null &&
+        state.hqTextureId != _pluginTextureId) {
+      state = state.copyWith(hqTextureId: _pluginTextureId);
+    }
+  }
+
   /// Connects the audio handler's media session to the plugin
   /// engine: PiP buttons, the lock screen, the notification and
   /// headset keys now describe and control THIS player — one main
@@ -1867,9 +1890,13 @@ class PlayerController extends Notifier<PlayerUiState>
       } catch (_) {}
     }
     // hqTextureId doubles as the "plugin engaged" marker the whole
-    // UI keys on; audio mode simply never renders the texture.
+    // UI keys on; audio mode simply never renders the texture. When
+    // the real id is momentarily unknown publish -1 (engaged, renders
+    // nothing) — never a guessed id like 1, which can be a REAL
+    // texture owned by something else. _publishTextureId heals it.
     state = state.copyWith(
-        hqTextureId: _pluginTextureId > 0 ? _pluginTextureId : 1);
+        hqTextureId: _pluginTextureId > 0 ? _pluginTextureId : -1);
+    unawaited(_publishTextureId());
     if (pt.duration > Duration.zero) {
       _hqDuration = pt.duration;
       _hqDurationCtrl.add(pt.duration);
@@ -1965,7 +1992,8 @@ class PlayerController extends Notifier<PlayerUiState>
       } catch (_) {}
     }
     state = state.copyWith(
-        hqTextureId: _pluginTextureId > 0 ? _pluginTextureId : 1);
+        hqTextureId: _pluginTextureId > 0 ? _pluginTextureId : -1);
+    unawaited(_publishTextureId());
     try {
       await pt.load(
         url,

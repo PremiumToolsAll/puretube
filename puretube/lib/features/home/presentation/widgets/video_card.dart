@@ -64,6 +64,21 @@ class VideoCard extends ConsumerWidget {
     if (!context.mounted) return;
     final videoOpts = options.where((o) => !o.audioOnly).toList();
     final audioOpts = options.where((o) => o.audioOnly).toList();
+    // SparkTube-style: already-downloaded options are marked and
+    // tapping one just says so instead of downloading it again.
+    final doneRecords = ref
+        .read(downloadsControllerProvider)
+        .values
+        .where((r) =>
+            r.videoId == video.id &&
+            r.status == DownloadStatus.completed)
+        .toList();
+    bool videoDone(DownloadOption o) => doneRecords.any((r) =>
+        !r.audioOnly &&
+        r.qualityLabel == o.label &&
+        (!o.videoOnly || r.audioFilePath != null));
+    bool audioDone(DownloadOption o) => doneRecords.any(
+        (r) => r.audioOnly && r.qualityLabel == o.label);
     final scheme = Theme.of(context).colorScheme;
     await showModalBottomSheet<void>(
       context: context,
@@ -83,9 +98,19 @@ class VideoCard extends ConsumerWidget {
               ListTile(
                 leading: const Icon(Icons.video_file_outlined),
                 title: Text(o.label),
-                subtitle: Text(_sizeText(o.sizeBytes)),
+                subtitle: Text(videoDone(o)
+                    ? 'Downloaded'
+                    : _sizeText(o.sizeBytes)),
+                trailing: videoDone(o)
+                    ? const Icon(Icons.check_circle, color: Colors.green)
+                    : null,
                 onTap: () {
                   Navigator.of(sheetCtx).pop();
+                  if (videoDone(o)) {
+                    messenger.showSnackBar(const SnackBar(
+                        content: Text('ইতিমধ্যে ডাউনলোড করা আছে')));
+                    return;
+                  }
                   unawaited(ref
                       .read(downloadsControllerProvider.notifier)
                       .startDownload(
@@ -103,9 +128,19 @@ class VideoCard extends ConsumerWidget {
               ListTile(
                 leading: const Icon(Icons.audio_file_outlined),
                 title: Text('Audio • ${o.label}'),
-                subtitle: Text(_sizeText(o.sizeBytes)),
+                subtitle: Text(audioDone(o)
+                    ? 'Downloaded'
+                    : _sizeText(o.sizeBytes)),
+                trailing: audioDone(o)
+                    ? const Icon(Icons.check_circle, color: Colors.green)
+                    : null,
                 onTap: () {
                   Navigator.of(sheetCtx).pop();
+                  if (audioDone(o)) {
+                    messenger.showSnackBar(const SnackBar(
+                        content: Text('ইতিমধ্যে ডাউনলোড করা আছে')));
+                    return;
+                  }
                   unawaited(ref
                       .read(downloadsControllerProvider.notifier)
                       .startDownload(o, video));

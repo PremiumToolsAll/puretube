@@ -75,11 +75,13 @@ class _ShortsPlayerWidgetState
         try {
           await pt?.stop();
         } catch (_) {}
-        await pt?.close();
+        // detach(), NOT close(): close() invokes the native
+        // 'dispose', releasing the ONE shared player for everyone.
+        await pt?.detach();
       }());
       ref.read(playerControllerProvider.notifier).invalidateEngine();
     } else {
-      unawaited(_pt?.close() ?? Future.value());
+      unawaited(_pt?.detach() ?? Future.value());
     }
     super.dispose();
   }
