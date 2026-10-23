@@ -69,6 +69,12 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     private var firstFrameSeen = true
     private var frameWaitStartMs = 0L
     private var frameRecoveryStep = 0
+    // Background play (SparkTube model): leaving the app does NOT
+    // pause the player; a foreground service keeps the process alive
+    // with a media notification while playback continues.
+    private val backgroundPlay = true
+    private var serviceStarted = false
+    private var lastServiceKey: String? = null
     private var selectedAudioId: String? = null
     private var audioOnly = false
     private var shouldAutoplay = true
@@ -80,17 +86,17 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     private var fallbackAudio: AudioStream? = null
     private var ticker: Runnable? = null
     private val lifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
-        override fun onActivityResumed(a: Activity) { if (a === activity) { resumed = true; if (shouldAutoplay && !stopped) player?.play() } }
-        override fun onActivityPaused(a: Activity) { if (a === activity) { resumed = false; pauseForBackground() } }
-        override fun onActivityStopped(a: Activity) { if (a === activity) { resumed = false; pauseForBackground() } }
+        override fun onActivityResumed(a: Activity) { if (a === activity) { resumed = true; refreshService(); if (shouldAutoplay && !stopped) player?.play() } }
+        override fun onActivityPaused(a: Activity) { if (a === activity) { resumed = false; if (backgroundPlay) refreshService() else pauseForBackground() } }
+        override fun onActivityStopped(a: Activity) { if (a === activity) { resumed = false; if (backgroundPlay) refreshService() else pauseForBackground() } }
         override fun onActivityCreated(a: Activity, b: Bundle?) {}
         override fun onActivityStarted(a: Activity) {}
         override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}
         override fun onActivityDestroyed(a: Activity) {}
     }
     private val playerListener = object : Player.Listener {
-        override fun onIsPlayingChanged(isPlaying: Boolean) = emitState()
-        override fun onPlaybackStateChanged(playbackState: Int) { emitState() }
+        override fun onIsPlayingChanged(isPlaying: Boolean) { emitState(); refreshService() }
+        override fun onPlaybackStateChanged(playbackState: Int) { emitState(); refreshService() }
         override fun onRenderedFirstFrame() { firstFrameSeen = true; frameRecoveryStep = 0 }
         override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) { if (videoSize.width > 0 && videoSize.height > 0) surfaceProducer?.setSize(videoSize.width, videoSize.height); emitState() }
         override fun onPlayerError(error: PlaybackException) {
@@ -110,6 +116,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         methods = MethodChannel(binding.binaryMessenger, "puretube_playback/methods")
         events = EventChannel(binding.binaryMessenger, "puretube_playback/events")
         methods.setMethodCallHandler(this); events.setStreamHandler(this)
+        PlaybackActionReceiver.handler = { action -> main.post { handlePlaybackAction(action) } }
         val producer = binding.textureRegistry.createSurfaceProducer()
         surfaceProducer = producer
         producer.setCallback(object : TextureRegistry.SurfaceProducer.Callback {
@@ -301,16 +308,76 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     }
     private fun emit(map: Map<String, Any?>) { main.post { sink?.success(map) } }
     private fun pauseForBackground() { shouldAutoplay = false; player?.pause() }
-    private fun disposePlayback() { generation.incrementAndGet(); player?.setVideoSurface(null); player?.removeListener(playerListener); player?.release(); player = null; catalog = null; currentUrl = null; stopped = true; shouldAutoplay = false; disposed = true }
+
+    /** Keeps the foreground service in sync with playback: running
+     *  while a session is alive, promoted (notification visible)
+     *  whenever the app is in the background, demoted in foreground. */
+    private fun refreshService() {
+        val p = player
+        val active = backgroundPlay && p != null && !stopped && !disposed && catalog != null
+        if (!active) {
+            if (serviceStarted) {
+                sendService(PlaybackForegroundService.ACTION_STOP, null, null, false)
+                serviceStarted = false
+            }
+            return
+        }
+        val title = catalog?.info?.name
+        val uploader = try { catalog?.info?.uploaderName } catch (_: Throwable) { null }
+        val playing = p!!.isPlaying
+        if (!serviceStarted) {
+            sendService(PlaybackForegroundService.ACTION_START, title, uploader, playing)
+            serviceStarted = true
+        }
+        if (!resumed) {
+            sendService(PlaybackForegroundService.ACTION_PROMOTE, title, uploader, playing)
+        } else {
+            sendService(PlaybackForegroundService.ACTION_DEMOTE, title, uploader, playing)
+        }
+    }
+
+    private fun sendService(action: String, title: String?, uploader: String?, playing: Boolean) {
+        // State events fire often; only forward real changes.
+        val key = "$action|${title ?: ""}|$playing"
+        if (action != PlaybackForegroundService.ACTION_STOP && key == lastServiceKey) return
+        lastServiceKey = if (action == PlaybackForegroundService.ACTION_STOP) null else key
+        val intent = PlaybackForegroundService.intent(context, action, title, uploader, playing)
+        try {
+            context.startService(intent)
+        } catch (_: Throwable) {
+            // Fully backgrounded: an ongoing media session may still
+            // start its foreground service directly.
+            try {
+                if (action == PlaybackForegroundService.ACTION_PROMOTE) {
+                    androidx.core.content.ContextCompat.startForegroundService(context, intent)
+                }
+            } catch (_: Throwable) {}
+        }
+    }
+
+    private fun handlePlaybackAction(action: String) {
+        val p = player ?: return
+        when (action) {
+            PlaybackActionReceiver.ACTION_TOGGLE -> {
+                if (p.isPlaying) { shouldAutoplay = false; p.pause() }
+                else if (!stopped && !disposed) { shouldAutoplay = true; p.play() }
+            }
+            PlaybackActionReceiver.ACTION_STOP -> {
+                generation.incrementAndGet(); shouldAutoplay = false; stopped = true; p.stop()
+            }
+        }
+        refreshService()
+    }
+    private fun disposePlayback() { generation.incrementAndGet(); player?.setVideoSurface(null); player?.removeListener(playerListener); player?.release(); player = null; catalog = null; currentUrl = null; stopped = true; shouldAutoplay = false; disposed = true; refreshService() }
     private fun validYoutube(raw: String): Boolean = try { val uri = android.net.Uri.parse(raw); uri.scheme == "https" && (uri.host?.lowercase() in setOf("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com", "youtube-nocookie.com", "www.youtube-nocookie.com")) } catch (_: Throwable) { false }
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) { sink = events }
     override fun onCancel(arguments: Any?) { sink = null }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) { activity = binding.activity; resumed = false; disposed = false }
-    override fun onDetachedFromActivityForConfigChanges() { activity?.let { if (resumed) pauseForBackground() }; activity = null; resumed = false }
-    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) { activity = binding.activity; surfaceProducer?.surface?.let { s -> player?.setVideoSurface(s) } }
-    override fun onDetachedFromActivity() { activity?.let { if (resumed) pauseForBackground() }; activity = null; resumed = false }
-    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) { disposePlayback(); surfaceProducer?.release(); surfaceProducer = null; ticker?.let(main::removeCallbacks); ticker = null; lifecycleApp?.unregisterActivityLifecycleCallbacks(lifecycleCallbacks); lifecycleApp = null; methods.setMethodCallHandler(null); events.setStreamHandler(null); io.shutdownNow() }
+    override fun onDetachedFromActivityForConfigChanges() { activity?.let { if (!backgroundPlay && resumed) pauseForBackground() }; activity = null; resumed = false }
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) { activity = binding.activity; surfaceProducer?.surface?.let { s -> player?.setVideoSurface(s) }; refreshService() }
+    override fun onDetachedFromActivity() { activity?.let { if (!backgroundPlay && resumed) pauseForBackground() }; activity = null; resumed = false }
+    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) { PlaybackActionReceiver.handler = null; disposePlayback(); surfaceProducer?.release(); surfaceProducer = null; ticker?.let(main::removeCallbacks); ticker = null; lifecycleApp?.unregisterActivityLifecycleCallbacks(lifecycleCallbacks); lifecycleApp = null; methods.setMethodCallHandler(null); events.setStreamHandler(null); io.shutdownNow() }
 
     private data class Catalog(val info: StreamInfo) {
         val video: List<VideoStream> = info.videoOnlyStreams.filter { it.isUrl && it.height > 0 }.sortedWith(compareByDescending<VideoStream> { it.height }.thenByDescending { it.fps }.thenByDescending { it.bitrate })

@@ -332,26 +332,48 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         );
       case SearchStatus.loading:
-        return GridView.builder(
-          padding: const EdgeInsets.all(12),
-          gridDelegate:
-              const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 0.72,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-          ),
-          itemCount: 6,
-          itemBuilder: (_, __) => Shimmer.fromColors(
-            baseColor:
-                Theme.of(context).colorScheme.surfaceContainer,
-            highlightColor: Theme.of(context)
-                .colorScheme
-                .surfaceContainerHigh,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
+        return ListView.builder(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+          itemCount: 4,
+          itemBuilder: (_, __) => Padding(
+            padding: const EdgeInsets.only(bottom: 18),
+            child: Shimmer.fromColors(
+              baseColor:
+                  Theme.of(context).colorScheme.surfaceContainer,
+              highlightColor: Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHigh,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    height: 14,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    height: 12,
+                    width: 180,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -385,54 +407,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: Text('No results found.',
                   style: TextStyle(color: Colors.grey)));
         }
-        // Bengali/Hindi songs, ghazal and waz rails (Bengali headers)
-        // sit above the trending grid on the home feed. Hidden while a
-        // search is active — same as the audio home.
-        final sections =
-            ref.watch(homeSectionsProvider).video;
-        final showSections = s.query.isEmpty;
+        // YouTube/SparkTube-style home: ONE vertical feed, full-width
+        // cards one below another — no horizontal rails, no grid.
         return CustomScrollView(
           controller: _scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
-            if (showSections)
-              for (final section in sections)
-                if (section.items.isNotEmpty) ...[
-                  SliverToBoxAdapter(
-                    child: _HomeSectionHeader(
-                        title: section.header),
-                  ),
-                  SliverToBoxAdapter(
-                    child: SizedBox(
-                      height: 190,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12),
-                        itemCount: section.items.length,
-                        itemBuilder: (c, i) => Padding(
-                          padding:
-                              const EdgeInsets.only(right: 12),
-                          child: SizedBox(
-                            width: 160,
-                            child: VideoCard(
-                                video: section.items[i]),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
             SliverPadding(
-              padding: const EdgeInsets.all(12),
-              sliver: SliverGrid.builder(
-                gridDelegate:
-                    const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  childAspectRatio: 0.72,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                ),
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              sliver: SliverList.builder(
                 // Extra item at the end for the loading indicator.
                 itemCount:
                     s.results.length + (s.loadingMore ? 1 : 0),
@@ -445,30 +428,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                     );
                   }
-                  return VideoCard(video: s.results[i]);
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 18),
+                    child: VideoCard(video: s.results[i]),
+                  );
                 },
               ),
             ),
           ],
         );
     }
-  }
-}
-
-/// Section header for the video home — same look as the audio home's
-/// section headers (titleMedium, bold, 16/16/16/8 padding).
-class _HomeSectionHeader extends StatelessWidget {
-  final String title;
-  const _HomeSectionHeader({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      child: Text(title,
-          style: theme.textTheme.titleMedium
-              ?.copyWith(fontWeight: FontWeight.bold)),
-    );
   }
 }

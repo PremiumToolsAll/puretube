@@ -360,9 +360,6 @@ class PlayerController extends Notifier<PlayerUiState>
   Duration _hqPosition = Duration.zero;
   Duration _hqDuration = Duration.zero;
   bool _hqPlaying = false;
-  // True while HQ audio was handed to the background audio service
-  // (app backgrounded during HQ playback).
-  bool _hqBackgrounded = false;
   final _hqPositionCtrl = StreamController<Duration>.broadcast();
   final _hqDurationCtrl = StreamController<Duration>.broadcast();
   final _hqPlayingCtrl = StreamController<bool>.broadcast();
@@ -576,21 +573,16 @@ class PlayerController extends Notifier<PlayerUiState>
   void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
     switch (lifecycleState) {
       case AppLifecycleState.paused:
-        // Home button / app switcher: let audio continue in background,
-        // but persist the resume position first.
+        // Home button / app switcher: persist the resume position.
         // PiP only when user explicitly taps the PiP button — auto-PiP
         // was interrupting background playback.
+        // Plugin (HQ) playback now continues NATIVELY in the
+        // background — the plugin's foreground service keeps it
+        // alive, SparkTube-style — so there is no mpv hand-off and
+        // playback never stops when the user leaves the app.
         unawaited(_persistResumePosition());
-        // HQ (ExoPlayer) lives in the activity: hand its audio to the
-        // background audio service so playback continues seamlessly.
-        if (hqActive && !_hqBackgrounded) {
-          unawaited(_hqToBackground());
-        }
         break;
       case AppLifecycleState.resumed:
-        if (_hqBackgrounded) {
-          unawaited(_hqFromBackground());
-        }
         break;
       case AppLifecycleState.detached:
         // DANGER: On some devices (notably Xiaomi/MIUI), `detached`
@@ -609,43 +601,6 @@ class PlayerController extends Notifier<PlayerUiState>
       default:
         break;
     }
-  }
-
-  /// Hands HQ playback to the background audio service (app backgrounded).
-  /// The native ExoPlayer is activity-bound; the audio service's mpv
-  /// keeps the audio going with its foreground notification.
-  Future<void> _hqToBackground() async {
-    if (!hqActive || _hqBackgrounded) return;
-    _hqBackgrounded = true;
-    final pos = _pt?.position ?? Duration.zero;
-    try {
-      await _pt?.pause();
-    } catch (_) {}
-    final audioUrl = state.currentQuality?.audioUrl;
-    if (audioUrl == null) return;
-    try {
-      await _handler.switchStream(audioUrl, resumeAt: pos);
-      await _handler.play();
-    } catch (_) {}
-  }
-
-  /// Returns from background: give playback back to the HQ engine.
-  Future<void> _hqFromBackground() async {
-    if (!_hqBackgrounded || !hqActive) return;
-    _hqBackgrounded = false;
-    Duration pos = Duration.zero;
-    try {
-      pos = _handler.player.state.position;
-    } catch (_) {}
-    try {
-      await _handler.pause();
-    } catch (_) {}
-    try {
-      await _pt?.seek(pos);
-      await _pt?.play();
-      _hqPlaying = true;
-      _hqPlayingCtrl.add(true);
-    } catch (_) {}
   }
 
   // ---------------- loading ----------------
@@ -2046,7 +2001,6 @@ class PlayerController extends Notifier<PlayerUiState>
   Future<void> _stopHq() async {
     _hqPollTimer?.cancel();
     _hqPollTimer = null;
-    _hqBackgrounded = false;
     _hqPosition = Duration.zero;
     _hqDuration = Duration.zero;
     _hqPlaying = false;
