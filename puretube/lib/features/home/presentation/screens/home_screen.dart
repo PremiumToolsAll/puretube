@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,11 +11,13 @@ import '../providers/home_mode_provider.dart';
 import '../providers/home_sections_provider.dart';
 import '../providers/music_feed_provider.dart';
 import '../providers/search_provider.dart';
+import '../../../../core/di/providers.dart';
 import '../../../player/presentation/widgets/mini_player_bar.dart';
 import '../widgets/audio_home.dart';
 import '../widgets/video_card.dart';
 import '../../../player/presentation/providers/popup_visibility.dart';
 import '../../../library/presentation/screens/downloads_screen.dart';
+import '../../../library/presentation/providers/library_providers.dart';
 import '../../../library/presentation/screens/history_screen.dart';
 import '../../../settings/presentation/screens/settings_screen.dart';
 
@@ -27,6 +31,115 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _searchController = TextEditingController();
   final _scrollController = ScrollController();
+
+  // Live search suggestions (SparkTube-style): while typing, a
+  // merged list — matching watch-history entries first, then
+  // YouTube's suggestions — replaces the feed under the search box.
+  Timer? _suggestDebounce;
+  List<({String text, bool fromHistory})> _suggestions = const [];
+  bool _suggesting = false;
+  int _suggestToken = 0;
+
+  void _onSearchChanged(String value) {
+    final q = value.trim();
+    _suggestDebounce?.cancel();
+    if (q.isEmpty) {
+      setState(() {
+        _suggesting = false;
+        _suggestions = const [];
+      });
+      return;
+    }
+    setState(() {
+      _suggesting = true;
+      _suggestions = _historyMatches(q);
+    });
+    final token = ++_suggestToken;
+    _suggestDebounce = Timer(const Duration(milliseconds: 250), () async {
+      final fetched =
+          await ref.read(extractorProvider).getSearchSuggestions(q);
+      if (!mounted || token != _suggestToken) return;
+      if (_searchController.text.trim() != q) return;
+      final merged = <({String text, bool fromHistory})>[
+        ..._historyMatches(q),
+      ];
+      final seen = merged.map((e) => e.text.toLowerCase()).toSet();
+      for (final f in fetched) {
+        if (seen.add(f.toLowerCase())) {
+          merged.add((text: f, fromHistory: false));
+        }
+      }
+      setState(() => _suggestions = merged.take(12).toList());
+    });
+  }
+
+  /// Watched-video titles containing the query — the local half of
+  /// the merged suggestion list (history icon rows).
+  List<({String text, bool fromHistory})> _historyMatches(String q) {
+    try {
+      final entries = ref.read(historyRepositoryProvider).getAll();
+      final lower = q.toLowerCase();
+      final seen = <String>{};
+      final out = <({String text, bool fromHistory})>[];
+      for (final e in entries) {
+        final t = e.title.trim();
+        if (t.isEmpty || !t.toLowerCase().contains(lower)) continue;
+        if (seen.add(t.toLowerCase())) {
+          out.add((text: t, fromHistory: true));
+        }
+        if (out.length >= 3) break;
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  void _fillSuggestion(String text) {
+    _searchController.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+    _onSearchChanged(text);
+  }
+
+  void _runSuggestion(String text) {
+    _suggestDebounce?.cancel();
+    setState(() => _suggesting = false);
+    _searchController.text = text;
+    _search(text);
+  }
+
+  Widget _buildSuggestionList() {
+    if (_suggestions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return ListView.builder(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      itemCount: _suggestions.length,
+      itemBuilder: (ctx, i) {
+        final s = _suggestions[i];
+        return ListTile(
+          leading: Icon(
+            s.fromHistory ? Icons.history : Icons.search,
+            color: Colors.grey,
+            size: 20,
+          ),
+          title: Text(
+            s.text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white, fontSize: 15),
+          ),
+          trailing: IconButton(
+            icon: const Icon(Icons.north_west, color: Colors.grey, size: 18),
+            onPressed: () => _fillSuggestion(s.text),
+          ),
+          onTap: () => _runSuggestion(s.text),
+        );
+      },
+    );
+  }
 
   @override
   void initState() {
@@ -101,12 +214,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   void dispose() {
+    _suggestDebounce?.cancel();
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
   void _search(String q) {
+    if (_suggesting) setState(() => _suggesting = false);
     FocusScope.of(context).unfocus();
     if (ref.read(homeModeProvider)) {
       // Audio mode: endless YouTube Music song search.
@@ -179,6 +294,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     controller: _searchController,
                     textInputAction: TextInputAction.search,
                     onSubmitted: _search,
+                    onChanged: _onSearchChanged,
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
                       hintText:
@@ -189,6 +305,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         icon: const Icon(Icons.clear, color: Colors.grey),
                         onPressed: () {
                           _searchController.clear();
+                          setState(() {
+                            _suggesting = false;
+                            _suggestions = const [];
+                          });
                           ref.read(searchControllerProvider.notifier).clear();
                           ref.read(audioSongSearchProvider.notifier).clear();
                         },
@@ -232,7 +352,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
           const SizedBox(height: 4),
-          if (!isAudioHome)
+          if (!isAudioHome && !_suggesting)
             SizedBox(
               height: 42,
               child: ListView.separated(
@@ -269,7 +389,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           const SizedBox(height: 4),
           Expanded(
-            child: isAudioHome
+            child: _suggesting
+                ? _buildSuggestionList()
+                : isAudioHome
                 ? const AudioHome()
                 : RefreshIndicator(
                     color: Theme.of(context).colorScheme.primary,

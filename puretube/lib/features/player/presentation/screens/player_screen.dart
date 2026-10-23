@@ -472,7 +472,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // Riverpod throws "Cannot use ref after the widget was disposed"
   // (this exact error was captured on-device when leaving the
   // player). Everything dispose() needs is stored here instead.
-  late final StateController<bool> _fullPlayerOpenNotifier;
+  late final FullPlayerOpenNotifier _fullPlayerOpenNotifier;
   late final PlayerController _playerNotifier;
   late final HistoryRepository _historyRepo;
 
@@ -484,7 +484,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _historyRepo = ref.read(historyRepositoryProvider);
     // Fullscreen player takes over: hide the floating popup window.
     ref.read(popupVisibleProvider.notifier).state = false;
-    ref.read(fullPlayerOpenProvider.notifier).state = true;
+    _fullPlayerOpenNotifier.push();
     final st = ref.read(playerControllerProvider);
     if (st.videoId != widget.videoId || st.status != PlayerStatus.ready) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -552,7 +552,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _videoSub?.close();
     _statusSub?.close();
     _errorMsgSub?.close();
-    _fullPlayerOpenNotifier.state = false;
+    _fullPlayerOpenNotifier.pop();
     // Persist resume position for history (creates entry if needed).
     // Uses the initState-captured references only — no `ref` here.
     final uiState = _playerNotifier.uiStateSnapshot;

@@ -1843,6 +1843,23 @@ class PlayerController extends Notifier<PlayerUiState>
     if (!keepAuto) {
       _sessionQualityHeight = target.height;
     }
+    // On a blocked-network (direct fallback) session the plugin has
+    // no catalog to rebuild from — re-run the fallback at the picked
+    // height instead (it fetches the session pair above 720p). The
+    // fallback sets the honest playing label itself.
+    if (_directFallbackFor == videoId) {
+      final okFb = await _playDirectFallback(
+          videoId, token, displayPosition,
+          audioOnly: false, wantHeight: target.height);
+      if (token != _qualitySwitchToken || state.videoId != videoId) {
+        return;
+      }
+      if (okFb) return;
+      state = state.copyWith(
+        errorMessage: '${target.resolutionLabel} চালানো যায়নি',
+      );
+      return;
+    }
     // Already on the plugin with another target: SparkTube-style
     // rebuild from the plugin's cached catalog at the new cap —
     // position preserved, no re-extraction, no mpv detour.
@@ -2021,7 +2038,8 @@ class PlayerController extends Notifier<PlayerUiState>
   /// (session engine), so play those through the same plugin
   /// engine — playback survives the block instead of erroring out.
   Future<bool> _playDirectFallback(String videoId, int token,
-      Duration resumeAt, {required bool audioOnly}) async {
+      Duration resumeAt,
+      {required bool audioOnly, int? wantHeight}) async {
     try {
       var streams = state.streams;
       if (streams == null ||
@@ -2041,12 +2059,37 @@ class PlayerController extends Notifier<PlayerUiState>
       state = state.copyWith(
           hqTextureId: _pluginTextureId > 0 ? _pluginTextureId : -1);
       unawaited(_publishTextureId());
+      var usedUrl = streams.muxedUrl;
+      var usedHeight = streams.muxedHeight;
       if (audioOnly) {
         await pt.loadDirect(streams.audioOnlyUrl,
             audioOnly: true, position: resumeAt, autoplay: true);
       } else {
-        await pt.loadDirect(streams.muxedUrl,
-            position: resumeAt, autoplay: true);
+        // Blocked-network HQ: the muxed formats stop at 720p, so for
+        // a higher target fetch the session engine's separate
+        // video+audio pair and merge it natively via loadDirect.
+        final want = wantHeight ?? _sessionQualityHeight ?? 1080;
+        var paired = false;
+        if (want > streams.muxedHeight) {
+          final pair =
+              await _extractor.getDirectDashPair(videoId, maxHeight: want);
+          if (token != _qualitySwitchToken || state.videoId != videoId) {
+            return false;
+          }
+          if (pair != null && pair.height > streams.muxedHeight) {
+            await pt.loadDirect(pair.videoUrl,
+                audioUrl: pair.audioUrl,
+                position: resumeAt,
+                autoplay: true);
+            usedUrl = pair.videoUrl;
+            usedHeight = pair.height;
+            paired = true;
+          }
+        }
+        if (!paired) {
+          await pt.loadDirect(streams.muxedUrl,
+              position: resumeAt, autoplay: true);
+        }
       }
       if (token != _qualitySwitchToken || state.videoId != videoId) {
         return false;
@@ -2075,14 +2118,15 @@ class PlayerController extends Notifier<PlayerUiState>
       if (playingVideo != null) _engageMirror(playingVideo);
       state = state.copyWith(
         streams: streams,
-        // Honest label: the fallback serves the app-chain muxed
-        // stream (<=720p), not the requested HQ target.
+        // Honest label: the height that is actually playing — the
+        // session pair's height when the HQ pair engaged, otherwise
+        // the muxed height.
         currentQuality: audioOnly
             ? state.currentQuality
             : MuxedQuality(
-                label: '${streams.muxedHeight}p',
-                height: streams.muxedHeight,
-                url: streams.muxedUrl,
+                label: '${usedHeight}p',
+                height: usedHeight,
+                url: usedUrl,
               ),
       );
       return true;

@@ -254,6 +254,87 @@ class YoutubeSessionService {
     );
   }
 
+  /// Best separate video+audio pair (DASH-style) through the visitor
+  /// session, for the blocked-network fallback: the muxed formats
+  /// stop at 720p, but adaptiveFormats carry direct video-only URLs
+  /// up to 2160p. AVC is preferred at a given height (proven decode
+  /// on the user's phone), then bitrate. Null when unavailable.
+  Future<({String videoUrl, String audioUrl, int height})?> getDashPair(
+      String videoId, {required int maxHeight}) async {
+    try {
+      final json = await _playerJson(videoId);
+      final sd = json['streamingData'];
+      if (sd is! Map<String, dynamic>) return null;
+      final adaptive = _asMaps(sd['adaptiveFormats'])
+          .where((s) => (s['url']?.toString() ?? '').isNotEmpty)
+          .toList();
+      final videos = adaptive
+          .where((s) =>
+              (s['mimeType']?.toString() ?? '').startsWith('video/'))
+          .toList();
+      final audios = adaptive
+          .where((s) =>
+              (s['mimeType']?.toString() ?? '').startsWith('audio/'))
+          .toList()
+        ..sort((a, b) => _num(b['bitrate']).compareTo(_num(a['bitrate'])));
+      if (videos.isEmpty || audios.isEmpty) return null;
+      int heightOf(Map<String, dynamic> s) {
+        final h = _num(s['height']);
+        return h > 0 ? h : _heightOfLabel(s['qualityLabel']?.toString());
+      }
+
+      videos.sort((a, b) {
+        final ha = heightOf(a), hb = heightOf(b);
+        if (ha != hb) return hb.compareTo(ha);
+        final ca = _codecOf(a['mimeType']?.toString()) == 'avc1' ? 0 : 1;
+        final cb = _codecOf(b['mimeType']?.toString()) == 'avc1' ? 0 : 1;
+        if (ca != cb) return ca.compareTo(cb);
+        return _num(b['bitrate']).compareTo(_num(a['bitrate']));
+      });
+      final under = videos.where((s) => heightOf(s) <= maxHeight).toList();
+      final pick = (under.isNotEmpty ? under : videos).first;
+      final h = heightOf(pick);
+      if (h <= 0) return null;
+      return (
+        videoUrl: pick['url'].toString(),
+        audioUrl: audios.first['url'].toString(),
+        height: h,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Live search suggestions while typing — YouTube's suggest
+  /// endpoint, the same data NewPipe's SuggestionExtractor shows.
+  /// Best-effort: any failure returns an empty list so typing
+  /// never breaks.
+  Future<List<String>> getSearchSuggestions(String query) async {
+    final q = query.trim();
+    if (q.isEmpty) return const [];
+    try {
+      final uri =
+          Uri.https('suggestqueries.google.com', '/complete/search', {
+        'client': 'firefox',
+        'ds': 'yt',
+        'q': q,
+      });
+      final res = await http
+          .get(uri, headers: {'User-Agent': _mobileUa})
+          .timeout(const Duration(seconds: 4));
+      if (res.statusCode != 200) return const [];
+      final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+      if (decoded is List && decoded.length > 1 && decoded[1] is List) {
+        return (decoded[1] as List)
+            .map((e) => e.toString())
+            .where((e) => e.isNotEmpty)
+            .take(12)
+            .toList();
+      }
+    } catch (_) {}
+    return const [];
+  }
+
   /// Quality menu through the real visitor session.
   Future<List<MuxedQuality>> getQualityOptions(
       String videoId) async {

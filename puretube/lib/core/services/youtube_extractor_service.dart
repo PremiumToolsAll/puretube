@@ -371,6 +371,17 @@ class YoutubeExtractorService {
     }
   }
 
+  /// Separate video+audio pair for the blocked-network fallback,
+  /// via the session engine (the chain that still answers under a
+  /// LOGIN_REQUIRED block). Null when unavailable.
+  Future<({String videoUrl, String audioUrl, int height})?>
+      getDirectDashPair(String videoId, {required int maxHeight}) =>
+          _session.getDashPair(videoId, maxHeight: maxHeight);
+
+  /// Live search suggestions while typing (session service).
+  Future<List<String>> getSearchSuggestions(String query) =>
+      _session.getSearchSuggestions(query);
+
   /// Lists all muxed (audio+video) quality options for a video plus
   /// DASH video-only options, sorted by height then fps, both
   /// descending. Labels look like "MPEG-4 720p60".
