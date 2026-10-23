@@ -77,6 +77,13 @@ class PureTubeController extends ChangeNotifier {
   static bool _claimed = false;
   late final StreamSubscription<dynamic> _subscription;
   bool _closed = false;
+
+  /// Which app surface currently owns the shared native engine
+  /// ('main' player, 'shorts', 'offline'). The native engine is a
+  /// single player; surfaces stamp this before loading so the
+  /// main PlayerController can ignore state events for loads it
+  /// did not start.
+  static String? ownerTag;
   Future<void>? _closing;
   int _loadGeneration = 0;
 
@@ -170,6 +177,35 @@ class PureTubeController extends ChangeNotifier {
     }
   }
 
+  /// Plays a downloaded file (offline playback), merging the
+  /// optional companion audio file natively. No network involved.
+  Future<void> loadLocal({
+    required String path,
+    String? audioPath,
+    bool audioOnly = false,
+    Duration position = Duration.zero,
+    bool autoplay = true,
+  }) async {
+    ++_loadGeneration;
+    resolving = true;
+    error = null;
+    notifyListeners();
+    try {
+      await _invoke<void>('loadLocal', {
+        'path': path,
+        'audioPath': audioPath,
+        'audioOnly': audioOnly,
+        'positionMs': position.inMilliseconds,
+        'autoplay': autoplay,
+      });
+    } finally {
+      if (!_closed) {
+        resolving = false;
+        notifyListeners();
+      }
+    }
+  }
+
   /// First result page only. No embedded API key or third-party proxy server.
   Future<List<PureTubeVideo>> search(String query) async {
     if (query.trim().isEmpty) return [];
@@ -217,6 +253,12 @@ class PureTubeController extends ChangeNotifier {
 
   Future<void> setAudioTrack(String id) async {
     await _invoke<void>('setAudioTrack', {'id': id});
+  }
+
+  /// Mutes/unmutes the engine's audio output (Shorts mute button).
+  /// Playback volume otherwise follows the system media volume.
+  Future<void> setMuted(bool muted) async {
+    await _invoke<void>('setMuted', {'muted': muted});
   }
 
   Future<void> setAudioOnly(bool enabled) async {

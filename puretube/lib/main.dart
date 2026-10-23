@@ -4,7 +4,6 @@ import 'dart:ui' as ui;
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -15,7 +14,6 @@ import 'features/player/data/services/audio_player_handler.dart';
 
 /// Tracks whether media_kit native libs loaded OK.
 /// If false, the player shows a message instead of crashing.
-bool mediaKitReady = false;
 
 /// Tracks whether AudioService.init succeeded (true) or fell back (false).
 /// Used for background-playback diagnostics.
@@ -54,15 +52,9 @@ Future<void> main() async {
     return true;
   };
 
-  // media_kit native libs can fail on some devices/ABIs — don't let it
-  // kill the whole app; the home feed works fine without it.
-  try {
-    MediaKit.ensureInitialized();
-    mediaKitReady = true;
-  } catch (e) {
-    debugPrint('MediaKit init failed (non-fatal): $e');
-    mediaKitReady = false;
-  }
+  // The playback engine is the puretube_playback plugin
+  // (Media3/ExoPlayer) — no Dart-side native init needed.
+
 
   try {
     await initHive();

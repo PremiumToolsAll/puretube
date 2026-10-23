@@ -1,14 +1,24 @@
+import 'dart:async';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'package:puretube_playback/puretube_playback.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../../../core/di/providers.dart';
 import '../../../../core/utils/format.dart';
 import '../../../player/domain/entities/playback_models.dart';
+import '../../../player/presentation/providers/player_controller.dart';
 
 /// Single full-screen vertical short player (9:16).
+///
+/// Plays through the shared puretube_playback engine (the same
+/// NewPipe/ExoPlayer engine as the main player — mpv is gone).
+/// Only the ACTIVE short claims the engine; inactive pages show
+/// their thumbnail. Claiming stamps [PureTubeController.ownerTag]
+/// so the main PlayerController ignores the engine's events while
+/// Shorts owns it, and leaving Shorts releases + invalidates the
+/// main player's stale engagement.
 class ShortsPlayerWidget extends ConsumerStatefulWidget {
   final VideoDetails video;
   final bool isActive;
@@ -27,96 +37,126 @@ class ShortsPlayerWidget extends ConsumerStatefulWidget {
 class _ShortsPlayerWidgetState
     extends ConsumerState<ShortsPlayerWidget> {
   Color get _accent => Theme.of(context).colorScheme.primary;
-  Player? _player;
-  VideoController? _videoController;
-  bool _playing = true;
+  PureTubeController? _pt;
+  int _textureId = -1;
+  bool _playing = false;
   bool _muted = false;
-  bool _loading = true;
+  bool _loading = false;
   bool _liked = false;
+  bool _claimed = false;
 
   @override
   void initState() {
     super.initState();
-    _init();
+    if (widget.isActive) {
+      unawaited(_claim());
+    }
   }
 
   @override
-  void didUpdateWidget(
-      covariant ShortsPlayerWidget old) {
+  void didUpdateWidget(covariant ShortsPlayerWidget old) {
     super.didUpdateWidget(old);
-    if (widget.isActive != old.isActive) {
-      _setActive(widget.isActive);
+    if (widget.isActive && !old.isActive) {
+      unawaited(_claim());
+    } else if (!widget.isActive && old.isActive) {
+      unawaited(_release());
     }
   }
 
   @override
   void dispose() {
-    try {
-      _player?.dispose();
-    } catch (_) {}
+    if (_claimed) {
+      // Leaving Shorts entirely: stop the engine and let the
+      // main player know its engagement is stale.
+      _claimed = false;
+      PureTubeController.ownerTag = null;
+      final pt = _pt;
+      unawaited(() async {
+        try {
+          await pt?.stop();
+        } catch (_) {}
+        await pt?.close();
+      }());
+      ref.read(playerControllerProvider.notifier).invalidateEngine();
+    } else {
+      unawaited(_pt?.close() ?? Future.value());
+    }
     super.dispose();
   }
 
-  Future<void> _init() async {
+  Future<void> _claim() async {
+    final pt = _pt ??= PureTubeController();
+    pt.addListener(_onEngineChanged);
+    PureTubeController.ownerTag = 'shorts';
+    _claimed = true;
+    if (mounted) setState(() => _loading = true);
     try {
-      _player = Player(
-          configuration: const PlayerConfiguration(
-              title: 'PureTube Shorts'));
-      _videoController = VideoController(_player!);
-      // Load stream via puretube's extractor.
-      final streams = await ref
-          .read(extractorProvider)
-          .getPlaybackStreams(widget.video.id);
-      await _player!
-          .open(Media(streams.muxedUrl));
-      if (widget.isActive) {
-        await _player!.play();
-      } else {
-        await _player!.pause();
-      }
+      await pt.load(
+        'https://www.youtube.com/watch?v=${widget.video.id}',
+        height: 720,
+        autoplay: true,
+      );
+      final id = await pt.textureId;
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() {
+          _textureId = id;
+          _loading = false;
+          _playing = true;
+        });
       }
     } catch (_) {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _setActive(bool active) async {
+  Future<void> _release() async {
+    if (!_claimed) return;
+    _claimed = false;
+    final pt = _pt;
+    pt?.removeListener(_onEngineChanged);
     try {
-      if (active) {
-        await _player?.play();
-        if (mounted) setState(() => _playing = true);
-      } else {
-        await _player?.pause();
-        if (mounted) {
-          setState(() => _playing = false);
-        }
-      }
+      await pt?.pause();
     } catch (_) {}
+    if (mounted) setState(() => _playing = false);
+  }
+
+  void _onEngineChanged() {
+    final pt = _pt;
+    if (pt == null || !_claimed || !mounted) return;
+    // Shorts loop forever.
+    if (pt.ended) {
+      unawaited(() async {
+        try {
+          await pt.seek(Duration.zero);
+          await pt.play();
+        } catch (_) {}
+      }());
+      return;
+    }
+    if (pt.isPlaying != _playing) {
+      setState(() => _playing = pt.isPlaying);
+    }
   }
 
   Future<void> _togglePlay() async {
+    final pt = _pt;
+    if (pt == null || !_claimed) return;
     try {
       if (_playing) {
-        await _player?.pause();
+        await pt.pause();
       } else {
-        await _player?.play();
+        await pt.play();
       }
-      if (mounted) {
-        setState(() => _playing = !_playing);
-      }
+      if (mounted) setState(() => _playing = !_playing);
     } catch (_) {}
   }
 
   Future<void> _toggleMute() async {
+    final next = !_muted;
     try {
-      final next = !_muted;
-      await _player?.setVolume(next ? 0 : 100);
-      if (mounted) setState(() => _muted = next);
+      await _pt?.setMuted(next);
     } catch (_) {}
+    if (mounted) setState(() => _muted = next);
   }
 
   @override
@@ -124,22 +164,30 @@ class _ShortsPlayerWidgetState
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Video.
-        if (_videoController != null)
+        // Video: the engine texture while this short owns the
+        // engine; otherwise its thumbnail.
+        if (_claimed && _textureId > 0)
           GestureDetector(
             onTap: _togglePlay,
-            child: Video(
-                controller: _videoController!,
-                controls: NoVideoControls),
+            child: PureTubeVideoView(
+              textureId: _textureId,
+              aspectRatio: 9 / 16,
+              fit: BoxFit.cover,
+            ),
           )
         else
-          Container(color: Colors.black),
+          GestureDetector(
+            onTap: _togglePlay,
+            child: CachedNetworkImage(
+              imageUrl: widget.video.thumbnailUrl,
+              fit: BoxFit.cover,
+              errorWidget: (_, __, ___) => Container(color: Colors.black),
+            ),
+          ),
         if (_loading)
-          Center(
-              child: CircularProgressIndicator(
-                  color: _accent)),
+          Center(child: CircularProgressIndicator(color: _accent)),
         // Play icon when paused.
-        if (!_playing && !_loading)
+        if (!_playing && !_loading && _claimed)
           Center(
             child: Container(
               padding: const EdgeInsets.all(16),
@@ -161,10 +209,8 @@ class _ShortsPlayerWidgetState
                 icon: _liked
                     ? Icons.favorite
                     : Icons.favorite_border,
-                label: formatCount(
-                    widget.video.viewCount),
-                color:
-                    _liked ? Colors.red : Colors.white,
+                label: formatCount(widget.video.viewCount),
+                color: _liked ? Colors.red : Colors.white,
                 onTap: () => setState(() {
                   _liked = !_liked;
                 }),
@@ -196,34 +242,28 @@ class _ShortsPlayerWidgetState
           right: 80,
           bottom: 24,
           child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
                   CircleAvatar(
                     radius: 16,
-                    backgroundColor:
-                        _accent.withOpacity(0.3),
+                    backgroundColor: _accent.withOpacity(0.3),
                     child: Text(
                         widget.video.author.isNotEmpty
-                            ? widget.video.author[0]
-                                .toUpperCase()
+                            ? widget.video.author[0].toUpperCase()
                             : '?',
                         style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 13)),
+                            color: Colors.white, fontSize: 13)),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(widget.video.author,
                         maxLines: 1,
-                        overflow:
-                            TextOverflow.ellipsis,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                             color: Colors.white,
-                            fontWeight:
-                                FontWeight.w600)),
+                            fontWeight: FontWeight.w600)),
                   ),
                 ],
               ),
@@ -231,8 +271,7 @@ class _ShortsPlayerWidgetState
               Text(widget.video.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      color: Colors.white)),
+                  style: const TextStyle(color: Colors.white)),
             ],
           ),
         ),
@@ -247,8 +286,7 @@ class _ShortsPlayerWidgetState
     Color color = Colors.white,
   }) {
     return Padding(
-      padding:
-          const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: InkWell(
         onTap: onTap,
         child: Column(
@@ -257,8 +295,7 @@ class _ShortsPlayerWidgetState
             const SizedBox(height: 4),
             Text(label,
                 style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11)),
+                    color: Colors.white, fontSize: 11)),
           ],
         ),
       ),

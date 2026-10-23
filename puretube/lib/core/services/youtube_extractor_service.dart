@@ -291,9 +291,9 @@ class YoutubeExtractorService {
       return list
           .take(limit)
           .map((c) => VideoComment(
-                author: c.author,
+                author: sanitizeUtf16(c.author),
                 channelId: c.channelId.value,
-                text: c.text,
+                text: sanitizeUtf16(c.text),
                 likeCount: c.likeCount,
                 publishedTime: c.publishedTime,
                 replyCount: c.replyCount,
@@ -690,6 +690,32 @@ class YoutubeExtractorService {
     }
   }
 
+  /// Downloads the timed cues for one caption track (by language
+  /// code) for the player's own subtitle overlay.
+  Future<List<CaptionCue>> getCaptionCues(
+      String videoId, String languageCode) async {
+    try {
+      final manifest = await _yt.videos.closedCaptions
+          .getManifest(videoId)
+          .timeout(const Duration(seconds: 20));
+      final matches =
+          manifest.tracks.where((t) => t.language.code == languageCode);
+      if (matches.isEmpty) return const [];
+      final track = await _yt.videos.closedCaptions
+          .get(matches.first)
+          .timeout(const Duration(seconds: 20));
+      return track.captions
+          .map((c) => CaptionCue(
+                start: c.offset,
+                end: c.offset + c.duration,
+                text: sanitizeUtf16(c.text),
+              ))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   /// Downloads the best caption track and returns it as plain
   /// lyrics-style text (no timestamps) — YouTube's own free AI
   /// (auto-generated captions) or manual captions when available.
@@ -756,7 +782,7 @@ class YoutubeExtractorService {
           .timeout(const Duration(seconds: 25));
       return ChannelInfo(
         id: ch.id.value,
-        title: ch.title,
+        title: sanitizeUtf16(ch.title),
         logoUrl: ch.logoUrl,
         bannerUrl: ch.bannerUrl,
         subscriberCount: ch.subscribersCount,

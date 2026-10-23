@@ -63,6 +63,16 @@ class PipService {
     }
   }
 
+  /// Enables/disables auto-PiP: leaving the app (Home button)
+  /// while enabled shrinks straight into the PiP window.
+  Future<void> setAutoPip(bool enabled) async {
+    try {
+      await _channel.invokeMethod<void>('setAutoPip', {'enabled': enabled});
+    } on PlatformException {
+      // PiP unavailable — background playback still continues.
+    }
+  }
+
   void dispose() {
     _controller.close();
     _actionController.close();

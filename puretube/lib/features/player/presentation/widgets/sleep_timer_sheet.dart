@@ -32,9 +32,7 @@ class SleepTimerSheet extends ConsumerWidget {
     final sleepTotal = ui.sleepTotal;
     final sleepEndOfVideo = ui.sleepEndOfVideo;
 
-    final playerState = ref.read(mediaKitPlayerProvider).state;
-    final videoLeft =
-        playerState.duration - playerState.position;
+    final videoLeft = notifier.displayDuration - notifier.displayPosition;
 
     final bg = Theme.of(context).scaffoldBackgroundColor;
     final accent = Theme.of(context).colorScheme.primary;

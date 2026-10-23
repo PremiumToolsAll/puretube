@@ -1,7 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart';
 
 import '../../../../core/di/providers.dart';
 import '../../../../core/widgets/press_scale.dart';
@@ -56,8 +55,7 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
   Widget build(BuildContext context) {
     final uiState = ref.watch(playerControllerProvider);
     final video = uiState.video;
-    final visible =
-        uiState.status == PlayerStatus.ready && video != null;
+    final visible = uiState.status == PlayerStatus.ready && video != null;
 
     // Drive the slide animation from visibility changes.
     if (visible && _slideController.status != AnimationStatus.completed) {
@@ -72,7 +70,6 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
     }
 
     final notifier = ref.read(playerControllerProvider.notifier);
-    final player = ref.watch(mediaKitPlayerProvider);
 
     return SlideTransition(
       position: _slideAnimation,
@@ -88,7 +85,7 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _ProgressLine(player: player),
+              _ProgressLine(notifier: notifier),
               InkWell(
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
@@ -96,8 +93,8 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
                   ),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   child: Row(
                     children: [
                       ClipRRect(
@@ -114,8 +111,7 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             _Marquee(
@@ -132,15 +128,14 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.white60),
+                                  fontSize: 11, color: Colors.white60),
                             ),
                           ],
                         ),
                       ),
                       StreamBuilder<bool>(
-                        stream: player.stream.playing,
-                        initialData: player.state.playing,
+                        stream: notifier.hqPlayingStream,
+                        initialData: notifier.hqIsPlaying,
                         builder: (context, snap) {
                           final playing = snap.data ?? false;
                           return Row(
@@ -148,22 +143,17 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
                             children: [
                               PressIconButton(
                                 tooltip: 'Rewind 10s',
-                                icon: const Icon(
-                                    Icons.replay_10_rounded,
-                                    size: 24,
-                                    color: Colors.white70),
-                                onPressed: () => notifier.seekBy(
-                                    const Duration(seconds: -10)),
+                                icon: const Icon(Icons.replay_10_rounded,
+                                    size: 24, color: Colors.white70),
+                                onPressed: () => notifier
+                                    .seekBy(const Duration(seconds: -10)),
                               ),
                               PressIconButton(
-                                tooltip:
-                                    playing ? 'Pause' : 'Play',
+                                tooltip: playing ? 'Pause' : 'Play',
                                 icon: AnimatedSwitcher(
-                                  duration: const Duration(
-                                      milliseconds: 200),
-                                  transitionBuilder:
-                                      (child, animation) =>
-                                          ScaleTransition(
+                                  duration: const Duration(milliseconds: 200),
+                                  transitionBuilder: (child, animation) =>
+                                      ScaleTransition(
                                     scale: animation,
                                     child: child,
                                   ),
@@ -176,17 +166,14 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
                                     size: 30,
                                   ),
                                 ),
-                                onPressed:
-                                    notifier.togglePlayPause,
+                                onPressed: notifier.togglePlayPause,
                               ),
                               PressIconButton(
                                 tooltip: 'Forward 10s',
-                                icon: const Icon(
-                                    Icons.forward_10_rounded,
-                                    size: 24,
-                                    color: Colors.white70),
-                                onPressed: () => notifier.seekBy(
-                                    const Duration(seconds: 10)),
+                                icon: const Icon(Icons.forward_10_rounded,
+                                    size: 24, color: Colors.white70),
+                                onPressed: () => notifier
+                                    .seekBy(const Duration(seconds: 10)),
                               ),
                             ],
                           );
@@ -211,24 +198,27 @@ class _MiniPlayerBarState extends ConsumerState<MiniPlayerBar>
 }
 
 /// Thin gold progress line pinned to the top of the mini player bar.
+/// Reads the engine that is actually playing: during plugin (HQ)
+/// playback mpv sits paused at 0, which used to leave this bar's
+/// icon on ▶ and the progress frozen while the song played.
 class _ProgressLine extends StatelessWidget {
-  final Player player;
-  const _ProgressLine({required this.player});
+  final PlayerController notifier;
+  const _ProgressLine({required this.notifier});
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<Duration>(
-      stream: player.stream.duration,
+      stream: notifier.hqDurationStream,
+      initialData: notifier.hqDuration,
       builder: (context, durSnap) {
         final total = durSnap.data?.inMilliseconds ?? 0;
         return StreamBuilder<Duration>(
-          stream: player.stream.position,
+          stream: notifier.hqPositionStream,
+          initialData: notifier.hqPosition,
           builder: (context, posSnap) {
             final pos = posSnap.data?.inMilliseconds ?? 0;
             return LinearProgressIndicator(
-              value: total > 0
-                  ? (pos / total).clamp(0.0, 1.0)
-                  : 0,
+              value: total > 0 ? (pos / total).clamp(0.0, 1.0) : 0,
               minHeight: 2,
               backgroundColor: Colors.white12,
               color: Theme.of(context).colorScheme.primary,

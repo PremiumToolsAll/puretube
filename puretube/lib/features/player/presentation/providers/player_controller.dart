@@ -5,7 +5,6 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:puretube_playback/puretube_playback.dart';
 import 'package:volume_controller/volume_controller.dart';
@@ -45,6 +44,7 @@ class PlayerUiState {
   final bool pipSupported;
   final List<CaptionTrack> subtitleTracks;
   final CaptionTrack? activeSubtitle;
+  final List<CaptionCue> captionCues;
   final List<MuxedQuality> availableQualities;
   final MuxedQuality? currentQuality;
   final List<AudioLanguage> audioLanguages;
@@ -92,6 +92,7 @@ class PlayerUiState {
     this.pipSupported = false,
     this.subtitleTracks = const [],
     this.activeSubtitle,
+    this.captionCues = const [],
     this.availableQualities = const [],
     this.currentQuality,
     this.audioLanguages = const [],
@@ -124,6 +125,7 @@ class PlayerUiState {
     bool? pipSupported,
     List<CaptionTrack>? subtitleTracks,
     CaptionTrack? activeSubtitle,
+    List<CaptionCue>? captionCues,
     bool clearSubtitle = false,
     List<MuxedQuality>? availableQualities,
     MuxedQuality? currentQuality,
@@ -163,6 +165,7 @@ class PlayerUiState {
       skipSponsors: skipSponsors ?? this.skipSponsors,
       pipSupported: pipSupported ?? this.pipSupported,
       subtitleTracks: subtitleTracks ?? this.subtitleTracks,
+      captionCues: captionCues ?? this.captionCues,
       activeSubtitle:
           clearSubtitle ? null : activeSubtitle ?? this.activeSubtitle,
       availableQualities: availableQualities ?? this.availableQualities,
@@ -183,19 +186,6 @@ class PlayerUiState {
   }
 }
 
-/// Outcome of _verifyDashLoad.
-enum _DashLoadOutcome {
-  /// mpv produced a duration — the stream is loading/playing.
-  loaded,
-
-  /// mpv reported an error ("Failed to open ...") — the URL is dead
-  /// (expired, 403'd, or revoked). A manifest refresh may fix it.
-  error,
-
-  /// No duration and no error within the timeout — the network is too
-  /// slow or the stream stalled. Retrying the same way won't help.
-  timeout,
-}
 
 /// Orchestrates everything about playback: extraction, the background
 /// audio handler, SponsorBlock skipping, sleep timer, speed, audio-only
@@ -233,11 +223,8 @@ class PlayerController extends Notifier<PlayerUiState>
 
   PipService get _pip => ref.read(pipServiceProvider);
 
-  StreamSubscription<Duration>? _positionSub;
-  StreamSubscription<String>? _errorSub;
   StreamSubscription<bool>? _pipSub;
   StreamSubscription<String>? _pipActionSub;
-  StreamSubscription<bool>? _mpvPlayingSub;
   bool? _lastPipPlaying;
 
   /// Keeps the system PiP window's play/pause action in sync with
@@ -250,6 +237,23 @@ class PlayerController extends Notifier<PlayerUiState>
     unawaited(_pip.setPlaying(playing));
   }
 
+  bool? _lastAutoPip;
+
+  /// Auto-PiP (Home button → the video shrinks into the small
+  /// window and keeps playing) is armed only while the full
+  /// player is open on a video that is actually playing.
+  void _syncAutoPip() {
+    final playing = _hqPlaying;
+    final enabled = state.status == PlayerStatus.ready &&
+        state.video != null &&
+        !state.audioOnly &&
+        playing &&
+        ref.read(fullPlayerOpenProvider);
+    if (_lastAutoPip == enabled) return;
+    _lastAutoPip = enabled;
+    unawaited(_pip.setAutoPip(enabled));
+  }
+
   Timer? _sleepCountdown;
   DateTime? _sleepEndsAt;
   bool _skipInProgress = false;
@@ -260,22 +264,11 @@ class PlayerController extends Notifier<PlayerUiState>
   /// the position poll would otherwise re-trigger the skip every
   /// 500ms and the video would keep jumping a few seconds at a time.
   final Set<String> _skippedSegmentKeys = {};
-  int _recoveryAttempts = 0;
 
   /// Bumps on every setQuality call; lets in-flight verifications detect
   /// when the user has moved on to another quality/video.
   int _qualitySwitchToken = 0;
 
-  /// True while a DASH quality switch is being verified (or rolled back).
-  /// The global [_onPlayerError] recovery must stay out during this window —
-  /// the switch owns error handling until verification completes.
-  bool _dashVerifyInFlight = false;
-
-  /// Raw mpv error stashed while [_dashVerifyInFlight] is true. This is the
-  /// REAL reason a quality switch failed (e.g. "Failed to open ... 403").
-  /// User directive 2026-10-17: surface it loudly instead of silently
-  /// falling back to 360p. Reset at the start of every DASH switch.
-  String? _dashVerifyError;
 
   // ---------------- native HQ player (1080p+) ----------------
   // The puretube_playback plugin (NewPipeExtractor + Media3, SparkTube-
@@ -381,6 +374,7 @@ class PlayerController extends Notifier<PlayerUiState>
 
   void _pushMirrorState() {
     _syncPipPlaying(_hqPlaying);
+    _syncAutoPip();
     if (!_handler.externalMode) return;
     final pt = _pt;
     _handler.setExternalState(
@@ -410,6 +404,12 @@ class PlayerController extends Notifier<PlayerUiState>
   void _onPluginChanged() {
     final c = _pt;
     if (c == null || !hqActive) return;
+    // Another surface (Shorts / offline player) owns the shared
+    // engine right now — its events are not this player's.
+    if (PureTubeController.ownerTag != null &&
+        PureTubeController.ownerTag != 'main') {
+      return;
+    }
     if (c.duration > Duration.zero && c.duration != _hqDuration) {
       _hqDuration = c.duration;
       _hqDurationCtrl.add(c.duration);
@@ -466,14 +466,12 @@ class PlayerController extends Notifier<PlayerUiState>
 
   /// Unified synchronous snapshots for gesture handlers: HQ engine when
   /// active, else mpv.
-  Duration get displayPosition =>
-      hqActive ? _hqPosition : _handler.player.state.position;
+  Duration get displayPosition => _hqPosition;
 
   /// The current UI state, for readers that cannot use `ref`
   /// (e.g. a widget's dispose()).
   PlayerUiState get uiStateSnapshot => state;
-  Duration get displayDuration =>
-      hqActive ? _hqDuration : _handler.player.state.duration;
+  Duration get displayDuration => _hqDuration;
 
   /// Cached system volume (0-100). Synced with the phone's media volume —
   /// the in-app pill and the hardware buttons control the same value.
@@ -491,14 +489,9 @@ class PlayerController extends Notifier<PlayerUiState>
       VolumeController.instance.showSystemUI = false;
       await VolumeController.instance.setVolume(clamped / 100);
     } catch (_) {}
-    // Keep player engines at full; system volume controls loudness.
-    // (The plugin engine has no volume API — it always plays at full
-    // volume, so the system volume set above is the loudness control.)
-    if (!hqActive) {
-      try {
-        await _handler.player.setVolume(100);
-      } catch (_) {}
-    }
+    // The plugin engine has no volume API — it always plays at
+    // full volume, so the system volume set above IS the loudness
+    // control (the old mpv setVolume(100) branch is gone with mpv).
   }
 
   double get displayVolume => _systemVolume;
@@ -530,6 +523,9 @@ class PlayerController extends Notifier<PlayerUiState>
   /// loadVideo so a fresh app start restores the user's last mode.
   bool _prefAudioOnly = false;
   static const _kAudioOnlyKey = 'audio_only';
+  static const _kSleepEndsAtKey = 'sleep_ends_at';
+  static const _kSleepTotalMsKey = 'sleep_total_ms';
+  static const _kSleepEndOfVideoKey = 'sleep_end_of_video';
 
   /// Autoplay preference (Hive, default ON). When a video/track completes
   /// and this is true, the next Up Next item starts automatically — in
@@ -538,7 +534,6 @@ class PlayerController extends Notifier<PlayerUiState>
   static const _kAutoplayKey = 'autoplay';
 
   /// Completion → playNext handoff guards.
-  StreamSubscription<bool>? _completedSub;
   bool _autoplayBusy = false;
 
   /// Ids played this session — Next/autoplay never offer them again,
@@ -624,23 +619,12 @@ class PlayerController extends Notifier<PlayerUiState>
           break;
       }
     });
-    // mpv (audio mode / fallback) play state → PiP icon sync.
-    _mpvPlayingSub = _handler.player.stream.playing.listen((p) {
-      if (!hqActive) _syncPipPlaying(p);
-    });
-    _positionSub = _handler.player.stream.position.listen((pos) {
-      _maybeSkipSponsor(pos);
-      _maybePersistLastVideo(pos);
-    });
-    _errorSub = _handler.player.stream.error.listen(_onPlayerError);
-    // Natural playback completion → autoplay the next Up Next item.
-    // Both video and audio mode share this one media_kit Player, so a
-    // single listener covers both.
-    try {
-      _completedSub = _handler.player.stream.completed.listen((_) {
-        _onPlaybackCompleted();
-      });
-    } catch (_) {}
+    // Auto-PiP arming follows the full player opening/closing.
+    ref.listen(fullPlayerOpenProvider, (_, __) => _syncAutoPip());
+    // SponsorBlock skipping, resume persistence and completion
+    // (autoplay-next) are driven by the plugin: its state listener
+    // (_onPluginChanged) handles completion, and the 500ms poll
+    // (_startHqPoll) drives skip/persist from the plugin position.
 
     // Wire notification skip buttons to the playback history / Up Next.
     _handler.onSkipToNext = () async {
@@ -662,10 +646,6 @@ class PlayerController extends Notifier<PlayerUiState>
       binding.removeObserver(this);
       _pipSub?.cancel();
       _pipActionSub?.cancel();
-      _mpvPlayingSub?.cancel();
-      _positionSub?.cancel();
-      _errorSub?.cancel();
-      _completedSub?.cancel();
       _cancelSleepTimer();
       _hqPollTimer?.cancel();
       final pt = _pt;
@@ -720,7 +700,6 @@ class PlayerController extends Notifier<PlayerUiState>
     final previousSkip = state.skipSponsors;
     final previousAudioOnly = state.audioOnly;
     final keepAudioOnly = previousAudioOnly || _prefAudioOnly;
-    _recoveryAttempts = 0;
     // The sleep timer is wall-clock based and must SURVIVE track changes —
     // it is cancelled only by explicit cancel, timer finish, stop(), or
     // dispose. Never cancel it here.
@@ -736,6 +715,7 @@ class PlayerController extends Notifier<PlayerUiState>
     _autoplayBusy = false;
     // Fresh video: its sponsor segments may be skipped again.
     _skippedSegmentKeys.clear();
+    // Captions belong to the previous video; tracks reload below.
     // Navigating away cancels any in-flight pre-load pass.
     _precacheToken++;
     // Navigating away also cancels any in-flight lyrics auto-fetch.
@@ -749,7 +729,6 @@ class PlayerController extends Notifier<PlayerUiState>
         state.status == PlayerStatus.ready && state.video != null;
     if (!hadPlayback) {
       await _stopHq();
-      await _handler.player.stop();
     }
 
     // Record in playback history (unless this load IS a history
@@ -821,26 +800,10 @@ class PlayerController extends Notifier<PlayerUiState>
       }
 
       if (keepAudioOnly) {
-        // Audio mode: the handler (mpv) IS the player.
-        // audio_service fetches artUri natively for the notification/
-        // lockscreen artwork. Only hand it a real http(s) URL — an
-        // empty or malformed Uri makes the artwork loader fail.
-        final artUri = Uri.tryParse(video.thumbnailUrl);
-        await _handler.loadMedia(
-          mediaItem: MediaItem(
-            id: video.id,
-            title: video.title,
-            artist: video.author,
-            artUri: (artUri != null &&
-                    (artUri.scheme == 'http' || artUri.scheme == 'https'))
-                ? artUri
-                : null,
-            duration: video.duration,
-          ),
-          streamUrl: streams.muxedUrl,
-          speed: previousSpeed,
-        );
-
+        // Audio mode: the SAME plugin engine, loaded audio-only —
+        // one player for everything (mpv is gone). The media
+        // session mirror carries the artwork to the notification /
+        // lock screen via _engageMirror.
         state = state.copyWith(
           status: PlayerStatus.ready,
           video: video,
@@ -848,16 +811,18 @@ class PlayerController extends Notifier<PlayerUiState>
           sponsorSegments: segments,
           pipSupported: await _pip.isPipSupported,
         );
-        // Record this video for "Continue watching" on the home screen.
         unawaited(_saveLastVideo());
-        // Resume from saved position if the user watched this before.
-        // Skip if position is 0 or within 10s of the end (likely finished).
+        // Resume from the saved position if the user listened
+        // before. Skip if 0 or within 10s of the end (finished).
         final savedSecs =
             ref.read(historyRepositoryProvider).getPosition(videoId);
         final totalSecs = video.duration?.inSeconds ?? 0;
-        if (savedSecs > 5 && (totalSecs <= 0 || savedSecs < totalSecs - 10)) {
-          await _handler.player.seek(Duration(seconds: savedSecs));
-        }
+        final resumeAt =
+            (savedSecs > 5 && (totalSecs <= 0 || savedSecs < totalSecs - 10))
+                ? Duration(seconds: savedSecs)
+                : Duration.zero;
+        _pluginEngagedFor = videoId;
+        unawaited(_startAudioOnPlugin(video, resumeAt: resumeAt));
       } else {
         // Video mode: DIRECT plugin start (SparkTube system) — the
         // video starts from the plugin's own extracted links right
@@ -928,7 +893,6 @@ class PlayerController extends Notifier<PlayerUiState>
 
   Future<void> stop() async {
     _cancelSleepTimer();
-    _recoveryAttempts = 0;
     await _stopHq();
     await _handler.stop();
     // Full reset, but keep the user's autoplay preference.
@@ -1009,7 +973,24 @@ class PlayerController extends Notifier<PlayerUiState>
   ///   the completed-vs-timer race at end-of-video.
   /// - Re-entry guard so one completion advances exactly one item, and
   ///   the video id must still match when we act (stale events ignored).
+  /// Repeat-one (set from the player's repeat button): on
+  /// completion the same video restarts instead of advancing.
+  bool _repeatOne = false;
+
+  void setRepeatOne(bool value) => _repeatOne = value;
+
   void _onPlaybackCompleted() {
+    if (_repeatOne && state.videoId != null) {
+      _hqPosition = Duration.zero;
+      _hqPositionCtrl.add(Duration.zero);
+      unawaited(() async {
+        try {
+          await _pt?.seek(Duration.zero);
+          await _pt?.play();
+        } catch (_) {}
+      }());
+      return;
+    }
     if (!_autoplay) return;
     if (state.status != PlayerStatus.ready) return;
     if (state.sleepEndOfVideo) return;
@@ -1038,7 +1019,29 @@ class PlayerController extends Notifier<PlayerUiState>
 
   // ---------------- transport ----------------
 
+  /// Releases the shared engine WITHOUT forgetting the session:
+  /// Shorts and the offline player take the engine over while
+  /// they are open, so the main player's engagement marker is
+  /// cleared (the video/queue stay; pressing play re-engages at
+  /// the remembered position via [retry]).
+  void invalidateEngine() {
+    _disengageMirror();
+    _hqPollTimer?.cancel();
+    _hqPollTimer = null;
+    _hqPlaying = false;
+    _hqPlayingCtrl.add(false);
+    if (state.hqTextureId != null) {
+      state = state.copyWith(clearHq: true);
+    }
+  }
+
   Future<void> togglePlayPause() async {
+    if (!hqActive && state.videoId != null && _pt != null) {
+      // The engine was taken over (Shorts/offline) and released:
+      // re-engage this video at the remembered position.
+      unawaited(retry());
+      return;
+    }
     if (hqActive) {
       // Optimistic flip for a snappy icon; the poll corrects it.
       _hqPlaying = !_hqPlaying;
@@ -1052,44 +1055,33 @@ class PlayerController extends Notifier<PlayerUiState>
       }
       return;
     }
-    if (_handler.player.state.playing) {
-      await _handler.pause();
-    } else {
-      await _handler.play();
-    }
+    // Not engaged: nothing to toggle.
   }
 
   Future<void> seekTo(Duration position) => _seekInternal(position);
 
   Future<void> seekBy(Duration offset) async {
-    if (hqActive) {
-      var target = _hqPosition + offset;
-      if (target < Duration.zero) target = Duration.zero;
-      if (_hqDuration > Duration.zero && target > _hqDuration) {
-        target = _hqDuration;
-      }
-      await _seekInternal(target);
-      return;
-    }
-    final player = _handler.player;
-    var target = player.state.position + offset;
-    final duration = player.state.duration;
+    var target = _hqPosition + offset;
     if (target < Duration.zero) target = Duration.zero;
-    if (duration > Duration.zero && target > duration) {
-      target = duration;
+    if (_hqDuration > Duration.zero && target > _hqDuration) {
+      target = _hqDuration;
     }
-    await _handler.seek(target);
+    await _seekInternal(target);
   }
 
   Future<void> setSpeed(double speed) async {
     final s = speed.clamp(0.25, 4.0);
+    // Plugin only. (The handler is NOT called back here: in mirror
+    // mode its setSpeed routes to this very method — that was a
+    // latent infinite loop. The session's speed is pushed to the
+    // notification via _pushMirrorState instead.)
     if (hqActive) {
       try {
         await _pt?.setSpeed(s.clamp(0.25, 3.0));
       } catch (_) {}
     }
-    await _handler.setSpeed(s);
     state = state.copyWith(speed: s);
+    _pushMirrorState();
   }
 
   /// Toggle between video and background-audio mode, preserving position.
@@ -1105,6 +1097,13 @@ class PlayerController extends Notifier<PlayerUiState>
     }
     final goingAudioOnly = !state.audioOnly;
     state = state.copyWith(audioOnly: goingAudioOnly);
+    // Tell the engine too: audio-only disables the video track
+    // (rebuild preserves position); back to video re-enables it.
+    // The plugin is the only engine now, so this always applies —
+    // the mpv-era toggle only flipped the UI.
+    try {
+      await _pt?.setAudioOnly(goingAudioOnly);
+    } catch (_) {}
     // Persist so a fresh app start restores the last mode.
     _prefAudioOnly = goingAudioOnly;
     unawaited(_saveAudioOnlyPref(goingAudioOnly));
@@ -1130,10 +1129,7 @@ class PlayerController extends Notifier<PlayerUiState>
   Future<void> enterPip() async {
     if (state.pipSupported && state.status == PlayerStatus.ready) {
       // Enter PiP with the transport icon already correct.
-      _syncPipPlaying(
-        hqActive ? hqIsPlaying : _handler.player.state.playing,
-        force: true,
-      );
+      _syncPipPlaying(hqIsPlaying, force: true);
       await _pip.enterPip();
     }
   }
@@ -1245,6 +1241,7 @@ class PlayerController extends Notifier<PlayerUiState>
     if (hqActive) {
       state = state.copyWith(activeAudioLanguage: lang);
       final pt = _plugin;
+    PureTubeController.ownerTag = 'main';
       try {
         final catalog = pt.catalog ??
             await pt
@@ -1807,114 +1804,25 @@ class PlayerController extends Notifier<PlayerUiState>
     if (token != _qualitySwitchToken || state.videoId != videoId) {
       return;
     }
-    // Leaving the HQ engine: stop it before mpv takes over.
-    if (hqActive) {
-      await _stopHq();
-    }
-    // NOTE: no manifest refresh before switching (an earlier version
-    // refreshed here for DASH). YouTube's android client limits stream
-    // URL reuse — the extractor itself warns it "often prevents
-    // downloading the same stream multiple times or more than one
-    // stream from the same manifest" — and every manifest fetch HEADs
-    // each URL, burning the budget mpv needs for real playback. DASH
-    // needs 2 URLs (video + audio), so a pre-switch refresh made DASH
-    // 403 while single-URL muxed survived. The cached URLs from
-    // loadQualities() are minutes old (signed URLs live ~6h). If they
-    // did expire, verification below fails and we refresh+retry once.
-    try {
-      // Clean mpv path: direct URLs, no proxy, no ExoPlayer.
-      // DASH passes video+audio (mpv audio-file); muxed passes single URL.
-      await _handler.switchStream(
-        target.url,
-        audioUrl: target.isDash ? target.audioUrl : null,
-      );
-    } catch (_) {
-      // Switch itself threw (e.g. invalid URL): roll back.
+    // The plugin is the only engine now: a failed pick restores
+    // the previous quality ON THE PLUGIN and reports loudly —
+    // never a silent drop (user directive 2026-10-17).
+    if (previous != null) {
+      final restored =
+          await _playHq(previous, token, cap: previous.height, loud: false);
       if (token != _qualitySwitchToken || state.videoId != videoId) {
         return;
       }
-      await _rollbackQuality(previous: previous, failed: target);
-      return;
-    }
-    // Verify DASH actually loads; muxed streams are trusted.
-    if (target.isDash) {
-      _dashVerifyInFlight = true;
-      _dashVerifyError = null;
-      try {
-        var outcome = await _verifyDashLoad(target, token);
-        if (token != _qualitySwitchToken || state.videoId != videoId) {
-          return;
-        }
-        // Hard mpv error (e.g. 403 "Failed to open"): the cached URLs
-        // are likely dead/expired — refresh once and retry with fresh
-        // URLs (a new manifest = new URLs with a full use budget). A
-        // timeout means the network is just slow; retrying won't help.
-        if (outcome == _DashLoadOutcome.error) {
-          try {
-            final fresh = await _extractor.getQualityOptions(videoId);
-            // Bail if the user moved on while the manifest was loading.
-            if (token != _qualitySwitchToken || state.videoId != videoId) {
-              return;
-            }
-            final match =
-                fresh.where((q) => q.height == quality.height && q.isDash);
-            if (match.isNotEmpty) {
-              // Retry the same fps variant when it still exists (the
-              // list is sorted fps-desc, so first is the best
-              // fallback).
-              target = match.firstWhere((q) => q.fps == quality.fps,
-                  orElse: () => match.first);
-              // Keep the quality menu in sync with the fresh URLs.
-              state = state.copyWith(availableQualities: fresh);
-              await _handler.switchStream(target.url,
-                  audioUrl: target.audioUrl);
-              outcome = await _verifyDashLoad(target, token);
-              if (token != _qualitySwitchToken || state.videoId != videoId) {
-                return;
-              }
-            }
-          } catch (_) {
-            // Refresh/retry failed; fall through to rollback.
-          }
-        }
-        if (outcome != _DashLoadOutcome.loaded) {
-          // DASH failed. User directive 2026-10-17: NEVER silently drop
-          // to a lower quality — restore the previous stream so playback
-          // continues, but surface the REAL failure reason loudly.
-          // (_dashVerifyError holds mpv's raw error, e.g. 403; a timeout
-          // means the stream stalled without any mpv error.)
-          final reason = _dashVerifyError != null
-              ? _shortenError(_dashVerifyError!)
-              : 'no data within 8s (timeout)';
-          await _rollbackQuality(previous: previous, failed: target);
-          state = state.copyWith(
-            errorMessage: '${target.resolutionLabel} চালানো যায়নি: $reason',
-          );
-          return;
-        }
-      } finally {
-        _dashVerifyInFlight = false;
+      if (restored) {
+        state = state.copyWith(
+          errorMessage:
+              '${target.resolutionLabel} চালানো যায়নি — আগের কোয়ালিটিতে ফিরে গেছে',
+        );
+        return;
       }
     }
-    if (token != _qualitySwitchToken || state.videoId != videoId) {
-      return;
-    }
-    // Success: adopt the new quality.
-    final s = state.streams;
     state = state.copyWith(
-      currentQuality: target,
-      // Keep the cached streams record in sync so expiry recovery
-      // and audio<->video toggling reuse the chosen quality.
-      streams: s == null
-          ? null
-          : PlaybackStreams(
-              videoId: s.videoId,
-              muxedUrl: target.url,
-              muxedHeight: target.height,
-              audioOnlyUrl: s.audioOnlyUrl,
-              audioBitrate: s.audioBitrate,
-              fetchedAt: s.fetchedAt,
-            ),
+      errorMessage: '${target.resolutionLabel} চালানো যায়নি',
     );
   }
 
@@ -1928,53 +1836,57 @@ class PlayerController extends Notifier<PlayerUiState>
     return s.length > 200 ? '${s.substring(0, 200)}…' : s;
   }
 
-  /// Waits for a DASH stream to actually start producing a duration.
-  ///
-  /// [token] must match [_qualitySwitchToken]; a mismatch means the user
-  /// picked another quality (or video) meanwhile and the caller must
-  /// treat the result as stale.
-  Future<_DashLoadOutcome> _verifyDashLoad(
-      MuxedQuality target, int token) async {
-    const timeout = Duration(seconds: 8);
-    const pollInterval = Duration(milliseconds: 500);
-    final deadline = DateTime.now().add(timeout);
-    // NOTE: Do NOT subscribe to _handler.player.stream.error here —
-    // it's a single-subscription stream already listened by _errorSub
-    // (line 304). A second listen throws "Bad state: Stream was
-    // already listened to". Just poll duration; the global
-    // _onPlayerError handler catches failures separately.
-    while (DateTime.now().isBefore(deadline)) {
-      // Bail early if superseded. (Do NOT compare
-      // state.currentQuality here: it still holds the OLD quality
-      // until verification succeeds.)
-      if (token != _qualitySwitchToken) return _DashLoadOutcome.timeout;
-      // A hard mpv error was stashed by _onPlayerError during the
-      // verify window — the URL is dead (expired/403/revoked), not slow.
-      if (_dashVerifyError != null) return _DashLoadOutcome.error;
-      final duration = _handler.player.state.duration;
-      if (duration > Duration.zero) return _DashLoadOutcome.loaded;
-      await Future.delayed(pollInterval);
+  /// Audio mode start on the plugin engine: an audio-only load
+  /// (no video track decoded), the session mirror engaged, the
+  /// poll running — the exact same machinery as video mode.
+  Future<void> _startAudioOnPlugin(VideoDetails video,
+      {required Duration resumeAt}) async {
+    final pt = _plugin;
+    PureTubeController.ownerTag = 'main';
+    try {
+      await pt.load(
+        'https://www.youtube.com/watch?v=${video.id}',
+        audioOnly: true,
+        position: resumeAt,
+        autoplay: true,
+      );
+    } catch (e) {
+      if (state.videoId == video.id && state.audioOnly) {
+        state = state.copyWith(
+          status: PlayerStatus.error,
+          errorMessage:
+              'গান চালু করা যায়নি: ${_shortenError(e.toString())}',
+        );
+      }
+      return;
     }
-    return _DashLoadOutcome.timeout;
+    if (state.videoId != video.id) return;
+    if (_pluginTextureId <= 0) {
+      try {
+        _pluginTextureId = await pt.textureId;
+      } catch (_) {}
+    }
+    // hqTextureId doubles as the "plugin engaged" marker the whole
+    // UI keys on; audio mode simply never renders the texture.
+    state = state.copyWith(
+        hqTextureId: _pluginTextureId > 0 ? _pluginTextureId : 1);
+    if (pt.duration > Duration.zero) {
+      _hqDuration = pt.duration;
+      _hqDurationCtrl.add(pt.duration);
+    }
+    _hqPosition = resumeAt;
+    _hqPositionCtrl.add(resumeAt);
+    _hqPlaying = true;
+    _hqPlayingCtrl.add(true);
+    if (state.speed != 1.0) {
+      try {
+        await pt.setSpeed(state.speed.clamp(0.25, 3.0));
+      } catch (_) {}
+    }
+    _startHqPoll();
+    _engageMirror(video);
   }
 
-  // ---------------- native HQ player (1080p+ DASH) ----------------
-
-  /// Plays [target] (1080p+ DASH) through the native HQ (ExoPlayer) engine.
-  /// mpv cannot play these streams on this phone, so they go straight to
-  /// the Java player. On failure the REAL reason is surfaced loudly —
-  /// never a silent downgrade (user directive 2026-10-17).
-  /// Loads [target] on the plugin engine at [cap] (null = adaptive
-  /// Auto). Returns true when the plugin is playing the target.
-  /// On failure mpv is resumed at whatever it was playing; with
-  /// [loud] the failure is also surfaced as an error message
-  /// (explicit user picks), without it the swap fails silently
-  /// (automatic engine engages / callers with their own fallback).
-  /// Direct plugin start for video mode (SparkTube system): the
-  /// video starts from the plugin's own extracted links right away —
-  /// mpv is never opened for video. If the plugin cannot start, the
-  /// muxed stream on the handler is the emergency fallback so the
-  /// video still plays.
   Future<void> _directStart(String videoId,
       {required PlaybackStreams streams, required Duration resumeAt}) async {
     final token = ++_qualitySwitchToken;
@@ -2005,49 +1917,25 @@ class PlayerController extends Notifier<PlayerUiState>
         state.audioOnly) {
       return;
     }
-    // Emergency fallback: play the muxed stream on the handler.
-    // Clear the HQ texture/mirror first — otherwise the UI keeps
-    // showing the (dead) plugin texture while mpv plays the sound.
-    await _stopHq();
-    try {
-      final v = state.video;
-      if (v == null) return;
-      final artUri = Uri.tryParse(v.thumbnailUrl);
-      await _handler.loadMedia(
-        mediaItem: MediaItem(
-          id: v.id,
-          title: v.title,
-          artist: v.author,
-          artUri: (artUri != null &&
-                  (artUri.scheme == 'http' || artUri.scheme == 'https'))
-              ? artUri
-              : null,
-          duration: v.duration,
-        ),
-        streamUrl: streams.muxedUrl,
-        speed: state.speed,
+    // No second engine to fall back to anymore (mpv is gone):
+    // the plugin already retried internally (expiry re-resolve +
+    // muxed fallback stages), so a failure here is real — say so
+    // loudly instead of leaving a silent black player.
+    if (state.videoId == videoId && !state.audioOnly) {
+      state = state.copyWith(
+        status: PlayerStatus.error,
+        errorMessage: 'ভিডিও চালু করা যায়নি — আবার চেষ্টা করুন',
       );
-      if (resumeAt > Duration.zero) {
-        await _handler.player.seek(resumeAt);
-      }
-    } catch (_) {}
+    }
   }
 
   Future<bool> _playHq(MuxedQuality target, int token,
       {required int? cap, bool loud = true, Duration? startAt}) async {
     final videoId = state.videoId;
     if (videoId == null) return false;
-    // Pause mpv so it doesn't double-play under the HQ engine.
-    try {
-      await _handler.pause();
-    } catch (_) {}
-    // Resume where the CURRENT engine is: the plugin's own position
-    // when it was already running (direct-start mode keeps mpv
-    // empty), otherwise mpv's position (legacy engage path).
-    final resumeAt = startAt ??
-        (_hqPosition > Duration.zero
-            ? _hqPosition
-            : _handler.player.state.position);
+    // Resume where the plugin currently is (a quality switch or
+    // a re-engage keeps the position; a fresh video passes 0).
+    final resumeAt = startAt ?? _hqPosition;
     final url = 'https://www.youtube.com/watch?v=$videoId';
     final pt = _plugin;
 
@@ -2137,10 +2025,6 @@ class PlayerController extends Notifier<PlayerUiState>
         return false;
       }
       await _stopHq();
-      // Resume the previous (working) mpv stream so the video keeps playing.
-      try {
-        await _handler.play();
-      } catch (_) {}
       if (!loud) return false;
       final raw = pt.error ?? e.toString();
       state = state.copyWith(
@@ -2198,6 +2082,10 @@ class PlayerController extends Notifier<PlayerUiState>
   void _startHqPoll() {
     _hqPollTimer?.cancel();
     _hqPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (PureTubeController.ownerTag != null &&
+          PureTubeController.ownerTag != 'main') {
+        return;
+      }
       if (state.hqTextureId == null) return;
       final pt = _pt;
       if (pt == null) return;
@@ -2214,134 +2102,73 @@ class PlayerController extends Notifier<PlayerUiState>
         _hqPlayingCtrl.add(playing);
       }
       _maybeSkipSponsor(pos);
+      _maybePersistLastVideo(pos);
       _pushMirrorState();
     });
   }
 
-  /// Unified seek: HQ engine when active, else mpv.
+  /// Unified seek — the plugin is the only engine.
   Future<void> _seekInternal(Duration target) {
-    if (hqActive) {
-      _hqPosition = target;
-      _hqPositionCtrl.add(target);
-      final pt = _pt;
-      if (pt == null) return Future.value();
-      return pt.seek(target);
-    }
-    return _handler.seek(target);
+    if (!hqActive) return Future.value();
+    _hqPosition = target;
+    _hqPositionCtrl.add(target);
+    final pt = _pt;
+    if (pt == null) return Future.value();
+    return pt.seek(target);
   }
 
-  /// Tries SABR (YouTube's native streaming protocol) when DASH fails.
-  /// Downloads video+audio via SABR and plays the local files.
-  /// Returns true if SABR playback started.
-  /// Restores the previous quality after a failed switch and surfaces a
-  /// clear error (e.g. "1080p failed to load, back to 720p"). The app
-  /// never silently drops to an arbitrary lower quality.
-  Future<void> _rollbackQuality({
-    required MuxedQuality? previous,
-    required MuxedQuality failed,
-  }) async {
-    final failedName = failed.resolutionLabel;
-    if (previous == null) {
-      state = state.copyWith(errorMessage: '$failedName failed to load');
-      return;
-    }
-    final prevName = previous.resolutionLabel;
-    try {
-      // Refresh the previous stream URL too — it may have expired while
-      // the failed attempt was in flight.
-      var prevUrl = previous.url;
-      String? prevAudio = previous.audioUrl;
-      final vid = state.videoId;
-      if (previous.isDash && vid != null) {
-        try {
-          final fresh = await _extractor.getQualityOptions(vid);
-          final match =
-              fresh.where((q) => q.height == previous.height && q.isDash);
-          if (match.isNotEmpty) {
-            // Restore the same fps variant when it still exists;
-            // the list is sorted fps-desc so the first entry is the
-            // best fallback otherwise.
-            final same = match.firstWhere(
-              (q) => q.fps == previous.fps,
-              orElse: () => match.first,
-            );
-            prevUrl = same.url;
-            prevAudio = same.audioUrl;
-          }
-        } catch (_) {}
-      }
-      await _handler.switchStream(prevUrl, audioUrl: prevAudio);
-      final restored = MuxedQuality(
-        label: previous.label,
-        height: previous.height,
-        url: prevUrl,
-        audioUrl: prevAudio,
-        bitrateKbps: previous.bitrateKbps,
-        fps: previous.fps,
-        codec: previous.codec,
-        isHdr: previous.isHdr,
-      );
-      final s = state.streams;
-      state = state.copyWith(
-        currentQuality: restored,
-        errorMessage: '$failedName failed to load, back to $prevName',
-        streams: s == null
-            ? null
-            : PlaybackStreams(
-                videoId: s.videoId,
-                muxedUrl: prevUrl,
-                muxedHeight: previous.height,
-                audioOnlyUrl: s.audioOnlyUrl,
-                audioBitrate: s.audioBitrate,
-                fetchedAt: s.fetchedAt,
-              ),
-      );
-    } catch (e) {
-      state = state.copyWith(
-          errorMessage:
-              '$failedName failed to load, could not restore $prevName: $e');
-    }
-  }
-
-  // ---------------- sleep timer ----------------
-
-  /// Hive key for the persisted sleep-timer end time (epoch millis),
-  /// so the timer survives app backgrounding.
-  static const _kSleepEndsAtKey = 'sleep_ends_at_ms';
-  static const _kSleepTotalMsKey = 'sleep_total_ms';
-  static const _kSleepEndOfVideoKey = 'sleep_end_of_video';
-
-  void startSleepTimer(Duration duration, {bool endOfVideo = false}) {
+  /// Starts a wall-clock sleep timer: playback pauses when it
+  /// fires, whatever track is playing by then. The timer is
+  /// persisted (ends-at + total) so it survives app restarts and
+  /// NEVER shifts with track changes.
+  void startSleepTimer(Duration duration) {
     _cancelSleepTimer();
-    _sleepEndsAt = DateTime.now().add(duration);
+    final endsAt = DateTime.now().add(duration);
+    _sleepEndsAt = endsAt;
+    try {
+      final box = Hive.box(HiveBoxes.playerPrefs);
+      box.put(_kSleepEndsAtKey, endsAt.millisecondsSinceEpoch);
+      box.put(_kSleepTotalMsKey, duration.inMilliseconds);
+      box.put(_kSleepEndOfVideoKey, false);
+    } catch (_) {}
     state = state.copyWith(
       sleepRemaining: duration,
       sleepTotal: duration,
-      sleepEndOfVideo: endOfVideo,
+      sleepEndOfVideo: false,
     );
-    // Persist the end time — the Dart timer keeps running while the
-    // audio foreground service holds the process alive in background.
-    // The original total + end-of-video flag are persisted too so the
-    // sleep timer sheet can show the right option as selected.
-    try {
-      final box = Hive.box(HiveBoxes.playerPrefs);
-      box.put(_kSleepEndsAtKey, _sleepEndsAt!.millisecondsSinceEpoch);
-      box.put(_kSleepTotalMsKey, duration.inMilliseconds);
-      box.put(_kSleepEndOfVideoKey, endOfVideo);
-    } catch (_) {}
     _armSleepCountdown();
   }
 
-  /// Starts a sleep timer that fires when the current video ends.
-  /// Returns false when the remaining time can't be determined.
+  /// Sleep at the end of the current video: a wall-clock timer
+  /// set to the video's remaining time (so the timer itself never
+  /// moves), flagged so completion does not autoplay the next.
+  /// Returns false when the remaining time is unknown.
   bool startSleepTimerUntilEndOfVideo() {
     final total = displayDuration;
     final pos = displayPosition;
-    if (total <= Duration.zero || pos >= total) return false;
-    startSleepTimer(total - pos, endOfVideo: true);
+    if (total <= Duration.zero || total - pos <= Duration.zero) {
+      return false;
+    }
+    final remaining = total - pos;
+    _cancelSleepTimer();
+    final endsAt = DateTime.now().add(remaining);
+    _sleepEndsAt = endsAt;
+    try {
+      final box = Hive.box(HiveBoxes.playerPrefs);
+      box.put(_kSleepEndsAtKey, endsAt.millisecondsSinceEpoch);
+      box.put(_kSleepTotalMsKey, remaining.inMilliseconds);
+      box.put(_kSleepEndOfVideoKey, true);
+    } catch (_) {}
+    state = state.copyWith(
+      sleepRemaining: remaining,
+      sleepTotal: remaining,
+      sleepEndOfVideo: true,
+    );
+    _armSleepCountdown();
     return true;
   }
 
+  /// Cancels an active sleep timer (sheet's "Off").
   void cancelSleepTimer() {
     _cancelSleepTimer();
     state = state.copyWith(sleepRemaining: null, clearSleep: true);
@@ -2531,17 +2358,27 @@ class PlayerController extends Notifier<PlayerUiState>
   }
 
   /// Selects a caption track (null = off). Applies via media_kit.
+  /// Selects a caption track (null = off). The cues are downloaded
+  /// and drawn by the player's own overlay, synced to the plugin
+  /// position (mpv used to render tracks natively; it is gone).
   Future<void> selectSubtitle(CaptionTrack? track) async {
-    try {
-      if (track == null) {
-        await _handler.player.setSubtitleTrack(SubtitleTrack.no());
-        state = state.copyWith(clearSubtitle: true);
-      } else {
-        await _handler.player.setSubtitleTrack(
-            SubtitleTrack.uri(track.url, title: track.language));
-        state = state.copyWith(activeSubtitle: track);
-      }
-    } catch (_) {}
+    if (track == null) {
+      state = state.copyWith(clearSubtitle: true, captionCues: const []);
+      return;
+    }
+    state = state.copyWith(activeSubtitle: track, captionCues: const []);
+    final videoId = state.videoId;
+    if (videoId == null) return;
+    final cues =
+        await _extractor.getCaptionCues(videoId, track.languageCode);
+    // Bail if the user switched video/track while downloading.
+    if (state.videoId != videoId ||
+        state.activeSubtitle?.languageCode != track.languageCode) {
+      return;
+    }
+    if (cues.isNotEmpty) {
+      state = state.copyWith(captionCues: cues);
+    }
   }
 
   void _maybeSkipSponsor(Duration position) {
@@ -2559,108 +2396,6 @@ class PlayerController extends Notifier<PlayerUiState>
     }
   }
 
-  // ---------------- stream expiry & error recovery ----------------
-
-  /// media_kit reports fatal errors (expired/403'd URL, lost connection)
-  /// on player.stream.error. Recover by re-extracting fresh URLs and
-  /// resuming at the last position. Bounded to 2 attempts, then the
-  /// error is surfaced to the UI instead of looping forever.
-  Future<void> _onPlayerError(String error) async {
-    if (state.status != PlayerStatus.ready || state.videoId == null) {
-      return;
-    }
-    if (error.trim().isEmpty) return;
-    // HQ (ExoPlayer) owns playback right now — mpv is paused and its
-    // errors must not trigger recovery that would fight the HQ engine.
-    if (hqActive) return;
-    // A DASH quality switch is mid-verification/rollback — it owns error
-    // handling until done. Recovering here would fight the switch and
-    // leave the player in an inconsistent state. Stash the raw error so
-    // the switch can report the REAL failure reason (user directive
-    // 2026-10-17: no silent 360p fallback).
-    if (_dashVerifyInFlight) {
-      _dashVerifyError = error;
-      return;
-    }
-
-    if (_recoveryAttempts >= 2) {
-      state = state.copyWith(
-        status: PlayerStatus.error,
-        errorMessage: 'Playback failed and could not recover: $error',
-      );
-      return;
-    }
-    _recoveryAttempts++;
-
-    try {
-      final resumeAt = _handler.player.state.position;
-      final onWifi = await _isOnWifi();
-      final fresh = await _extractor.getPlaybackStreams(state.videoId!,
-          preferBestAudio: !_wantWorstAudio(onWifi));
-      if (state.status != PlayerStatus.ready) return;
-      // Preserve the user's chosen quality across recovery when possible.
-      // Exception: DASH (video-only) qualities are fragile — if the player
-      // errored while on DASH ("Failed to open ...googlevideo.com..."),
-      // retrying the same DASH URL just fails again. Fall back to the
-      // reliable muxed stream instead so the video keeps playing.
-      var muxedUrl = fresh.muxedUrl;
-      var muxedHeight = fresh.muxedHeight;
-      MuxedQuality? preservedQuality;
-      final wantedHeight = state.currentQuality?.height;
-      final wantedIsDash = state.currentQuality?.isDash ?? false;
-      if (!state.audioOnly &&
-          !wantedIsDash &&
-          wantedHeight != null &&
-          wantedHeight != fresh.muxedHeight) {
-        try {
-          final options = await _extractor.getQualityOptions(state.videoId!);
-          // Preserve the user's exact (height, fps) variant when it
-          // still exists; muxed-only (a DASH match would lose audio).
-          // The list is sorted fps-desc, so the first height match is
-          // the best fallback.
-          final wantedFps = state.currentQuality?.fps;
-          final atHeight = options
-              .where((q) => q.height == wantedHeight && !q.isDash)
-              .toList();
-          if (atHeight.isNotEmpty) {
-            final q = atHeight.firstWhere((e) => e.fps == wantedFps,
-                orElse: () => atHeight.first);
-            muxedUrl = q.url;
-            muxedHeight = q.height;
-            preservedQuality = q;
-          }
-        } catch (_) {}
-      }
-      state = state.copyWith(
-        streams: PlaybackStreams(
-          videoId: fresh.videoId,
-          muxedUrl: muxedUrl,
-          muxedHeight: muxedHeight,
-          audioOnlyUrl: fresh.audioOnlyUrl,
-          audioBitrate: fresh.audioBitrate,
-          fetchedAt: fresh.fetchedAt,
-        ),
-        // Keep the quality label in sync with the stream actually playing.
-        currentQuality: preservedQuality ??
-            MuxedQuality(
-              label: 'MPEG-4 ${muxedHeight}p',
-              height: muxedHeight,
-              url: muxedUrl,
-            ),
-      );
-      final url = state.audioOnly ? fresh.audioOnlyUrl : muxedUrl;
-      await _handler.switchStream(url,
-          audioUrl: state.audioOnly ? null : preservedQuality?.audioUrl,
-          resumeAt: resumeAt);
-    } on PureTubeException catch (e) {
-      // Most likely NetworkException: user lost internet mid-playback.
-      state =
-          state.copyWith(status: PlayerStatus.error, errorMessage: e.message);
-    } catch (e) {
-      state = state.copyWith(
-          status: PlayerStatus.error, errorMessage: 'Playback error: $e');
-    }
-  }
 }
 
 final playerControllerProvider =

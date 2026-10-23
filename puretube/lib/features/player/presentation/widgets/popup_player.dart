@@ -2,8 +2,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import 'package:puretube_playback/puretube_playback.dart';
 
 import '../../../../core/database/hive_setup.dart';
@@ -78,20 +76,11 @@ class _LiveCornerPlayer extends ConsumerStatefulWidget {
 
 class _LiveCornerPlayerState
     extends ConsumerState<_LiveCornerPlayer> {
-  VideoController? _videoController;
   // Drag offset via ValueNotifier so panning only rebuilds the
   // Positioned wrapper — the Video widget itself is built once and
   // never rebuilt mid-drag (that's what made dragging janky).
   final ValueNotifier<Offset?> _offsetNotifier =
       ValueNotifier<Offset?>(null);
-
-  @override
-  void initState() {
-    super.initState();
-    // Second view onto the SAME shared player instance.
-    _videoController =
-        VideoController(ref.read(mediaKitPlayerProvider));
-  }
 
   @override
   void dispose() {
@@ -113,9 +102,7 @@ class _LiveCornerPlayerState
     // playing plugin video OFF.
     final ui = ref.read(playerControllerProvider);
     final notifier = ref.read(playerControllerProvider.notifier);
-    final playing = ui.hqTextureId != null
-        ? notifier.hqIsPlaying
-        : ref.read(mediaKitPlayerProvider).state.playing;
+    final playing = notifier.hqIsPlaying;
     if (!playing) {
       notifier.togglePlayPause();
     }
@@ -139,7 +126,6 @@ class _LiveCornerPlayerState
     final video = uiState.video;
     if (video == null) return const SizedBox.shrink();
     final notifier = ref.read(playerControllerProvider.notifier);
-    final player = ref.watch(mediaKitPlayerProvider);
 
     final size = MediaQuery.of(context).size;
 
@@ -199,12 +185,6 @@ class _LiveCornerPlayerState
                     aspectRatio: uiState.hqAspectRatio,
                     fit: BoxFit.cover,
                   )
-                else if (_videoController != null)
-                  Video(
-                    controller: _videoController!,
-                    controls: NoVideoControls,
-                    fit: BoxFit.cover,
-                  )
                 else
                   Container(color: Colors.black),
                 // Readability scrim.
@@ -234,12 +214,8 @@ class _LiveCornerPlayerState
                         ),
                       ),
                       StreamBuilder<bool>(
-                        stream: uiState.hqTextureId != null
-                            ? notifier.hqPlayingStream
-                            : player.stream.playing,
-                        initialData: uiState.hqTextureId != null
-                            ? notifier.hqIsPlaying
-                            : player.state.playing,
+                        stream: notifier.hqPlayingStream,
+                        initialData: notifier.hqIsPlaying,
                         builder: (context, snap) {
                           final playing = snap.data ?? false;
                           return Container(
@@ -302,7 +278,7 @@ class _LiveCornerPlayerState
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  child: _LiveProgressLine(player: player),
+                  child: const _LiveProgressLine(),
                 ),
               ],
             ),
@@ -479,24 +455,18 @@ class _ResumeCornerPlayerState
 
 /// Thin live progress line for the corner player.
 class _LiveProgressLine extends ConsumerWidget {
-  final Player player;
-  const _LiveProgressLine({required this.player});
+  const _LiveProgressLine();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final notifier = ref.read(playerControllerProvider.notifier);
-    final hqActive =
-        ref.watch(playerControllerProvider.select((s) => s.hqTextureId)) !=
-            null;
     return StreamBuilder<Duration>(
       stream:
-          hqActive ? notifier.hqDurationStream : player.stream.duration,
+          notifier.hqDurationStream,
       builder: (context, durSnap) {
         final total = durSnap.data?.inMilliseconds ?? 0;
         return StreamBuilder<Duration>(
-          stream: hqActive
-              ? notifier.hqPositionStream
-              : player.stream.position,
+          stream: notifier.hqPositionStream,
           builder: (context, posSnap) {
             final pos = posSnap.data?.inMilliseconds ?? 0;
             return LinearProgressIndicator(

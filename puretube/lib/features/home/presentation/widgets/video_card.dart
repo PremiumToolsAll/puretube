@@ -320,18 +320,33 @@ class VideoCard extends ConsumerWidget {
                                   ChannelScreen(channelId: video.channelId),
                             ),
                           ),
-                  child: CircleAvatar(
-                    radius: 18,
-                    backgroundColor: scheme.primaryContainer,
-                    child: Text(
-                      initial,
-                      style: TextStyle(
-                        color: scheme.onPrimaryContainer,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                      ),
-                    ),
-                  ),
+                  child: Builder(builder: (context) {
+                    final logo =
+                        ref.watch(channelLogoProvider)[video.channelId];
+                    if (logo == null && video.channelId.isNotEmpty) {
+                      // Fetch once per channel; cached forever.
+                      ref
+                          .read(channelLogoProvider.notifier)
+                          .ensure(video.channelId);
+                    }
+                    return CircleAvatar(
+                      radius: 18,
+                      backgroundColor: scheme.primaryContainer,
+                      backgroundImage: logo != null
+                          ? CachedNetworkImageProvider(logo)
+                          : null,
+                      child: logo == null
+                          ? Text(
+                              initial,
+                              style: TextStyle(
+                                color: scheme.onPrimaryContainer,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            )
+                          : null,
+                    );
+                  }),
                 ),
                 const SizedBox(width: 10),
                 Expanded(

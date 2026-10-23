@@ -17,9 +17,6 @@ dependencies:
   flutter_riverpod: ^2.4.9
 
   # Video playback (mpv-powered: custom controls, PiP-friendly, background-capable)
-  media_kit: ^1.1.10
-  media_kit_video: ^1.2.0
-  media_kit_libs_video: ^1.0.0
 
   # Native HQ playback engine (NewPipeExtractor + Media3, SparkTube-style
   # DASH/merged playback) — used for 1080p+ selections.

@@ -12,6 +12,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -158,15 +159,32 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
                 disposed = false; audioOnly = a["audioOnly"] as? Boolean ?: false; shouldAutoplay = a["autoplay"] as? Boolean ?: true; stopped = false; retryingExpiry = false; fallbackStage = 0
                 resolveAndLoad(url, requestedHeight, selectedAudioId, audioOnly, (a["positionMs"] as? Number)?.toLong() ?: 0L, shouldAutoplay, id, result)
             }
+            "loadLocal" -> {
+                ensureProducer()
+                val path = a["path"] as? String ?: return result.error("bad_arguments", "path is required", null)
+                val audioPath = a["audioPath"] as? String
+                generation.incrementAndGet()
+                // No remote URL: the HTTP-expiry retry and the
+                // catalog fallbacks must never engage for files.
+                currentUrl = null; catalog = null; requestedHeight = null; selectedAudioId = null
+                disposed = false; audioOnly = a["audioOnly"] as? Boolean ?: false; shouldAutoplay = a["autoplay"] as? Boolean ?: true; stopped = false; retryingExpiry = false; fallbackStage = 0
+                try {
+                    installLocal(path, audioPath, audioOnly, (a["positionMs"] as? Number)?.toLong() ?: 0L, shouldAutoplay)
+                    result.success(null)
+                } catch (t: Throwable) {
+                    result.error("load_failed", t.message ?: "Unable to play file", null)
+                }
+            }
             "setQuality" -> { requestedHeight = (a["height"] as? Number)?.toInt(); safeRebuild(result) }
             "setResizeMode" -> { resizeMode = (a["mode"] as? Number)?.toInt() ?: androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT; result.success(null) }
             "setNotificationEnabled" -> { notificationEnabled = a["enabled"] as? Boolean ?: true; refreshService(); result.success(null) }
             "textureId" -> result.success(ensureProducer()?.id())
             "setAudioTrack" -> { selectedAudioId = a["id"] as? String; safeRebuild(result) }
             "setAudioOnly" -> { audioOnly = a["enabled"] as? Boolean ?: false; safeRebuild(result) }
-            "play" -> { stopped = false; shouldAutoplay = true; if (resumed) player?.play(); result.success(null) }
+            "play" -> { stopped = false; shouldAutoplay = true; player?.play(); result.success(null) }
             "pause" -> { shouldAutoplay = false; player?.pause(); result.success(null) }
             "seek" -> { player?.seekTo((a["positionMs"] as? Number)?.toLong() ?: 0L); result.success(null) }
+            "setMuted" -> { val muted = a["muted"] as? Boolean ?: false; player?.volume = if (muted) 0f else 1f; result.success(null) }
             "setSpeed" -> { val speed = (a["speed"] as? Number)?.toFloat(); if (speed == null || speed <= 0f) result.error("bad_arguments", "speed must be positive", null) else { player?.setPlaybackSpeed(speed); result.success(null) } }
             "stop" -> { generation.incrementAndGet(); shouldAutoplay = false; stopped = true; player?.stop(); result.success(null) }
             "dispose" -> { disposePlayback(); result.success(null) }
@@ -254,8 +272,29 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         // resolveAndLoad.
         firstFrameSeen = onlyAudio
         frameWaitStartMs = System.currentTimeMillis()
-        p.setMediaSource(source); p.prepare(); if (pos > 0) p.seekTo(pos); if (autoplay && resumed && !stopped) p.play() else p.pause()
+        p.setMediaSource(source); p.prepare(); if (pos > 0) p.seekTo(pos); if (autoplay && !stopped) p.play() else p.pause()
     }
+    /** Plays a downloaded file (offline playback). A companion
+     *  audio file (DASH downloads) is merged in, ExoPlayer-side —
+     *  the role mpv's audio-file property used to fill. */
+    private fun installLocal(path: String, audioPath: String?, onlyAudio: Boolean, pos: Long, autoplay: Boolean) {
+        val p = ensurePlayer()
+        val factory = DefaultDataSource.Factory(context)
+        val videoSource = ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(android.net.Uri.fromFile(java.io.File(path))))
+        val source: MediaSource = when {
+            onlyAudio -> videoSource
+            audioPath != null -> MergingMediaSource(
+                videoSource,
+                ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(android.net.Uri.fromFile(java.io.File(audioPath))))
+            )
+            else -> videoSource
+        }
+        firstFrameSeen = onlyAudio
+        frameWaitStartMs = System.currentTimeMillis()
+        p.setMediaSource(source); p.prepare(); if (pos > 0) p.seekTo(pos); if (autoplay && !stopped) p.play() else p.pause()
+        emitState()
+    }
+
     private fun tryFallback(): Boolean {
         val c = catalog ?: return false
         val p = player ?: return false
@@ -272,7 +311,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
             p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, audioOnly).build()
             ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(muxed.content))
         }
-        p.setMediaSource(source); p.prepare(); if (pos > 0) p.seekTo(pos); if (shouldAutoplay && resumed && !stopped) p.play()
+        p.setMediaSource(source); p.prepare(); if (pos > 0) p.seekTo(pos); if (shouldAutoplay && !stopped) p.play()
         return true
     }
     private fun safeRebuild(result: MethodChannel.Result) {
@@ -411,6 +450,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     override fun onCancel(arguments: Any?) { sink = null }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) { activity = binding.activity; resumed = false; disposed = false }
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) { activity = binding.activity }
     override fun onDetachedFromActivityForConfigChanges() { activity?.let { if (!backgroundPlay && resumed) pauseForBackground() }; activity = null; resumed = false }
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) { activity = binding.activity; bindSurface(); refreshService() }
     override fun onDetachedFromActivity() { activity?.let { if (!backgroundPlay && resumed) pauseForBackground() }; activity = null; resumed = false }

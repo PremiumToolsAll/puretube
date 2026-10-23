@@ -41,6 +41,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : AudioServiceActivity() {
     private var pipChannel: MethodChannel? = null
     private var pipPlaying = false
+    private var autoPipEnabled = false
     private var pipReceiver: BroadcastReceiver? = null
 
     companion object {
@@ -107,6 +108,11 @@ class MainActivity : AudioServiceActivity() {
                             // PiP params are cosmetic here; never crash.
                         }
                     }
+                    result.success(null)
+                }
+                "setAutoPip" -> {
+                    autoPipEnabled =
+                        call.argument<Boolean>("enabled") ?: false
                     result.success(null)
                 }
                 else -> result.notImplemented()
@@ -209,6 +215,29 @@ class MainActivity : AudioServiceActivity() {
         }
         pipReceiver = null
         super.onDestroy()
+    }
+
+    /**
+     * Auto-PiP: pressing Home (or otherwise leaving) while a video
+     * is playing shrinks straight into the PiP window — playback
+     * never stops. Dart enables this only while the full player is
+     * open with a video actually playing. Tapping the PiP window
+     * restores the activity (system behaviour), landing back on
+     * the still-open player screen.
+     */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (autoPipEnabled &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !isInPipCompat()
+        ) {
+            try {
+                enterPictureInPictureMode(buildPipParams())
+            } catch (e: Exception) {
+                // PiP refused (e.g. disabled in system settings):
+                // background playback continues via the service.
+            }
+        }
     }
 
     private fun isInPipCompat(): Boolean =

@@ -1,64 +1,77 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:puretube_playback/puretube_playback.dart';
 
 import '../../../../core/utils/format.dart';
+import '../../../player/presentation/providers/player_controller.dart';
 import '../../domain/entities/library_models.dart';
 
-/// Plays a downloaded file with media_kit. No network, no extractor.
-class OfflinePlayerScreen extends StatefulWidget {
+/// Plays a downloaded file with the shared puretube_playback
+/// engine (loadLocal — the companion audio file of a DASH
+/// download is merged natively, the role mpv's audio-file
+/// property used to fill). No network, no extractor.
+///
+/// Opening this screen takes the shared engine over from the
+/// main player (ownerTag 'offline'); closing it stops the engine
+/// and invalidates the main player's stale engagement, so its
+/// play button cleanly re-engages the previous video.
+class OfflinePlayerScreen extends ConsumerStatefulWidget {
   final DownloadRecord record;
   const OfflinePlayerScreen({super.key, required this.record});
 
   @override
-  State<OfflinePlayerScreen> createState() =>
+  ConsumerState<OfflinePlayerScreen> createState() =>
       _OfflinePlayerScreenState();
 }
 
 class _OfflinePlayerScreenState
-    extends State<OfflinePlayerScreen> {
-  late final Player _player;
-  late final VideoController _controller;
+    extends ConsumerState<OfflinePlayerScreen> {
+  late final PureTubeController _pt;
+  int _textureId = -1;
+  bool _error = false;
 
   @override
   void initState() {
     super.initState();
-    _player = Player();
-    _controller = VideoController(_player);
-    _attachCompanionAudio().then((_) {
-      if (mounted) {
-        _player.open(Media('file://${widget.record.filePath}'));
-      }
-    });
+    _pt = PureTubeController();
+    unawaited(_start());
   }
 
-  /// DASH video-only downloads ship a companion audio file. Attach it
-  /// via mpv's `audio-file` (same mechanism as DASH streaming) so the
-  /// video plays WITH audio — no FFmpeg merge required.
-  Future<void> _attachCompanionAudio() async {
-    final audioPath = widget.record.audioFilePath;
-    if (audioPath == null || audioPath.isEmpty) return;
-    // Skip a deleted companion file — mpv would fail the whole load.
-    if (!await File(audioPath).exists()) return;
-    final platform = _player.platform;
-    if (platform is NativePlayer) {
-      try {
-        await platform.setProperty('audio-file', audioPath);
-        // Same settle delay as the streaming switch path: without it
-        // mpv can start the demuxer before the property applies and the
-        // companion audio is silently dropped on some devices.
-        await Future.delayed(const Duration(milliseconds: 500));
-      } catch (_) {
-        // Video still plays; just without the companion audio.
-      }
+  Future<void> _start() async {
+    PureTubeController.ownerTag = 'offline';
+    ref.read(playerControllerProvider.notifier).invalidateEngine();
+    try {
+      final audioPath = widget.record.audioFilePath;
+      final companion = (audioPath != null &&
+              audioPath.isNotEmpty &&
+              await File(audioPath).exists())
+          ? audioPath
+          : null;
+      await _pt.loadLocal(
+        path: widget.record.filePath,
+        audioPath: companion,
+        audioOnly: widget.record.audioOnly,
+        autoplay: true,
+      );
+      final id = await _pt.textureId;
+      if (mounted) setState(() => _textureId = id);
+    } catch (_) {
+      if (mounted) setState(() => _error = true);
     }
   }
 
   @override
   void dispose() {
-    _player.dispose();
+    PureTubeController.ownerTag = null;
+    unawaited(() async {
+      try {
+        await _pt.stop();
+      } catch (_) {}
+      await _pt.close();
+    }());
     super.dispose();
   }
 
@@ -81,64 +94,61 @@ class _OfflinePlayerScreenState
                 ? const Center(
                     child: Icon(Icons.audio_file,
                         size: 64, color: Colors.grey))
-                : Video(
-                    controller: _controller,
-                    controls: NoVideoControls,
-                  ),
+                : _error
+                    ? const Center(
+                        child: Icon(Icons.error_outline,
+                            size: 48, color: Colors.grey))
+                    : _textureId > 0
+                        ? PureTubeVideoView(
+                            textureId: _textureId,
+                            aspectRatio: 16 / 9,
+                          )
+                        : const Center(
+                            child: CircularProgressIndicator()),
           ),
           Padding(
             padding: const EdgeInsets.all(16),
-            child: StreamBuilder<Duration>(
-              stream: _player.stream.position,
-              builder: (context, posSnap) {
-                return StreamBuilder<Duration>(
-                  stream: _player.stream.duration,
-                  builder: (context, durSnap) {
-                    final pos =
-                        posSnap.data ?? Duration.zero;
-                    final dur =
-                        durSnap.data ?? Duration.zero;
-                    return Column(
+            child: ListenableBuilder(
+              listenable: _pt,
+              builder: (context, _) {
+                final pos = _pt.position;
+                final dur = _pt.duration;
+                return Column(
+                  children: [
+                    Slider(
+                      value: dur.inMilliseconds > 0
+                          ? (pos.inMilliseconds / dur.inMilliseconds)
+                              .clamp(0.0, 1.0)
+                          : 0,
+                      onChanged: (v) => _pt.seek(Duration(
+                          milliseconds:
+                              (v * dur.inMilliseconds).round())),
+                    ),
+                    Row(
+                      mainAxisAlignment:
+                          MainAxisAlignment.spaceBetween,
                       children: [
-                        Slider(
-                          value: dur.inMilliseconds > 0
-                              ? (pos.inMilliseconds /
-                                      dur.inMilliseconds)
-                                  .clamp(0.0, 1.0)
-                              : 0,
-                          onChanged: (v) => _player.seek(
-                              Duration(
-                                  milliseconds:
-                                      (v * dur.inMilliseconds)
-                                          .round())),
-                        ),
-                        Row(
-                          mainAxisAlignment:
-                              MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(formatDuration(pos),
-                                style: const TextStyle(
-                                    color: Colors.grey)),
-                            Text(formatDuration(dur),
-                                style: const TextStyle(
-                                    color: Colors.grey)),
-                          ],
-                        ),
+                        Text(formatDuration(pos),
+                            style:
+                                const TextStyle(color: Colors.grey)),
+                        Text(formatDuration(dur),
+                            style:
+                                const TextStyle(color: Colors.grey)),
                       ],
-                    );
-                  },
+                    ),
+                  ],
                 );
               },
             ),
           ),
-          StreamBuilder<bool>(
-            stream: _player.stream.playing,
-            builder: (context, snap) {
-              final playing = snap.data ?? false;
+          ListenableBuilder(
+            listenable: _pt,
+            builder: (context, _) {
+              final playing = _pt.isPlaying;
               return IconButton(
                 iconSize: 56,
                 onPressed: () =>
-                    playing ? _player.pause() : _player.play(),
+                    playing ? _pt.pause() : _pt.play(),
                 icon: Icon(playing
                     ? Icons.pause_circle_filled
                     : Icons.play_circle_filled),

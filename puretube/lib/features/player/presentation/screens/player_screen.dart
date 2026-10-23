@@ -5,8 +5,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import 'package:puretube_playback/puretube_playback.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:share_plus/share_plus.dart';
@@ -395,7 +393,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   /// Follows the selected theme accent so the whole app converts.
   Color get _gold => Theme.of(context).colorScheme.primary;
 
-  VideoController? _videoController;
   bool _showControls = true;
   Timer? _hideTimer;
 
@@ -485,7 +482,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _fullPlayerOpenNotifier = ref.read(fullPlayerOpenProvider.notifier);
     _playerNotifier = ref.read(playerControllerProvider.notifier);
     _historyRepo = ref.read(historyRepositoryProvider);
-    _videoController = VideoController(ref.read(mediaKitPlayerProvider));
     // Fullscreen player takes over: hide the floating popup window.
     ref.read(popupVisibleProvider.notifier).state = false;
     ref.read(fullPlayerOpenProvider.notifier).state = true;
@@ -1758,7 +1754,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final uiState = ref.watch(playerControllerProvider);
 
     // PiP mode: render the bare video only. The system owns the window.
-    if (uiState.isInPip && _videoController != null) {
+    if (uiState.isInPip) {
       return Scaffold(
         backgroundColor: Colors.black,
         body: Center(
@@ -1772,12 +1768,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     aspectRatio: uiState.hqAspectRatio,
                   ),
                 )
-              : Video(controller: _videoController!, controls: NoVideoControls),
+              : const SizedBox.shrink(),
         ),
       );
     }
 
-    final player = ref.watch(mediaKitPlayerProvider);
     final notifier = ref.read(playerControllerProvider.notifier);
 
     // Fullscreen: video fills the whole landscape screen with the same
@@ -1792,7 +1787,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         },
         child: Scaffold(
           backgroundColor: _willowBg,
-          body: _buildVideoArea(uiState, player, fillScreen: true),
+          body: _buildVideoArea(uiState, fillScreen: true),
         ),
       );
     }
@@ -1809,7 +1804,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         },
         child: Scaffold(
           backgroundColor: Colors.black,
-          body: SafeArea(child: _buildAudioMode(uiState, player, notifier)),
+          body: SafeArea(child: _buildAudioMode(uiState, notifier)),
         ),
       );
     }
@@ -1826,7 +1821,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _buildVideoArea(uiState, player),
+              _buildVideoArea(uiState),
               Expanded(child: _buildMeta(uiState, notifier)),
             ],
           ),
@@ -1842,7 +1837,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // playing even if the user pops this screen or turns the display off.
 
   Widget _buildAudioMode(
-      PlayerUiState uiState, Player player, PlayerController notifier) {
+      PlayerUiState uiState, PlayerController notifier) {
     final video = uiState.video!;
     final hqActive = uiState.hqTextureId != null;
     return Stack(
@@ -2143,7 +2138,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             // Seekbar + times.
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-              child: _AudioSeekBar(player: player),
+              child: _AudioSeekBar(),
             ),
             // Controls: shuffle | prev | WHITE 72 play | next | repeat
             Padding(
@@ -2170,11 +2165,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     onPressed: _playPrevious,
                   ),
                   StreamBuilder<bool>(
-                    stream: hqActive
-                        ? notifier.hqPlayingStream
-                        : player.stream.playing,
+                    stream: notifier.hqPlayingStream,
                     initialData:
-                        hqActive ? notifier.hqIsPlaying : player.state.playing,
+                        notifier.hqIsPlaying,
                     builder: (context, snap) {
                       final playing = snap.data ?? false;
                       return PressScale(
@@ -2386,14 +2379,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   void _cycleRepeatMode() {
-    final player = ref.read(mediaKitPlayerProvider);
     setState(() => _repeatMode = (_repeatMode + 1) % 3);
-    // Real behavior via media_kit playlist modes.
-    player.setPlaylistMode(_repeatMode == 2
-        ? PlaylistMode.single
-        : _repeatMode == 1
-            ? PlaylistMode.loop
-            : PlaylistMode.none);
+    // Repeat-one replays via the controller's completion path;
+    // repeat-all/off are the default autoplay-next behavior.
+    ref
+        .read(playerControllerProvider.notifier)
+        .setRepeatOne(_repeatMode == 2);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(_repeatMode == 2
           ? 'Repeat one'
@@ -2543,7 +2534,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
-  Widget _buildVideoArea(PlayerUiState uiState, Player player,
+  Widget _buildVideoArea(PlayerUiState uiState,
       {bool fillScreen = false}) {
     final isReady = uiState.status == PlayerStatus.ready;
     final content = Container(
@@ -2567,11 +2558,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 fit: _videoFit,
               ),
             )
-          else if (_videoController != null)
-            Video(
-                controller: _videoController!,
-                controls: NoVideoControls,
-                fit: _videoFit),
+          else
+            const SizedBox.shrink(),
           if (isReady)
             GestureDetector(
               behavior: HitTestBehavior.translucent,
@@ -2656,7 +2644,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               child: IgnorePointer(
                 child: _StatsOverlay(
                   uiState: uiState,
-                  player: player,
                 ),
               ),
             ),
@@ -2672,7 +2659,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               bottom: 0,
               left: 0,
               right: 0,
-              child: _buildBottomControls(player, uiState),
+              child: _buildBottomControls(uiState),
             ),
           ],
           if (_showMoreVideos && isReady && fillScreen)
@@ -2947,7 +2934,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   /// switches instantly.
   Widget _buildCenterControls() {
     final notifier = ref.read(playerControllerProvider.notifier);
-    final player = ref.read(mediaKitPlayerProvider);
     final hqActive = ref.read(playerControllerProvider).hqTextureId != null;
 
     Widget discButton({
@@ -2977,8 +2963,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
 
     return StreamBuilder<bool>(
-      stream: hqActive ? notifier.hqPlayingStream : player.stream.playing,
-      initialData: hqActive ? notifier.hqIsPlaying : player.state.playing,
+      stream: notifier.hqPlayingStream,
+      initialData: notifier.hqIsPlaying,
       builder: (context, snap) {
         final playing = snap.data ?? false;
         return Row(
@@ -3018,7 +3004,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   /// Bottom controls: one compact row —
   /// current time | seekbar | total time | fullscreen.
-  Widget _buildBottomControls(Player player, PlayerUiState uiState) {
+  Widget _buildBottomControls(PlayerUiState uiState) {
     // Absorb taps on the control bar: without this, a tap on the seekbar
     // also reaches the video-area GestureDetector behind it, whose onTap
     // toggles (hides) the controls — hiding the bar mid-gesture and
@@ -3042,13 +3028,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               padding: const EdgeInsets.fromLTRB(8, 0, 0, 6),
               child: Row(
                 children: [
-                  _TimeLabel(
-                      player: player, current: true, color: _emeraldLight),
+                  _TimeLabel(current: true, color: _emeraldLight),
                   Expanded(
-                      child: _PlayerSeekBar(
-                          player: player, activeColor: _emerald)),
-                  _TimeLabel(
-                      player: player, current: false, color: _emeraldLight),
+                      child: _PlayerSeekBar(activeColor: _emerald)),
+                  _TimeLabel(current: false, color: _emeraldLight),
                   PressIconButton(
                     tooltip: _isFullscreen ? 'Exit fullscreen' : 'Fullscreen',
                     onPressed: _toggleFullscreen,
@@ -4033,32 +4016,27 @@ String _clock(Duration d) {
 
 /// Bottom-row time label: current position on the left, total on the right.
 class _TimeLabel extends ConsumerWidget {
-  final Player player;
   final bool current;
 
   /// Tint for the label; defaults to white (video fullscreen overlays).
   final Color color;
-  const _TimeLabel(
-      {required this.player, required this.current, this.color = Colors.white});
+  const _TimeLabel({required this.current, this.color = Colors.white});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final notifier = ref.read(playerControllerProvider.notifier);
-    final hqActive =
-        ref.watch(playerControllerProvider.select((s) => s.hqTextureId)) !=
-            null;
     // initialData from the synchronous player state: media_kit's streams
     // are broadcast without replay, so a fresh subscription (e.g. after
     // the fullscreen rebuild) would otherwise show 00:00 until the next
     // mpv event.
     return StreamBuilder<Duration>(
-      stream: hqActive ? notifier.hqDurationStream : player.stream.duration,
-      initialData: hqActive ? notifier.hqDuration : player.state.duration,
+      stream: notifier.hqDurationStream,
+      initialData: notifier.hqDuration,
       builder: (context, durSnap) {
         final duration = durSnap.data ?? Duration.zero;
         return StreamBuilder<Duration>(
-          stream: hqActive ? notifier.hqPositionStream : player.stream.position,
-          initialData: hqActive ? notifier.hqPosition : player.state.position,
+          stream: notifier.hqPositionStream,
+          initialData: notifier.hqPosition,
           builder: (context, posSnap) {
             final position = posSnap.data ?? Duration.zero;
             return Text(
@@ -4074,11 +4052,9 @@ class _TimeLabel extends ConsumerWidget {
 
 /// Custom seek bar: buffered track + played track + knob, tap & drag to seek.
 class _PlayerSeekBar extends ConsumerStatefulWidget {
-  final Player player;
-
   /// Color of the played track and knob. Defaults to amber.
   final Color activeColor;
-  const _PlayerSeekBar({required this.player, this.activeColor = Colors.amber});
+  const _PlayerSeekBar({this.activeColor = Colors.amber});
 
   @override
   ConsumerState<_PlayerSeekBar> createState() => _PlayerSeekBarState();
@@ -4123,35 +4099,28 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
   @override
   Widget build(BuildContext context) {
     final notifier = ref.read(playerControllerProvider.notifier);
-    final hqActive =
-        ref.watch(playerControllerProvider.select((s) => s.hqTextureId)) !=
-            null;
     // initialData from the synchronous player state: media_kit's streams
     // are broadcast without replay, so a fresh subscription (e.g. after
     // the fullscreen rebuild, which recreates this whole subtree) would
     // otherwise show an empty track and 00:00 until mpv emits again.
     return StreamBuilder<Duration>(
       stream:
-          hqActive ? notifier.hqDurationStream : widget.player.stream.duration,
+          notifier.hqDurationStream,
       initialData:
-          hqActive ? notifier.hqDuration : widget.player.state.duration,
+          notifier.hqDuration,
       builder: (context, durSnap) {
         final duration = durSnap.data ?? Duration.zero;
         return StreamBuilder<Duration>(
           // HQ has no separate buffered stream; position is the buffer.
-          stream: hqActive
-              ? notifier.hqPositionStream
-              : widget.player.stream.buffer,
+          stream: notifier.hqPositionStream,
           initialData:
-              hqActive ? notifier.hqPosition : widget.player.state.buffer,
+              notifier.hqPosition,
           builder: (context, bufSnap) {
             final buffered = bufSnap.data ?? Duration.zero;
             return StreamBuilder<Duration>(
-              stream: hqActive
-                  ? notifier.hqPositionStream
-                  : widget.player.stream.position,
+              stream: notifier.hqPositionStream,
               initialData:
-                  hqActive ? notifier.hqPosition : widget.player.state.position,
+                  notifier.hqPosition,
               builder: (context, posSnap) {
                 final position = posSnap.data ?? Duration.zero;
                 final total = duration.inMilliseconds;
@@ -4306,11 +4275,10 @@ class _SeekBarPainter extends CustomPainter {
 
 /// "Stats for nerds" debug overlay (YouTube parity): monospace readout of
 /// video ID, quality, codec/fps/bitrate, position/duration/buffer.
-class _StatsOverlay extends StatelessWidget {
+class _StatsOverlay extends ConsumerWidget {
   final PlayerUiState uiState;
-  final Player player;
 
-  const _StatsOverlay({required this.uiState, required this.player});
+  const _StatsOverlay({required this.uiState});
 
   String _fmt(Duration d) {
     final h = d.inHours;
@@ -4320,7 +4288,8 @@ class _StatsOverlay extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final notifier = ref.read(playerControllerProvider.notifier);
     final q = uiState.currentQuality;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -4329,12 +4298,12 @@ class _StatsOverlay extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
       ),
       child: StreamBuilder<Duration>(
-        stream: player.stream.position,
-        initialData: player.state.position,
+        stream: notifier.hqPositionStream,
+        initialData: notifier.hqPosition,
         builder: (context, posSnap) {
           return StreamBuilder<Duration>(
-            stream: player.stream.buffer,
-            initialData: player.state.buffer,
+            stream: notifier.hqPositionStream,
+            initialData: notifier.hqPosition,
             builder: (context, bufSnap) {
               final pos = posSnap.data ?? Duration.zero;
               final buf = bufSnap.data ?? Duration.zero;
@@ -4369,9 +4338,7 @@ class _StatsOverlay extends StatelessWidget {
 
 /// Seek bar for the audio (music) mode: gold track with time labels.
 class _AudioSeekBar extends ConsumerWidget {
-  final Player player;
-
-  const _AudioSeekBar({required this.player});
+  const _AudioSeekBar();
 
   String _fmt(Duration d) {
     final h = d.inHours;
@@ -4383,26 +4350,22 @@ class _AudioSeekBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final notifier = ref.read(playerControllerProvider.notifier);
-    final hqActive =
-        ref.watch(playerControllerProvider.select((s) => s.hqTextureId)) !=
-            null;
     // initialData from the synchronous player state (broadcast streams
     // don't replay for fresh subscriptions).
     return StreamBuilder<Duration>(
-      stream: hqActive ? notifier.hqDurationStream : player.stream.duration,
-      initialData: hqActive ? notifier.hqDuration : player.state.duration,
+      stream: notifier.hqDurationStream,
+      initialData: notifier.hqDuration,
       builder: (context, durSnap) {
         final duration = durSnap.data ?? Duration.zero;
         return StreamBuilder<Duration>(
-          stream: hqActive ? notifier.hqPositionStream : player.stream.position,
-          initialData: hqActive ? notifier.hqPosition : player.state.position,
+          stream: notifier.hqPositionStream,
+          initialData: notifier.hqPosition,
           builder: (context, posSnap) {
             final position = posSnap.data ?? Duration.zero;
             return Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 _PlayerSeekBar(
-                    player: player,
                     activeColor: Theme.of(context).colorScheme.primary),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
