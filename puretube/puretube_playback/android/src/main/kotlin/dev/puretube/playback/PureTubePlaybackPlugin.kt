@@ -27,7 +27,15 @@ import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import android.content.Context
 import android.view.Surface
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import android.view.View
+import android.widget.FrameLayout
+import io.flutter.plugin.common.StandardMessageCodec
+import io.flutter.plugin.platform.PlatformView
+import io.flutter.plugin.platform.PlatformViewFactory
 import io.flutter.view.TextureRegistry
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
@@ -55,6 +63,33 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     // player, popup, PiP) can never pause, restart or black out the
     // video, unlike the old PlatformView whose surface lifecycle was
     // destroyed on every popup transition.
+    // The currently-designated native video view. Only the LATEST
+    // created view may own the player's video surface; an older
+    // view's surface dying during a popup/fullscreen transition
+    // must never unbind the surface the new view is showing (that
+    // was the #548 popup bug).
+    internal var activeView: PureTubePlayerView? = null
+    internal var latestViewSeq = 0
+
+    internal fun onViewSurfaceReady(view: PureTubePlayerView) {
+        if (view.seq < latestViewSeq) return
+        activeView = view
+        bindSurface()
+    }
+
+    internal fun onViewSurfaceGone(view: PureTubePlayerView) {
+        if (activeView === view) {
+            try { player?.setVideoSurface(null) } catch (_: Throwable) {}
+        }
+    }
+
+    internal fun onViewDisposed(view: PureTubePlayerView) {
+        if (activeView === view) {
+            activeView = null
+            try { player?.setVideoSurface(null) } catch (_: Throwable) {}
+        }
+    }
+
     private var textureEntry: TextureRegistry.SurfaceTextureEntry? = null
     private var renderSurface: Surface? = null
     private var textureRegistry: TextureRegistry? = null
@@ -129,6 +164,12 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         // attach is the one startup change vs the last known-good
         // build, and attach must stay crash-proof.
         textureRegistry = binding.textureRegistry
+        // Native video view (PlatformView): the ONLY renderer that
+        // ever produced a picture on the user's HyperOS phone —
+        // both texture paths (SurfaceProducer, SurfaceTextureEntry)
+        // played audio with a permanently black picture there.
+        binding.platformViewRegistry.registerViewFactory(
+            "puretube_playback/video_view", PureTubePlayerViewFactory(this))
         lifecycleApp = context.applicationContext as? Application
         lifecycleApp?.registerActivityLifecycleCallbacks(lifecycleCallbacks)
         ensurePlayer()
@@ -375,12 +416,10 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         if (now - frameWaitStartMs < 8_000L) return
         when (frameRecoveryStep) {
             0 -> {
-                // A dead surface is the usual suspect: rebinding it
-                // changes nothing (the picture stayed black while
-                // audio played), so throw it away and create a fresh
-                // one — Dart adopts the new texture id from the
-                // state event and rebuilds its Texture widget.
-                recreateSurface()
+                // A dead/unbound surface is the usual suspect:
+                // rebind to the active view (or recreate the engine
+                // texture when no view is mounted).
+                if (activeView != null) bindSurface() else recreateSurface()
                 frameWaitStartMs = now; frameRecoveryStep = 1
             }
             1 -> {
@@ -437,7 +476,10 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
 
     private fun bindSurface() {
         try {
-            val surf = renderSurface
+            // A mounted native view owns the picture when one is
+            // active; the engine texture is the fallback surface
+            // (background / no view mounted).
+            val surf = activeView?.surface ?: renderSurface
             if (surf != null) player?.setVideoSurface(surf)
         } catch (_: Throwable) {}
     }
@@ -540,5 +582,60 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
             val title = info.name.orEmpty(); val qualities = (video + muxed).map { it.height }.filter { it > 0 }.distinct().sortedDescending()
             return mapOf("url" to info.url.orEmpty(), "title" to title, "durationMs" to info.duration * 1000L, "qualities" to qualities, "audioTracks" to tracks, "hasVideo" to (video.isNotEmpty() || muxed.isNotEmpty()))
         }
+    }
+}
+
+
+/** Native video surface for the shared player. A plain SurfaceView
+ *  inside a FrameLayout; the plugin arbitrates which mounted view
+ *  owns the player's video output (latest created wins). */
+class PureTubePlayerView(
+    context: Context,
+    private val plugin: PureTubePlaybackPlugin,
+    val seq: Int
+) : PlatformView {
+    private val container = FrameLayout(context)
+    private val surfaceView = SurfaceView(context)
+
+    @Volatile
+    var surface: Surface? = null
+        private set
+
+    init {
+        container.setBackgroundColor(android.graphics.Color.BLACK)
+        container.addView(
+            surfaceView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT))
+        surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                surface = holder.surface
+                plugin.onViewSurfaceReady(this@PureTubePlayerView)
+            }
+
+            override fun surfaceChanged(
+                holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+            }
+
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                plugin.onViewSurfaceGone(this@PureTubePlayerView)
+                surface = null
+            }
+        })
+    }
+
+    override fun getView(): View = container
+
+    override fun dispose() {
+        plugin.onViewDisposed(this)
+    }
+}
+
+class PureTubePlayerViewFactory(
+    private val plugin: PureTubePlaybackPlugin
+) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+    override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
+        return PureTubePlayerView(context, plugin, ++plugin.latestViewSeq)
     }
 }

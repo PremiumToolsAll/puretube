@@ -380,14 +380,24 @@ class PureTubeVideoView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (textureId <= 0 ||
+    if (textureId == 0 ||
         kIsWeb ||
         defaultTargetPlatform != TargetPlatform.android) {
       return const ColoredBox(color: Color(0xFF000000));
     }
+    // Native platform view: on the user's phone BOTH texture
+    // renderers (SurfaceProducer, SurfaceTextureEntry) played
+    // audio with a permanently black picture, while the native
+    // view is the renderer that always worked there. [textureId]
+    // now only gates "the engine is engaged"; the native side
+    // arbitrates which mounted view shows the picture.
     final ar = aspectRatio > 0 ? aspectRatio : 16 / 9;
-    final texture = Texture(textureId: textureId);
-    if (fit == BoxFit.fill) return texture;
+    const view = AndroidView(
+      viewType: 'puretube_playback/video_view',
+      layoutDirection: TextDirection.ltr,
+      creationParamsCodec: StandardMessageCodec(),
+    );
+    if (fit == BoxFit.fill) return view;
     return SizedBox.expand(
       child: FittedBox(
         fit: fit,
@@ -395,7 +405,7 @@ class PureTubeVideoView extends StatelessWidget {
         child: SizedBox(
           width: ar * 1000,
           height: 1000,
-          child: texture,
+          child: view,
         ),
       ),
     );
