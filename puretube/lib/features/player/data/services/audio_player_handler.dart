@@ -84,6 +84,58 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
   /// The single player the video UI attaches its VideoController to.
   Player get player => _player;
 
+  // ---- external (mirror) mode ----
+  //
+  // When the native plugin engine is the real player (video mode),
+  // this handler must still own the MediaSession — PiP buttons, the
+  // lock screen, the notification and headset keys all talk to it.
+  // In mirror mode it describes the PLUGIN's playback (state pushed
+  // via [setExternalState] / [setExternalMediaItem]) and routes every
+  // command to the plugin via the callbacks below, so every surface
+  // stays connected to the one main player. mpv is never touched.
+  bool externalMode = false;
+  Future<void> Function()? onExternalPlay;
+  Future<void> Function()? onExternalPause;
+  Future<void> Function(Duration)? onExternalSeek;
+  Future<void> Function(double)? onExternalSetSpeed;
+  Future<void> Function()? onExternalStop;
+
+  bool _extPlaying = false;
+  bool _extBuffering = false;
+  bool _extCompleted = false;
+  Duration _extPosition = Duration.zero;
+  Duration _extBuffered = Duration.zero;
+  double _extSpeed = 1.0;
+
+  /// Pushes the real (plugin) player's state into the media session.
+  void setExternalState({
+    required bool playing,
+    required bool buffering,
+    required bool completed,
+    required Duration position,
+    required Duration buffered,
+    required double speed,
+  }) {
+    _extPlaying = playing;
+    _extBuffering = buffering;
+    _extCompleted = completed;
+    _extPosition = position;
+    _extBuffered = buffered;
+    _extSpeed = speed;
+    if (externalMode) _broadcastState();
+  }
+
+  /// Sets the media item shown on the lock screen / notification
+  /// while the external engine plays.
+  void setExternalMediaItem(MediaItem item) {
+    mediaItem.add(item);
+    if (externalMode) _broadcastState();
+  }
+
+  /// Re-broadcasts the current state (used when leaving mirror mode
+  /// so the session snaps back to mpv's real state).
+  void refreshState() => _broadcastState();
+
   StreamSubscription<bool>? _playingSub;
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<bool>? _bufferingSub;
@@ -157,21 +209,61 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   @override
-  Future<void> play() => _player.play();
+  Future<void> play() async {
+    if (externalMode) {
+      await onExternalPlay?.call();
+      return;
+    }
+    await _player.play();
+  }
 
   @override
-  Future<void> pause() => _player.pause();
+  Future<void> pause() async {
+    if (externalMode) {
+      await onExternalPause?.call();
+      return;
+    }
+    await _player.pause();
+  }
 
   @override
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> seek(Duration position) async {
+    if (externalMode) {
+      await onExternalSeek?.call(position);
+      return;
+    }
+    await _player.seek(position);
+  }
 
   @override
-  Future<void> rewind() => _handlerSeek(
-      _player.state.position - const Duration(seconds: 10));
+  Future<void> rewind() async {
+    if (externalMode) {
+      await _externalSeekBy(const Duration(seconds: -10));
+      return;
+    }
+    await _handlerSeek(
+        _player.state.position - const Duration(seconds: 10));
+  }
 
   @override
-  Future<void> fastForward() => _handlerSeek(
-      _player.state.position + const Duration(seconds: 10));
+  Future<void> fastForward() async {
+    if (externalMode) {
+      await _externalSeekBy(const Duration(seconds: 10));
+      return;
+    }
+    await _handlerSeek(
+        _player.state.position + const Duration(seconds: 10));
+  }
+
+  Future<void> _externalSeekBy(Duration offset) async {
+    var target = _extPosition + offset;
+    if (target < Duration.zero) target = Duration.zero;
+    final duration = mediaItem.value?.duration ?? Duration.zero;
+    if (duration > Duration.zero && target > duration) {
+      target = duration;
+    }
+    await onExternalSeek?.call(target);
+  }
 
   Future<void> _handlerSeek(Duration target) async {
     final duration = _player.state.duration;
@@ -184,10 +276,23 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   @override
-  Future<void> setSpeed(double speed) => _player.setRate(speed);
+  Future<void> setSpeed(double speed) async {
+    if (externalMode) {
+      await onExternalSetSpeed?.call(speed);
+      return;
+    }
+    await _player.setRate(speed);
+  }
 
   @override
   Future<void> stop() async {
+    if (externalMode) {
+      // The controller's stop flow turns mirror mode off first and
+      // then calls stop() again for the real teardown — delegating
+      // here keeps one single stop path.
+      await onExternalStop?.call();
+      return;
+    }
     await _player.stop();
     await super.stop();
   }
@@ -199,6 +304,42 @@ class PureTubeAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   void _broadcastState() {
+    if (externalMode) {
+      var updatePosition = _extPosition;
+      final itemDuration = mediaItem.value?.duration;
+      if (itemDuration != null &&
+          itemDuration > Duration.zero &&
+          updatePosition > itemDuration) {
+        updatePosition = itemDuration;
+      }
+      playbackState.add(
+        playbackState.value.copyWith(
+          controls: [
+            MediaControl.skipToPrevious,
+            if (_extPlaying) MediaControl.pause else MediaControl.play,
+            MediaControl.skipToNext,
+          ],
+          systemActions: const {
+            MediaAction.seek,
+            MediaAction.seekForward,
+            MediaAction.seekBackward,
+            MediaAction.setSpeed,
+          },
+          androidCompactActionIndices: const [1],
+          processingState: _extCompleted
+              ? AudioProcessingState.completed
+              : _extBuffering
+                  ? AudioProcessingState.buffering
+                  : AudioProcessingState.ready,
+          playing: _extPlaying,
+          updatePosition: updatePosition,
+          bufferedPosition: _extBuffered,
+          speed: _extSpeed,
+          queueIndex: 0,
+        ),
+      );
+      return;
+    }
     final playing = _player.state.playing;
     // audio_service misbehaves when updatePosition exceeds the media
     // item's duration (can suppress or break the notification), which

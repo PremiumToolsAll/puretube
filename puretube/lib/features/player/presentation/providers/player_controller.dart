@@ -12,6 +12,7 @@ import 'package:volume_controller/volume_controller.dart';
 
 import '../../../../core/database/hive_setup.dart';
 import '../../../../core/di/providers.dart';
+import '../../../../main.dart' as app_main;
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/services/pip_service.dart';
 import '../../../../core/services/sponsorblock_service.dart';
@@ -281,6 +282,10 @@ class PlayerController extends Notifier<PlayerUiState>
   /// the controller is created). Published into
   /// [PlayerUiState.hqTextureId] while the plugin engine is active.
   int _pluginTextureId = -1;
+  // One-shot resume position for the next direct start (set by
+  // retry() so a mid-video retry resumes HERE, not at the last
+  // persisted history position).
+  Duration? _pendingResumeOnce;
   bool _ptEndedHandled = false;
   String? _lastPluginError;
   // Video id for which the persistent-Auto hook already engaged the
@@ -311,11 +316,81 @@ class PlayerController extends Notifier<PlayerUiState>
       c = PureTubeController();
       c.addListener(_onPluginChanged);
       _pt = c;
+      // One connected notification: when the audio_service session
+      // is healthy it carries the media notification (mirror mode),
+      // so the plugin's own service notification stays off. Only
+      // when AudioService failed does the plugin show its own.
+      unawaited(c
+          .setServiceNotificationEnabled(!app_main.audioServiceReady)
+          .catchError((_) {}));
       c.textureId.then((id) {
         if (id > 0) _pluginTextureId = id;
       }).catchError((_) => -1);
     }
     return c;
+  }
+
+  /// Connects the audio handler's media session to the plugin
+  /// engine: PiP buttons, the lock screen, the notification and
+  /// headset keys now describe and control THIS player — one main
+  /// player, everything connected.
+  void _engageMirror(VideoDetails video) {
+    final h = _handler;
+    h.onExternalPlay = () async {
+      _hqPlaying = true;
+      _hqPlayingCtrl.add(true);
+      try {
+        await _pt?.play();
+      } catch (_) {}
+    };
+    h.onExternalPause = () async {
+      _hqPlaying = false;
+      _hqPlayingCtrl.add(false);
+      try {
+        await _pt?.pause();
+      } catch (_) {}
+    };
+    h.onExternalSeek = (pos) => _seekInternal(pos);
+    h.onExternalSetSpeed = (s) => setSpeed(s);
+    h.onExternalStop = () => stop();
+    h.externalMode = true;
+    final artUri = Uri.tryParse(video.thumbnailUrl);
+    h.setExternalMediaItem(MediaItem(
+      id: video.id,
+      title: video.title,
+      artist: video.author,
+      artUri: (artUri != null &&
+              (artUri.scheme == 'http' || artUri.scheme == 'https'))
+          ? artUri
+          : null,
+      duration: video.duration,
+    ));
+    _pushMirrorState();
+  }
+
+  void _pushMirrorState() {
+    if (!_handler.externalMode) return;
+    final pt = _pt;
+    _handler.setExternalState(
+      playing: _hqPlaying,
+      buffering: pt?.buffering ?? false,
+      completed: pt?.ended ?? false,
+      position: _hqPosition,
+      buffered: pt?.bufferedPosition ?? Duration.zero,
+      speed: state.speed,
+    );
+  }
+
+  void _disengageMirror() {
+    final h = _handler;
+    if (!h.externalMode) return;
+    h.externalMode = false;
+    h.onExternalPlay = null;
+    h.onExternalPause = null;
+    h.onExternalSeek = null;
+    h.onExternalSetSpeed = null;
+    h.onExternalStop = null;
+    h.refreshState();
   }
 
   /// Mirrors plugin state into the HQ display fields and forwards the
@@ -354,6 +429,7 @@ class PlayerController extends Notifier<PlayerUiState>
     } else {
       _ptEndedHandled = false;
     }
+    _pushMirrorState();
   }
 
   Timer? _hqPollTimer;
@@ -630,9 +706,17 @@ class PlayerController extends Notifier<PlayerUiState>
     _precacheToken++;
     // Navigating away also cancels any in-flight lyrics auto-fetch.
     _lyricsToken++;
-    // A new video stops any active HQ (ExoPlayer) session first.
-    await _stopHq();
-    await _handler.player.stop();
+    // Seamless transitions: when a video is already playing, the
+    // current engine KEEPS PLAYING while the next video is fetched
+    // and resolved; the plugin's load supersedes it at the switch
+    // point, so Next never shows a stopped/dead player. Only a
+    // fresh start (nothing playing) stops everything up front.
+    final hadPlayback =
+        state.status == PlayerStatus.ready && state.video != null;
+    if (!hadPlayback) {
+      await _stopHq();
+      await _handler.player.stop();
+    }
 
     // Record in playback history (unless this load IS a history
     // back/forward navigation — those just move the index).
@@ -641,9 +725,12 @@ class PlayerController extends Notifier<PlayerUiState>
     state = PlayerUiState(
       status: PlayerStatus.loading,
       videoId: videoId,
-      // Audio mode: keep the previous track's artwork/title visible while
-      // the new track loads (YouTube Music style — no full-screen spinner).
-      video: keepAudioOnly ? state.video : null,
+      // Keep the current video (and its picture) on screen while the
+      // next one loads — audio mode (YouTube Music style) and video
+      // transitions alike; no blank spinner over a playing video.
+      video: (keepAudioOnly || hadPlayback) ? state.video : null,
+      hqTextureId: hadPlayback ? state.hqTextureId : null,
+      hqAspectRatio: state.hqAspectRatio,
       speed: previousSpeed,
       skipSponsors: previousSkip,
       // Restore the persisted audio-only mode on fresh app starts.
@@ -669,117 +756,107 @@ class PlayerController extends Notifier<PlayerUiState>
       final targetHeight =
           _targetVideoHeight(onWifi: onWifi, fullscreen: false);
       final worstAudio = _wantWorstAudio(onWifi);
-      // DASH (video-only + separate audio) is how high quality plays:
-      // 'auto' aims for 720p DASH by default, explicit 720p+ choices
-      // use DASH too. The pre-cache only holds muxed streams, so it
-      // can't serve DASH targets.
-      final wantDash = !keepAudioOnly &&
-          (targetHeight == null || targetHeight >= 720);
 
       // Use pre-fetched Up Next data when available (instant Next),
       // otherwise fetch normally. The hit is removed; other queued
-      // videos stay precached for later.
+      // videos stay precached for later. The fetched streams are the
+      // emergency fallback + bookkeeping only — video playback
+      // itself starts directly on the plugin engine (SparkTube
+      // system), never from these links.
       final VideoDetails video;
       final PlaybackStreams streams;
       final List<SponsorSegment> segments;
-      String? dashAudioUrl;
       final PrecachedData? hit = _precache.remove(videoId);
-      if (hit != null && !wantDash) {
+      if (hit != null) {
         video = hit.details;
         streams = hit.streams;
         segments = hit.segments;
       } else {
-        // Fast path: fetch details, streams, and sponsor segments in
-        // parallel instead of sequentially — cuts load time significantly.
-        if (wantDash) {
-          // Fetch the DASH option list and the audio track in parallel,
-          // then build a DASH-backed PlaybackStreams.
-          final results = await Future.wait([
-            _extractor.getVideoDetails(videoId),
-            // Quality list failure must not kill the load — empty
-            // options simply fall back to the muxed stream below.
-            _extractor
-                .getQualityOptions(videoId)
-                .catchError((_) => const <MuxedQuality>[]),
-            _extractor.getPlaybackStreams(videoId,
-                preferBestAudio: !worstAudio),
-            _sponsorBlock.getSegments(videoId),
-          ]);
-          video = results[0] as VideoDetails;
-          final options = results[1] as List<MuxedQuality>;
-          final base = results[2] as PlaybackStreams;
-          segments = results[3] as List<SponsorSegment>;
-          final dash =
-              _pickDashOption(options, targetHeight ?? 720);
-          if (dash != null) {
-            streams = PlaybackStreams(
-              videoId: videoId,
-              muxedUrl: dash.url,
-              muxedHeight: dash.height,
-              audioOnlyUrl: base.audioOnlyUrl,
-              audioBitrate: base.audioBitrate,
-              fetchedAt: DateTime.now(),
-            );
-            dashAudioUrl = dash.audioUrl;
-          } else {
-            // No DASH stream at that height — fall back to muxed.
-            streams = base;
-          }
-        } else {
-          final results = await Future.wait([
-            _extractor.getVideoDetails(videoId),
-            _extractor.getPlaybackStreams(
-              videoId,
-              maxMuxedHeight: targetHeight ?? 720,
-              preferBestAudio: !worstAudio,
-            ),
-            _sponsorBlock.getSegments(videoId),
-          ]);
-          video = results[0] as VideoDetails;
-          streams = results[1] as PlaybackStreams;
-          segments = results[2] as List<SponsorSegment>;
-        }
+        final results = await Future.wait([
+          _extractor.getVideoDetails(videoId),
+          _extractor.getPlaybackStreams(
+            videoId,
+            maxMuxedHeight: targetHeight ?? 720,
+            preferBestAudio: !worstAudio,
+          ),
+          _sponsorBlock.getSegments(videoId),
+        ]);
+        video = results[0] as VideoDetails;
+        streams = results[1] as PlaybackStreams;
+        segments = results[2] as List<SponsorSegment>;
       }
 
-      // audio_service fetches artUri natively for the notification/lockscreen
-      // artwork. Only hand it a real http(s) URL — an empty or malformed
-      // Uri makes the notification's artwork loader fail and can leave
-      // the notification art-less or stale.
-      final artUri = Uri.tryParse(video.thumbnailUrl);
-      await _handler.loadMedia(
-        mediaItem: MediaItem(
-          id: video.id,
-          title: video.title,
-          artist: video.author,
-          artUri: (artUri != null &&
-                  (artUri.scheme == 'http' || artUri.scheme == 'https'))
-              ? artUri
-              : null,
-          duration: video.duration,
-        ),
-        streamUrl: streams.muxedUrl,
-        audioUrl: dashAudioUrl,
-        speed: previousSpeed,
-      );
+      if (keepAudioOnly) {
+        // Audio mode: the handler (mpv) IS the player.
+        // audio_service fetches artUri natively for the notification/
+        // lockscreen artwork. Only hand it a real http(s) URL — an
+        // empty or malformed Uri makes the artwork loader fail.
+        final artUri = Uri.tryParse(video.thumbnailUrl);
+        await _handler.loadMedia(
+          mediaItem: MediaItem(
+            id: video.id,
+            title: video.title,
+            artist: video.author,
+            artUri: (artUri != null &&
+                    (artUri.scheme == 'http' || artUri.scheme == 'https'))
+                ? artUri
+                : null,
+            duration: video.duration,
+          ),
+          streamUrl: streams.muxedUrl,
+          speed: previousSpeed,
+        );
 
-      state = state.copyWith(
-        status: PlayerStatus.ready,
-        video: video,
-        streams: streams,
-        sponsorSegments: segments,
-        pipSupported: await _pip.isPipSupported,
-      );
-      // Record this video for "Continue watching" on the home screen.
-      unawaited(_saveLastVideo());
-      // Resume from saved position if the user watched this before.
-      // Skip if position is 0 or within 10s of the end (likely finished).
-      final savedSecs =
-          ref.read(historyRepositoryProvider).getPosition(videoId);
-      final totalSecs = video.duration?.inSeconds ?? 0;
-      if (savedSecs > 5 &&
-          (totalSecs <= 0 || savedSecs < totalSecs - 10)) {
-        await _handler.player
-            .seek(Duration(seconds: savedSecs));
+        state = state.copyWith(
+          status: PlayerStatus.ready,
+          video: video,
+          streams: streams,
+          sponsorSegments: segments,
+          pipSupported: await _pip.isPipSupported,
+        );
+        // Record this video for "Continue watching" on the home screen.
+        unawaited(_saveLastVideo());
+        // Resume from saved position if the user watched this before.
+        // Skip if position is 0 or within 10s of the end (likely finished).
+        final savedSecs =
+            ref.read(historyRepositoryProvider).getPosition(videoId);
+        final totalSecs = video.duration?.inSeconds ?? 0;
+        if (savedSecs > 5 &&
+            (totalSecs <= 0 || savedSecs < totalSecs - 10)) {
+          await _handler.player
+              .seek(Duration(seconds: savedSecs));
+        }
+      } else {
+        // Video mode: DIRECT plugin start (SparkTube system) — the
+        // video starts from the plugin's own extracted links right
+        // away; mpv is never opened for video. On a transition the
+        // previous video keeps playing until the plugin installs
+        // the new one (the load supersedes it natively).
+        state = state.copyWith(
+          status: PlayerStatus.ready,
+          video: video,
+          streams: streams,
+          sponsorSegments: segments,
+          pipSupported: await _pip.isPipSupported,
+        );
+        // Record this video for "Continue watching" on the home screen.
+        unawaited(_saveLastVideo());
+        final savedSecs =
+            ref.read(historyRepositoryProvider).getPosition(videoId);
+        final totalSecs = video.duration?.inSeconds ?? 0;
+        final pending = _pendingResumeOnce;
+        _pendingResumeOnce = null;
+        final resumeAt = pending ??
+            ((savedSecs > 5 &&
+                    (totalSecs <= 0 || savedSecs < totalSecs - 10))
+                ? Duration(seconds: savedSecs)
+                : Duration.zero);
+        // loadQualities must not re-engage: the direct start below
+        // owns this video's engine engage.
+        _pluginEngagedFor = videoId;
+        if (state.autoQuality) _autoHqEngagedFor = videoId;
+        unawaited(_directStart(videoId,
+            streams: streams, resumeAt: resumeAt));
       }
       // Load captions in the background; UI updates when ready.
       unawaited(loadSubtitles());
@@ -811,11 +888,12 @@ class PlayerController extends Notifier<PlayerUiState>
   Future<void> retry() async {
     final id = state.videoId;
     if (id == null) return;
-    final resumeAt = _handler.player.state.position;
+    final resumeAt = displayPosition;
+    _pendingResumeOnce = resumeAt;
     await loadVideo(id);
     if (resumeAt > const Duration(seconds: 3) &&
         state.status == PlayerStatus.ready) {
-      await _handler.seek(resumeAt);
+      await seekTo(resumeAt);
     }
   }
 
@@ -860,9 +938,9 @@ class PlayerController extends Notifier<PlayerUiState>
   /// previous video was loaded, false when it just restarted (or
   /// there is no previous video).
   Future<bool> playPrevious() async {
-    final pos = _handler.player.state.position;
+    final pos = displayPosition;
     if (pos > const Duration(seconds: 3)) {
-      await _handler.seek(Duration.zero);
+      await seekTo(Duration.zero);
       return false;
     }
     if (_historyIndex > 0 && state.status == PlayerStatus.ready) {
@@ -876,7 +954,7 @@ class PlayerController extends Notifier<PlayerUiState>
       return true;
     }
     // No previous video: just restart.
-    await _handler.seek(Duration.zero);
+    await seekTo(Duration.zero);
     return false;
   }
 
@@ -1872,15 +1950,74 @@ class PlayerController extends Notifier<PlayerUiState>
   /// [loud] the failure is also surfaced as an error message
   /// (explicit user picks), without it the swap fails silently
   /// (automatic engine engages / callers with their own fallback).
+  /// Direct plugin start for video mode (SparkTube system): the
+  /// video starts from the plugin's own extracted links right away —
+  /// mpv is never opened for video. If the plugin cannot start, the
+  /// muxed stream on the handler is the emergency fallback so the
+  /// video still plays.
+  Future<void> _directStart(String videoId,
+      {required PlaybackStreams streams,
+      required Duration resumeAt}) async {
+    final token = ++_qualitySwitchToken;
+    final onWifi = await _isOnWifi();
+    if (state.videoId != videoId) return;
+    final targetH =
+        _targetVideoHeight(onWifi: onWifi, fullscreen: false);
+    final cap =
+        (state.autoQuality || targetH == null) ? null : targetH;
+    final target = MuxedQuality(
+      label: cap == null ? 'Auto' : '${cap}p',
+      height: cap ?? targetH ?? 720,
+      url: streams.muxedUrl,
+    );
+    final ok = await _playHq(target, token,
+        cap: cap, loud: false, startAt: resumeAt);
+    if (ok) return;
+    if (token != _qualitySwitchToken ||
+        state.videoId != videoId ||
+        state.audioOnly) {
+      return;
+    }
+    // Emergency fallback: play the muxed stream on the handler.
+    try {
+      final v = state.video;
+      if (v == null) return;
+      final artUri = Uri.tryParse(v.thumbnailUrl);
+      await _handler.loadMedia(
+        mediaItem: MediaItem(
+          id: v.id,
+          title: v.title,
+          artist: v.author,
+          artUri: (artUri != null &&
+                  (artUri.scheme == 'http' || artUri.scheme == 'https'))
+              ? artUri
+              : null,
+          duration: v.duration,
+        ),
+        streamUrl: streams.muxedUrl,
+        speed: state.speed,
+      );
+      if (resumeAt > Duration.zero) {
+        await _handler.player.seek(resumeAt);
+      }
+    } catch (_) {}
+  }
+
   Future<bool> _playHq(MuxedQuality target, int token,
-      {required int? cap, bool loud = true}) async {
+      {required int? cap, bool loud = true, Duration? startAt}) async {
     final videoId = state.videoId;
     if (videoId == null) return false;
     // Pause mpv so it doesn't double-play under the HQ engine.
     try {
       await _handler.pause();
     } catch (_) {}
-    final resumeAt = _handler.player.state.position;
+    // Resume where the CURRENT engine is: the plugin's own position
+    // when it was already running (direct-start mode keeps mpv
+    // empty), otherwise mpv's position (legacy engage path).
+    final resumeAt = startAt ??
+        (_hqPosition > Duration.zero
+            ? _hqPosition
+            : _handler.player.state.position);
     final url = 'https://www.youtube.com/watch?v=$videoId';
     final pt = _plugin;
 
@@ -1941,6 +2078,12 @@ class PlayerController extends Notifier<PlayerUiState>
       _hqPlaying = true;
       _hqPlayingCtrl.add(true);
       _startHqPoll();
+      // The media session (PiP, lock screen, notification) now
+      // mirrors this engine — everything controls the main player.
+      final playingVideo = state.video;
+      if (playingVideo != null) {
+        _engageMirror(playingVideo);
+      }
       final s = state.streams;
       state = state.copyWith(
         currentQuality: target,
@@ -1999,6 +2142,7 @@ class PlayerController extends Notifier<PlayerUiState>
   /// The plugin controller itself is kept alive for reuse (it allows
   /// only one live controller per engine); stop() halts its player.
   Future<void> _stopHq() async {
+    _disengageMirror();
     _hqPollTimer?.cancel();
     _hqPollTimer = null;
     _hqPosition = Duration.zero;
@@ -2038,6 +2182,7 @@ class PlayerController extends Notifier<PlayerUiState>
         _hqPlayingCtrl.add(playing);
       }
       _maybeSkipSponsor(pos);
+      _pushMirrorState();
     });
   }
 
@@ -2159,8 +2304,8 @@ class PlayerController extends Notifier<PlayerUiState>
   /// Starts a sleep timer that fires when the current video ends.
   /// Returns false when the remaining time can't be determined.
   bool startSleepTimerUntilEndOfVideo() {
-    final total = _handler.player.state.duration;
-    final pos = _handler.player.state.position;
+    final total = displayDuration;
+    final pos = displayPosition;
     if (total <= Duration.zero || pos >= total) return false;
     startSleepTimer(total - pos, endOfVideo: true);
     return true;
@@ -2310,7 +2455,7 @@ class PlayerController extends Notifier<PlayerUiState>
       return;
     }
     try {
-      final posSecs = _handler.player.state.position.inSeconds;
+      final posSecs = displayPosition.inSeconds;
       await Hive.box(HiveBoxes.playerPrefs).putAll({
         kLastVideoId: id,
         kLastVideoTitle: v.title,

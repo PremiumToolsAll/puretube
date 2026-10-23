@@ -206,6 +206,15 @@ class PureTubeController extends ChangeNotifier {
     await _invoke<void>('setResizeMode', {'mode': mode});
   }
 
+  /// Whether the plugin's own foreground-service notification may
+  /// show. The app disables it when its audio_service media session
+  /// already provides the one connected notification (mirror mode),
+  /// so the same playback never produces two notifications.
+  Future<void> setServiceNotificationEnabled(bool enabled) async {
+    await _invoke<void>(
+        'setNotificationEnabled', {'enabled': enabled});
+  }
+
   Future<void> setAudioTrack(String id) async {
     await _invoke<void>('setAudioTrack', {'id': id});
   }

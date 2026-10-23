@@ -76,6 +76,9 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     private val backgroundPlay = true
     private var serviceStarted = false
     private var lastServiceKey: String? = null
+    // The app turns this OFF when its audio_service media session
+    // already shows the one connected notification for this playback.
+    private var notificationEnabled = true
     private var selectedAudioId: String? = null
     private var audioOnly = false
     private var shouldAutoplay = true
@@ -157,6 +160,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
             }
             "setQuality" -> { requestedHeight = (a["height"] as? Number)?.toInt(); safeRebuild(result) }
             "setResizeMode" -> { resizeMode = (a["mode"] as? Number)?.toInt() ?: androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT; result.success(null) }
+            "setNotificationEnabled" -> { notificationEnabled = a["enabled"] as? Boolean ?: true; refreshService(); result.success(null) }
             "textureId" -> result.success(ensureProducer()?.id())
             "setAudioTrack" -> { selectedAudioId = a["id"] as? String; safeRebuild(result) }
             "setAudioOnly" -> { audioOnly = a["enabled"] as? Boolean ?: false; safeRebuild(result) }
@@ -337,6 +341,15 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
      *  while a session is alive, promoted (notification visible)
      *  whenever the app is in the background, demoted in foreground. */
     private fun refreshService() {
+        if (!notificationEnabled) {
+            // The app's media session carries the notification; this
+            // service stays out of the way entirely.
+            if (serviceStarted) {
+                sendService(PlaybackForegroundService.ACTION_STOP, null, null, false)
+                serviceStarted = false
+            }
+            return
+        }
         val p = player
         val active = backgroundPlay && p != null && !stopped && !disposed && catalog != null
         if (!active) {
