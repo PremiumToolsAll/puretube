@@ -831,7 +831,7 @@ class PlayerController extends Notifier<PlayerUiState>
       // itself starts directly on the plugin engine (SparkTube
       // system), never from these links.
       final VideoDetails video;
-      final PlaybackStreams streams;
+      PlaybackStreams? streams;
       final List<SponsorSegment> segments;
       final PrecachedData? hit = _precache.remove(videoId);
       if (hit != null) {
@@ -839,18 +839,28 @@ class PlayerController extends Notifier<PlayerUiState>
         streams = hit.streams;
         segments = hit.segments;
       } else {
+        // Playback starts as soon as the DETAILS land: the Dart
+        // stream chain is fallback-only data, so it no longer blocks
+        // the plugin's own resolve on the critical path (SparkTube
+        // starts from a single resolve — the same shape). The streams
+        // patch into state when they arrive; the direct fallback
+        // refetches them itself if it ever fires before that.
+        final streamsFuture = _extractor.getPlaybackStreams(
+          videoId,
+          maxMuxedHeight: targetHeight ?? 720,
+          preferBestAudio: !worstAudio,
+        );
+        unawaited(streamsFuture.then((s) {
+          if (state.videoId == videoId && state.streams == null) {
+            state = state.copyWith(streams: s);
+          }
+        }, onError: (_) {}));
         final results = await Future.wait([
           _extractor.getVideoDetails(videoId),
-          _extractor.getPlaybackStreams(
-            videoId,
-            maxMuxedHeight: targetHeight ?? 720,
-            preferBestAudio: !worstAudio,
-          ),
           _sponsorBlock.getSegments(videoId),
         ]);
         video = results[0] as VideoDetails;
-        streams = results[1] as PlaybackStreams;
-        segments = results[2] as List<SponsorSegment>;
+        segments = results[1] as List<SponsorSegment>;
       }
 
       if (keepAudioOnly) {
@@ -911,7 +921,7 @@ class PlayerController extends Notifier<PlayerUiState>
       unawaited(loadSubtitles());
       // Same for quality options; current quality starts at the
       // height of the initially picked stream.
-      unawaited(loadQualities(initialHeight: streams.muxedHeight));
+      unawaited(loadQualities(initialHeight: streams?.muxedHeight));
       // Up Next suggestions load in the background; the section below
       // the player and the Next button both read them from state.
       unawaited(_loadRelated(videoId,
@@ -1151,8 +1161,9 @@ class PlayerController extends Notifier<PlayerUiState>
     }
     final goingAudioOnly = !state.audioOnly;
     state = state.copyWith(audioOnly: goingAudioOnly);
-    // Tell the engine too: audio-only disables the video track
-    // (rebuild preserves position); back to video re-enables it.
+    // Tell the engine too: audio-only disables the video track on
+    // the LIVE source (no rebuild, so the sound never breaks);
+    // back to video re-enables it the same way.
     // The plugin is the only engine now, so this always applies —
     // the mpv-era toggle only flipped the UI.
     try {
@@ -1955,7 +1966,7 @@ class PlayerController extends Notifier<PlayerUiState>
   }
 
   Future<void> _directStart(String videoId,
-      {required PlaybackStreams streams, required Duration resumeAt}) async {
+      {PlaybackStreams? streams, required Duration resumeAt}) async {
     final token = ++_qualitySwitchToken;
     final onWifi = await _isOnWifi();
     if (state.videoId != videoId) return;
@@ -1974,7 +1985,9 @@ class PlayerController extends Notifier<PlayerUiState>
     final target = MuxedQuality(
       label: cap == null ? 'Auto' : '${cap}p',
       height: cap ?? targetH ?? 720,
-      url: streams.muxedUrl,
+      // Placeholder only: the plugin resolves and plays its own
+      // streams; this URL is never what reaches the player.
+      url: streams?.muxedUrl ?? '',
     );
     final ok =
         await _playHq(target, token, cap: cap, loud: false, startAt: resumeAt);

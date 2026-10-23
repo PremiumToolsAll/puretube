@@ -27,7 +27,6 @@ import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import android.content.Context
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -119,6 +118,8 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     private var notificationEnabled = true
     private var selectedAudioId: String? = null
     private var audioOnly = false
+    /** True when the installed source actually contains a video track (in-place audio-only switch is possible). */
+    private var installedHasVideo = false
     private var shouldAutoplay = true
     private var stopped = false
     private var disposed = false
@@ -242,7 +243,22 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
             "setNotificationEnabled" -> { notificationEnabled = a["enabled"] as? Boolean ?: true; refreshService(); result.success(null) }
             "textureId" -> result.success(ensureTexture()?.id())
             "setAudioTrack" -> { selectedAudioId = a["id"] as? String; safeRebuild(result) }
-            "setAudioOnly" -> { audioOnly = a["enabled"] as? Boolean ?: false; safeRebuild(result) }
+            "setAudioOnly" -> {
+                val enabled = a["enabled"] as? Boolean ?: false
+                audioOnly = enabled
+                val p = player
+                if (p != null && installedHasVideo) {
+                    // SparkTube switchToAudioOnly semantics: presentation-only.
+                    // Flip the video track on the LIVE source — no stop,
+                    // prepare or seek — so the sound never breaks.
+                    p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, enabled).build()
+                    result.success(null)
+                } else {
+                    // Installed audio-only: no video track exists in the
+                    // player, so showing video again needs a rebuild.
+                    safeRebuild(result)
+                }
+            }
             "play" -> { stopped = false; shouldAutoplay = true; player?.play(); result.success(null) }
             "pause" -> { shouldAutoplay = false; player?.pause(); result.success(null) }
             "seek" -> { player?.seekTo((a["positionMs"] as? Number)?.toLong() ?: 0L); result.success(null) }
@@ -293,10 +309,11 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         fallbackVideo = chosenVideo; fallbackAudio = selected
         val muxed = c.muxed.filter { height == null || it.height <= height }.ifEmpty { c.muxed }.maxByOrNull { it.height }
         val factory = DefaultHttpDataSource.Factory().setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/132.0.0.0 Safari/537.36")
+        val pFactory = ParallelRangeDataSource.Factory(factory)
         val source: MediaSource = if (onlyAudio) {
             when {
-                selected != null -> ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(selected.content))
-                muxed != null -> { p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, true).build(); ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(muxed.content)) }
+                selected != null -> ProgressiveMediaSource.Factory(pFactory).createMediaSource(MediaItem.fromUri(selected.content))
+                muxed != null -> { p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, true).build(); ProgressiveMediaSource.Factory(pFactory).createMediaSource(MediaItem.fromUri(muxed.content)) }
                 else -> throw IOException("No playable audio stream")
             }
         } else {
@@ -312,15 +329,15 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
                         // DASH kept starting low and staying low on a
                         // conservatively-estimated line: "1080 selected
                         // but the picture is blurry".)
-                        MergingMediaSource(ProgressiveMediaSource.Factory(factory).createMediaSource(videoItem), ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(selected.content)))
+                        MergingMediaSource(ProgressiveMediaSource.Factory(pFactory).createMediaSource(videoItem), ProgressiveMediaSource.Factory(pFactory).createMediaSource(MediaItem.fromUri(selected.content)))
                     } else {
                         // Auto: adaptive DASH across every height.
                         DashSources.create(factory, videoItem, eligible, selected, c.info.duration)
-                            ?: MergingMediaSource(ProgressiveMediaSource.Factory(factory).createMediaSource(videoItem), ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(selected.content)))
+                            ?: MergingMediaSource(ProgressiveMediaSource.Factory(pFactory).createMediaSource(videoItem), ProgressiveMediaSource.Factory(pFactory).createMediaSource(MediaItem.fromUri(selected.content)))
                     }
                 }
-                muxed != null -> ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(muxed.content))
-                selected != null -> ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(selected.content))
+                muxed != null -> ProgressiveMediaSource.Factory(pFactory).createMediaSource(MediaItem.fromUri(muxed.content))
+                selected != null -> ProgressiveMediaSource.Factory(pFactory).createMediaSource(MediaItem.fromUri(selected.content))
                 else -> throw IOException("No playable streams")
             }
         }
@@ -334,6 +351,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         // resolveAndLoad.
         firstFrameSeen = onlyAudio
         frameWaitStartMs = System.currentTimeMillis()
+        installedHasVideo = !onlyAudio
         bindSurface()
         p.setMediaSource(source); p.prepare(); if (pos > 0) p.seekTo(pos); if (autoplay && !stopped) p.play() else p.pause()
     }
@@ -354,6 +372,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         }
         firstFrameSeen = onlyAudio
         frameWaitStartMs = System.currentTimeMillis()
+        installedHasVideo = !onlyAudio
         bindSurface()
         p.setMediaSource(source); p.prepare(); if (pos > 0) p.seekTo(pos); if (autoplay && !stopped) p.play() else p.pause()
         emitState()
@@ -366,17 +385,19 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     private fun installDirect(url: String, audioUrl: String?, onlyAudio: Boolean, pos: Long, autoplay: Boolean) {
         val p = ensurePlayer()
         val factory = DefaultHttpDataSource.Factory().setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/132.0.0.0 Safari/537.36")
+        val pFactory = ParallelRangeDataSource.Factory(factory)
         val source: MediaSource = when {
-            onlyAudio -> ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(url))
+            onlyAudio -> ProgressiveMediaSource.Factory(pFactory).createMediaSource(MediaItem.fromUri(url))
             audioUrl != null -> MergingMediaSource(
-                ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(url)),
-                ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(audioUrl))
+                ProgressiveMediaSource.Factory(pFactory).createMediaSource(MediaItem.fromUri(url)),
+                ProgressiveMediaSource.Factory(pFactory).createMediaSource(MediaItem.fromUri(audioUrl))
             )
-            else -> ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(url))
+            else -> ProgressiveMediaSource.Factory(pFactory).createMediaSource(MediaItem.fromUri(url))
         }
         p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, onlyAudio).build()
         firstFrameSeen = onlyAudio
         frameWaitStartMs = System.currentTimeMillis()
+        installedHasVideo = !onlyAudio
         bindSurface()
         p.setMediaSource(source); p.prepare(); if (pos > 0) p.seekTo(pos); if (autoplay && !stopped) p.play() else p.pause()
         emitState()
@@ -387,16 +408,17 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         val p = player ?: return false
         val pos = p.currentPosition
         val factory = DefaultHttpDataSource.Factory().setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/132.0.0.0 Safari/537.36")
+        val pFactory = ParallelRangeDataSource.Factory(factory)
         val source: MediaSource = if (fallbackStage == 0 && fallbackVideo != null && fallbackAudio != null && !audioOnly) {
             MergingMediaSource(
-                ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(fallbackVideo!!.content)),
-                ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(fallbackAudio!!.content))
+                ProgressiveMediaSource.Factory(pFactory).createMediaSource(MediaItem.fromUri(fallbackVideo!!.content)),
+                ProgressiveMediaSource.Factory(pFactory).createMediaSource(MediaItem.fromUri(fallbackAudio!!.content))
             )
         } else {
             if (fallbackStage >= 2) return false
             val muxed = c.muxed.filter { requestedHeight == null || it.height <= requestedHeight!! }.maxByOrNull { it.height } ?: return false
             p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, audioOnly).build()
-            ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(muxed.content))
+            ProgressiveMediaSource.Factory(pFactory).createMediaSource(MediaItem.fromUri(muxed.content))
         }
         p.setMediaSource(source); p.prepare(); if (pos > 0) p.seekTo(pos); if (shouldAutoplay && !stopped) p.play()
         return true
