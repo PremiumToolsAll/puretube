@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
 import 'core/database/hive_setup.dart';
@@ -23,12 +25,33 @@ bool audioServiceReady = false;
 /// Settings → Diagnostics so the real cause is visible on-device).
 String? audioServiceError;
 
+/// Persists the most recent fatal error so the home screen can show
+/// it on the NEXT launch — when the app dies instantly, this text is
+/// the evidence (the user can screenshot it instead of guessing).
+const lastFatalKey = 'last_fatal_error';
+
+Future<void> saveLastFatal(Object error, StackTrace stack) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final text = '${DateTime.now().toIso8601String()}\n$error\n$stack';
+    await prefs.setString(
+        lastFatalKey,
+        text.length > 4000 ? text.substring(0, 4000) : text);
+  } catch (_) {}
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Catch-all: never leave the user staring at a white screen.
+  // Catch-all: never leave the user staring at a white screen, and
+  // never die silently — record fatal errors for the next launch.
   FlutterError.onError = (details) {
+    saveLastFatal(details.exception, details.stack ?? StackTrace.current);
     FlutterError.presentError(details);
+  };
+  ui.PlatformDispatcher.instance.onError = (error, stack) {
+    saveLastFatal(error, stack);
+    return true;
   };
 
   // media_kit native libs can fail on some devices/ABIs — don't let it

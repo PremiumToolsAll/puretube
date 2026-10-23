@@ -54,6 +54,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
     // video, unlike the old PlatformView whose surface lifecycle was
     // destroyed on every popup transition.
     private var surfaceProducer: TextureRegistry.SurfaceProducer? = null
+    private var textureRegistry: TextureRegistry? = null
     private var activity: Activity? = null
     private var resumed = false
     private var lifecycleApp: Application? = null
@@ -117,17 +118,11 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         events = EventChannel(binding.binaryMessenger, "puretube_playback/events")
         methods.setMethodCallHandler(this); events.setStreamHandler(this)
         PlaybackActionReceiver.handler = { action -> main.post { handlePlaybackAction(action) } }
-        val producer = binding.textureRegistry.createSurfaceProducer()
-        surfaceProducer = producer
-        producer.setCallback(object : TextureRegistry.SurfaceProducer.Callback {
-            override fun onSurfaceAvailable() {
-                val s = surfaceProducer?.surface ?: return
-                player?.setVideoSurface(s)
-            }
-            override fun onSurfaceCleanup() {
-                player?.setVideoSurface(null)
-            }
-        })
+        // NOTE: the render SurfaceProducer is created LAZILY on first
+        // use (ensureProducer), never here — creating it during engine
+        // attach is the one startup change vs the last known-good
+        // build, and attach must stay crash-proof.
+        textureRegistry = binding.textureRegistry
         lifecycleApp = context.applicationContext as? Application
         lifecycleApp?.registerActivityLifecycleCallbacks(lifecycleCallbacks)
         ensurePlayer()
@@ -145,7 +140,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
             // looks blurry. A slow line downshifts within a few segments.
             .setBandwidthMeter(DefaultBandwidthMeter.Builder(context).setInitialBitrateEstimate(10_000_000L).build())
             .setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(45_000, 120_000, 1_000, 5_000).setBackBuffer(30_000, true).build())
-            .build().also { player = it; it.setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true); it.setHandleAudioBecomingNoisy(true); it.addListener(playerListener); surfaceProducer?.surface?.let { s -> it.setVideoSurface(s) } }
+            .build().also { player = it; it.setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true); it.setHandleAudioBecomingNoisy(true); it.addListener(playerListener); bindSurface() }
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -154,6 +149,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
             "resolve" -> { val url = a["url"] as? String ?: return result.error("bad_arguments", "url is required", null); extract(url, result) }
             "search" -> { val q = a["query"] as? String ?: return result.error("bad_arguments", "query is required", null); search(q, result) }
             "load" -> {
+                ensureProducer()
                 val url = a["url"] as? String ?: return result.error("bad_arguments", "url is required", null)
                 val id = generation.incrementAndGet(); currentUrl = url; requestedHeight = (a["height"] as? Number)?.toInt(); selectedAudioId = a["audioTrackId"] as? String
                 disposed = false; audioOnly = a["audioOnly"] as? Boolean ?: false; shouldAutoplay = a["autoplay"] as? Boolean ?: true; stopped = false; retryingExpiry = false; fallbackStage = 0
@@ -161,7 +157,7 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
             }
             "setQuality" -> { requestedHeight = (a["height"] as? Number)?.toInt(); safeRebuild(result) }
             "setResizeMode" -> { resizeMode = (a["mode"] as? Number)?.toInt() ?: androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT; result.success(null) }
-            "textureId" -> result.success(surfaceProducer?.id())
+            "textureId" -> result.success(ensureProducer()?.id())
             "setAudioTrack" -> { selectedAudioId = a["id"] as? String; safeRebuild(result) }
             "setAudioOnly" -> { audioOnly = a["enabled"] as? Boolean ?: false; safeRebuild(result) }
             "play" -> { stopped = false; shouldAutoplay = true; if (resumed) player?.play(); result.success(null) }
@@ -307,6 +303,34 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
         }
     }
     private fun emit(map: Map<String, Any?>) { main.post { sink?.success(map) } }
+    /** Creates the render texture producer on FIRST use only and
+     *  never lets a failure escape: a broken/absent producer degrades
+     *  to audio-only playback instead of taking the app down. */
+    private fun ensureProducer(): TextureRegistry.SurfaceProducer? {
+        surfaceProducer?.let { return it }
+        val registry = textureRegistry ?: return null
+        return try {
+            val producer = registry.createSurfaceProducer()
+            producer.setCallback(object : TextureRegistry.SurfaceProducer.Callback {
+                override fun onSurfaceAvailable() { bindSurface() }
+                override fun onSurfaceCleanup() {
+                    try { player?.setVideoSurface(null) } catch (_: Throwable) {}
+                }
+            })
+            surfaceProducer = producer
+            bindSurface()
+            producer
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun bindSurface() {
+        try {
+            surfaceProducer?.surface?.let { s -> player?.setVideoSurface(s) }
+        } catch (_: Throwable) {}
+    }
+
     private fun pauseForBackground() { shouldAutoplay = false; player?.pause() }
 
     /** Keeps the foreground service in sync with playback: running
@@ -375,9 +399,9 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) { activity = binding.activity; resumed = false; disposed = false }
     override fun onDetachedFromActivityForConfigChanges() { activity?.let { if (!backgroundPlay && resumed) pauseForBackground() }; activity = null; resumed = false }
-    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) { activity = binding.activity; surfaceProducer?.surface?.let { s -> player?.setVideoSurface(s) }; refreshService() }
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) { activity = binding.activity; bindSurface(); refreshService() }
     override fun onDetachedFromActivity() { activity?.let { if (!backgroundPlay && resumed) pauseForBackground() }; activity = null; resumed = false }
-    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) { PlaybackActionReceiver.handler = null; disposePlayback(); surfaceProducer?.release(); surfaceProducer = null; ticker?.let(main::removeCallbacks); ticker = null; lifecycleApp?.unregisterActivityLifecycleCallbacks(lifecycleCallbacks); lifecycleApp = null; methods.setMethodCallHandler(null); events.setStreamHandler(null); io.shutdownNow() }
+    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) { PlaybackActionReceiver.handler = null; disposePlayback(); surfaceProducer?.release(); surfaceProducer = null; textureRegistry = null; ticker?.let(main::removeCallbacks); ticker = null; lifecycleApp?.unregisterActivityLifecycleCallbacks(lifecycleCallbacks); lifecycleApp = null; methods.setMethodCallHandler(null); events.setStreamHandler(null); io.shutdownNow() }
 
     private data class Catalog(val info: StreamInfo) {
         val video: List<VideoStream> = info.videoOnlyStreams.filter { it.isUrl && it.height > 0 }.sortedWith(compareByDescending<VideoStream> { it.height }.thenByDescending { it.fps }.thenByDescending { it.bitrate })

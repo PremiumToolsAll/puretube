@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shimmer/shimmer.dart';
 
 import '../../../player/presentation/providers/player_controller.dart';
@@ -48,6 +49,38 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     });
     // Infinite scroll: load more when near the bottom.
     _scrollController.addListener(_onScroll);
+    // If the previous run died with a recorded fatal error, show it
+    // once — the text is the diagnostic evidence (key: main.dart's
+    // lastFatalKey).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showLastFatalIfAny();
+    });
+  }
+
+  Future<void> _showLastFatalIfAny() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final fatal = prefs.getString('last_fatal_error');
+      if (fatal == null || fatal.isEmpty || !mounted) return;
+      await prefs.remove('last_fatal_error');
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('আগের crash-এর তথ্য'),
+          content: SingleChildScrollView(
+            child: SelectableText(fatal,
+                style: const TextStyle(fontSize: 11)),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('বন্ধ করো'),
+            ),
+          ],
+        ),
+      );
+    } catch (_) {}
   }
 
   void _onScroll() {

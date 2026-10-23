@@ -1,5 +1,10 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
+import 'dart:convert';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:hive_ce_flutter/hive_flutter.dart';
+
+import '../../../../core/database/hive_setup.dart';
 import '../../../../core/di/providers.dart';
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/services/watch_category_tracker.dart';
@@ -104,9 +109,79 @@ class SearchController extends Notifier<SearchState> {
     'trending now worldwide',
   ];
   int _feedQueryIndex = 0;
+  bool _rotatedThisSession = false;
+
+  static const _feedCacheKey = 'home_feed_cache_v1';
+  static const _feedIndexKey = 'home_feed_query_index';
 
   @override
-  SearchState build() => const SearchState();
+  SearchState build() {
+    // Restore the persisted rotation so the feed does not restart
+    // from the same query on every app launch.
+    try {
+      final saved = Hive.box(HiveBoxes.playerPrefs).get(_feedIndexKey);
+      if (saved is num) {
+        _feedQueryIndex = saved.toInt() % _feedQueries.length;
+      }
+    } catch (_) {}
+    return const SearchState();
+  }
+
+  // ---- home-feed cache (instant app open) ----
+
+  List<VideoDetails> _readFeedCache() {
+    try {
+      final raw = Hive.box(HiveBoxes.playerPrefs).get(_feedCacheKey);
+      if (raw is! String || raw.isEmpty) return const [];
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      return decoded
+          .map((e) => _videoFromCache(Map<String, dynamic>.from(e as Map)))
+          .where((v) => v.id.isNotEmpty && v.title.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _writeFeedCache(List<VideoDetails> videos) async {
+    try {
+      final data = videos.take(30).map(_videoToCache).toList();
+      await Hive.box(HiveBoxes.playerPrefs)
+          .put(_feedCacheKey, jsonEncode(data));
+    } catch (_) {}
+  }
+
+  Map<String, dynamic> _videoToCache(VideoDetails v) => {
+        'id': v.id,
+        'title': v.title,
+        'author': v.author,
+        'channelId': v.channelId,
+        'durationMs': v.duration?.inMilliseconds,
+        'thumbnailUrl': v.thumbnailUrl,
+        'viewCount': v.viewCount,
+        'likeCount': v.likeCount,
+        'uploadDate': v.uploadDate?.toIso8601String(),
+        'description':
+            v.description.length > 200 ? v.description.substring(0, 200) : v.description,
+      };
+
+  VideoDetails _videoFromCache(Map<String, dynamic> m) => VideoDetails(
+        id: m['id'] as String? ?? '',
+        title: m['title'] as String? ?? '',
+        author: m['author'] as String? ?? '',
+        channelId: m['channelId'] as String? ?? '',
+        duration: (m['durationMs'] as num?) != null
+            ? Duration(milliseconds: (m['durationMs'] as num).toInt())
+            : null,
+        thumbnailUrl: m['thumbnailUrl'] as String? ?? '',
+        viewCount: (m['viewCount'] as num?)?.toInt(),
+        likeCount: (m['likeCount'] as num?)?.toInt(),
+        uploadDate: m['uploadDate'] != null
+            ? DateTime.tryParse(m['uploadDate'] as String)
+            : null,
+        description: m['description'] as String? ?? '',
+      );
 
   /// Pull-to-refresh / refresh button: reloads the home feed with a
   /// rotated trending query and a shuffled order, so every refresh
@@ -189,20 +264,52 @@ class SearchController extends Notifier<SearchState> {
   /// Loads the default home feed on app startup.
   /// Mixes trending results with personalized suggestions derived from
   /// watch history (Bug 3: smart suggestions).
-  Future<void> loadTrending() =>
-      _loadTrendingWith(_feedQueries[_feedQueryIndex]);
+  ///
+  /// The rotation advances once per app session and is persisted, so
+  /// every app open starts from a DIFFERENT feed query; the last feed
+  /// is shown instantly from cache while fresh results load behind it.
+  Future<void> loadTrending() async {
+    if (!_rotatedThisSession) {
+      _rotatedThisSession = true;
+      _feedQueryIndex =
+          (_feedQueryIndex + 1) % _feedQueries.length;
+      try {
+        await Hive.box(HiveBoxes.playerPrefs)
+            .put(_feedIndexKey, _feedQueryIndex);
+      } catch (_) {}
+    }
+    await _loadTrendingWith(_feedQueries[_feedQueryIndex],
+        shuffle: true, cachedFirst: true);
+  }
 
   /// Shared feed loader. When [shuffle] is true (refresh path), the
   /// mixed results are shuffled so every refresh shows new videos.
+  /// When [cachedFirst] is true, the cached feed is displayed
+  /// immediately and fresh results replace it when they arrive.
   Future<void> _loadTrendingWith(String feedQuery,
-      {bool shuffle = false}) async {
+      {bool shuffle = false, bool cachedFirst = false}) async {
     if (state.status == SearchStatus.loading) return;
     _session = null;
-    state = state.copyWith(
-        status: SearchStatus.loading,
-        query: '',
-        loadingMore: false,
-        hasMore: true);
+    var showedCache = false;
+    if (cachedFirst && state.results.isEmpty) {
+      final cached = _readFeedCache();
+      if (cached.isNotEmpty) {
+        showedCache = true;
+        state = state.copyWith(
+            status: SearchStatus.done,
+            query: '',
+            results: cached,
+            loadingMore: false,
+            hasMore: true);
+      }
+    }
+    if (!showedCache) {
+      state = state.copyWith(
+          status: SearchStatus.loading,
+          query: '',
+          loadingMore: false,
+          hasMore: true);
+    }
     try {
       final extractor = ref.read(extractorProvider);
       final session =
@@ -227,13 +334,18 @@ class SearchController extends Notifier<SearchState> {
               queries.add(kws.first);
             }
           }
+          // Fetch all personalization queries in PARALLEL — doing
+          // them one by one was a big part of the slow home load.
           final personalized = <VideoDetails>[];
-          for (final kw in queries.take(5)) {
+          final pages = await Future.wait(queries.take(5).map((kw) async {
             try {
-              final vids =
-                  await extractor.searchVideos(kw, limit: 6);
-              personalized.addAll(vids);
-            } catch (_) {}
+              return await extractor.searchVideos(kw, limit: 6);
+            } catch (_) {
+              return <VideoDetails>[];
+            }
+          }));
+          for (final vids in pages) {
+            personalized.addAll(vids);
           }
           // Interleave: 2 trending, 1 personalized, ...
           if (personalized.isNotEmpty) {
@@ -265,13 +377,22 @@ class SearchController extends Notifier<SearchState> {
         results: results,
         hasMore: session.firstPage.isNotEmpty,
       );
+      // Remember this feed so the next app open shows videos
+      // instantly instead of a loading shimmer.
+      unawaited(_writeFeedCache(results));
     } on PureTubeException catch (e) {
-      state = state.copyWith(
-          status: SearchStatus.error, errorMessage: e.message);
+      // With the cached feed already on screen, a failed refresh
+      // keeps the cache instead of replacing it with an error.
+      if (!showedCache) {
+        state = state.copyWith(
+            status: SearchStatus.error, errorMessage: e.message);
+      }
     } catch (e) {
-      state = state.copyWith(
-          status: SearchStatus.error,
-          errorMessage: 'Could not load home feed: $e');
+      if (!showedCache) {
+        state = state.copyWith(
+            status: SearchStatus.error,
+            errorMessage: 'Could not load home feed: $e');
+      }
     }
   }
 
