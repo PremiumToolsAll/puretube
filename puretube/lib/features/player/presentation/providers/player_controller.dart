@@ -462,6 +462,10 @@ class PlayerController extends Notifier<PlayerUiState>
   /// active, else mpv.
   Duration get displayPosition =>
       hqActive ? _hqPosition : _handler.player.state.position;
+
+  /// The current UI state, for readers that cannot use `ref`
+  /// (e.g. a widget's dispose()).
+  PlayerUiState get uiStateSnapshot => state;
   Duration get displayDuration =>
       hqActive ? _hqDuration : _handler.player.state.duration;
 

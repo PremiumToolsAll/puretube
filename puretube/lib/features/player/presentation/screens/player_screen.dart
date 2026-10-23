@@ -18,6 +18,7 @@ import '../../../../core/utils/format.dart';
 import '../../../../core/widgets/press_scale.dart';
 import '../../../../features/library/domain/entities/library_models.dart';
 import '../../../../features/library/presentation/providers/library_providers.dart';
+import '../../../../features/library/data/repositories/library_repository.dart';
 import '../../../../features/library/presentation/screens/downloads_screen.dart';
 import '../../../../features/library/presentation/screens/playlists_screen.dart'
     show showSaveToPlaylistSheet;
@@ -463,9 +464,21 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   ProviderSubscription<VideoDetails?>? _videoSub;
   ProviderSubscription<String?>? _errorMsgSub;
 
+  // Captured in initState: `ref` must NOT be used in dispose() —
+  // Riverpod throws "Cannot use ref after the widget was disposed"
+  // (this exact error was captured on-device when leaving the
+  // player). Everything dispose() needs is stored here instead.
+  late final StateController<bool> _fullPlayerOpenNotifier;
+  late final PlayerController _playerNotifier;
+  late final HistoryRepository _historyRepo;
+
   @override
   void initState() {
     super.initState();
+    _fullPlayerOpenNotifier =
+        ref.read(fullPlayerOpenProvider.notifier);
+    _playerNotifier = ref.read(playerControllerProvider.notifier);
+    _historyRepo = ref.read(historyRepositoryProvider);
     _videoController = VideoController(ref.read(mediaKitPlayerProvider));
     // Fullscreen player takes over: hide the floating popup window.
     ref.read(popupVisibleProvider.notifier).state = false;
@@ -540,18 +553,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _videoSub?.close();
     _statusSub?.close();
     _errorMsgSub?.close();
-    ref.read(fullPlayerOpenProvider.notifier).state = false;
+    _fullPlayerOpenNotifier.state = false;
     // Persist resume position for history (creates entry if needed).
-    final uiState = ref.read(playerControllerProvider);
+    // Uses the initState-captured references only — no `ref` here.
+    final uiState = _playerNotifier.uiStateSnapshot;
     if (uiState.videoId != null) {
       final v = uiState.video;
-      ref.read(historyRepositoryProvider).saveResumePosition(
+      _historyRepo.saveResumePosition(
             videoId: uiState.videoId!,
-            positionSecs: ref
-                .read(mediaKitPlayerProvider)
-                .state
-                .position
-                .inSeconds,
+            positionSecs:
+                _playerNotifier.displayPosition.inSeconds,
             title: v?.title ?? '',
             author: v?.author ?? '',
             thumbnailUrl: v?.thumbnailUrl ?? '',
@@ -3138,13 +3149,43 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 
-  /// YouTube-style centered transport controls:
-  /// previous | play/pause | next.
+  /// Centered transport controls over the video (user spec,
+  /// screenshot-led): previous | play/pause | next as small circular
+  /// discs with a LIGHT translucent fill — no heavy opaque circle,
+  /// no glow. The play/pause icon keeps the theme color and still
+  /// switches instantly.
   Widget _buildCenterControls() {
     final notifier = ref.read(playerControllerProvider.notifier);
     final player = ref.read(mediaKitPlayerProvider);
     final hqActive =
         ref.read(playerControllerProvider).hqTextureId != null;
+
+    Widget discButton({
+      required IconData icon,
+      required double size,
+      required double iconSize,
+      required Color iconColor,
+      required VoidCallback onTap,
+      required String label,
+    }) {
+      return PressScale(
+        onTap: onTap,
+        child: Semantics(
+          button: true,
+          label: label,
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.black.withValues(alpha: 0.38),
+            ),
+            child: Icon(icon, color: iconColor, size: iconSize),
+          ),
+        ),
+      );
+    }
+
     return StreamBuilder<bool>(
       stream:
           hqActive ? notifier.hqPlayingStream : player.stream.playing,
@@ -3155,55 +3196,31 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            PressIconButton(
-              tooltip: 'Previous',
-              iconSize: 48,
-              onPressed: _playPrevious,
-              icon: const Icon(Icons.skip_previous,
-                  color: Colors.white),
+            discButton(
+              icon: Icons.skip_previous,
+              size: 44,
+              iconSize: 26,
+              iconColor: Colors.white,
+              onTap: _playPrevious,
+              label: 'Previous',
             ),
-            const SizedBox(width: 24),
-            // WILLOW-style glowing emerald transport button.
-            PressScale(
+            const SizedBox(width: 18),
+            discButton(
+              icon: playing ? Icons.pause : Icons.play_arrow,
+              size: 58,
+              iconSize: 32,
+              iconColor: _emeraldLight,
               onTap: notifier.togglePlayPause,
-              child: Semantics(
-                button: true,
-                label: playing ? 'Pause' : 'Play',
-                child: Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _emerald.withValues(alpha: 0.92),
-                    border: Border.all(
-                      color:
-                          _emeraldLight.withValues(alpha: 0.55),
-                      width: 2,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color:
-                            _emerald.withValues(alpha: 0.40),
-                        blurRadius: 24,
-                        spreadRadius: 3,
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    playing ? Icons.pause : Icons.play_arrow,
-                    color: Colors.white,
-                    size: 36,
-                  ),
-                ),
-              ),
+              label: playing ? 'Pause' : 'Play',
             ),
-            const SizedBox(width: 24),
-            PressIconButton(
-              tooltip: 'Next',
-              iconSize: 48,
-              onPressed: _playNext,
-              icon: const Icon(Icons.skip_next,
-                  color: Colors.white),
+            const SizedBox(width: 18),
+            discButton(
+              icon: Icons.skip_next,
+              size: 44,
+              iconSize: 26,
+              iconColor: Colors.white,
+              onTap: _playNext,
+              label: 'Next',
             ),
           ],
         );
