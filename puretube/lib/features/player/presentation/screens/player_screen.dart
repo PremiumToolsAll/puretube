@@ -12,6 +12,7 @@ import 'package:shimmer/shimmer.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/di/providers.dart';
+import '../../../../core/services/orientation_follow_service.dart';
 import '../../../../core/utils/format.dart';
 import '../../../../core/widgets/press_scale.dart';
 import '../../../../features/library/domain/entities/library_models.dart';
@@ -572,6 +573,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _gaugeTimer?.cancel();
     // Restore portrait + system UI if the user left while fullscreen.
     if (_isFullscreen) {
+      OrientationFollowService.stopLandscapeFollow();
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     }
@@ -617,7 +619,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         DeviceOrientation.landscapeLeft,
         DeviceOrientation.landscapeRight,
       ]);
+      // The video must sit on the side the phone is held: the
+      // native follow listener flips the activity between the two
+      // landscape sides as the user turns the phone over (the
+      // allowed-list alone leaves many phones stuck on one side).
+      await OrientationFollowService.startLandscapeFollow();
     } else {
+      await OrientationFollowService.stopLandscapeFollow();
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       await SystemChrome.setPreferredOrientations(
           [DeviceOrientation.portraitUp]);

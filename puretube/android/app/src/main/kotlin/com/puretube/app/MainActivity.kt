@@ -7,7 +7,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.hardware.SensorManager
+import android.view.OrientationEventListener
+import android.view.Surface
 import android.content.res.Configuration
 import android.graphics.drawable.Icon
 import android.os.Build
@@ -40,6 +44,21 @@ import io.flutter.plugin.common.MethodChannel
  */
 class MainActivity : AudioServiceActivity() {
     private var pipChannel: MethodChannel? = null
+    private var orientationChannel: MethodChannel? = null
+
+    // ---- landscape follow (fullscreen) ----
+    // Flutter can ALLOW both landscape sides, but on many phones
+    // (MIUI especially) the activity then sticks to one side and
+    // never flips when the user turns the phone over. While the
+    // full player is open, an OrientationEventListener watches the
+    // physical tilt and re-locks requestedOrientation to the side
+    // the phone is actually held on. The sector<->rotation pairing
+    // is calibrated at runtime from the system's own first pick,
+    // so no device-specific sign convention is assumed.
+    private var orientationListener: OrientationEventListener? = null
+    private var followSector: Int = -1
+    private var followRotation: Int = Surface.ROTATION_0
+    private var followLastFlipMs: Long = 0L
     private var pipPlaying = false
     private var autoPipEnabled = false
     private var pipReceiver: BroadcastReceiver? = null
@@ -71,6 +90,22 @@ class MainActivity : AudioServiceActivity() {
             flutterEngine.dartExecutor.binaryMessenger, "pure_tube/pip"
         )
         registerPipReceiver()
+        orientationChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger, "pure_tube/orientation"
+        )
+        orientationChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startLandscapeFollow" -> {
+                    startLandscapeFollow()
+                    result.success(null)
+                }
+                "stopLandscapeFollow" -> {
+                    stopLandscapeFollow()
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
         pipChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "isPipSupported" -> {
@@ -203,6 +238,58 @@ class MainActivity : AudioServiceActivity() {
         } else {
             registerReceiver(receiver, filter)
         }
+    }
+
+    private fun startLandscapeFollow() {
+        followSector = -1
+        followLastFlipMs = 0L
+        if (orientationListener == null) {
+            orientationListener = object :
+                OrientationEventListener(this, SensorManager.SENSOR_DELAY_NORMAL) {
+                override fun onOrientationChanged(orientation: Int) {
+                    if (orientation == ORIENTATION_UNKNOWN) return
+                    // Landscape sectors are centred on 90 and 270.
+                    val sector = when (orientation) {
+                        in 45..134 -> 1
+                        in 225..314 -> 3
+                        else -> -1
+                    }
+                    if (sector == -1) return
+                    @Suppress("DEPRECATION")
+                    val rotation = windowManager.defaultDisplay.rotation
+                    if (followSector == -1) {
+                        // Calibrate: pair the sector the phone is
+                        // physically held in with the landscape side
+                        // the system just picked for it.
+                        followSector = sector
+                        followRotation = rotation
+                        return
+                    }
+                    if (sector == followSector) {
+                        followRotation = rotation
+                        return
+                    }
+                    // The phone turned over to the other landscape
+                    // sector: flip the activity to match the hold.
+                    val now = System.currentTimeMillis()
+                    if (now - followLastFlipMs < 900) return
+                    followLastFlipMs = now
+                    followSector = sector
+                    requestedOrientation =
+                        if (followRotation == Surface.ROTATION_90) {
+                            ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                        } else {
+                            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                        }
+                }
+            }
+        }
+        orientationListener?.enable()
+    }
+
+    private fun stopLandscapeFollow() {
+        orientationListener?.disable()
+        followSector = -1
     }
 
     override fun onDestroy() {
