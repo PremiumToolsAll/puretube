@@ -3284,18 +3284,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     fontSize: 17,
                     fontWeight: FontWeight.bold)),
           ),
-          // WILLOW-style subtitle: quality • duration in emerald-grey.
-          if (uiState.currentQuality?.label != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 3),
-              child: Text(
-                '${uiState.currentQuality!.label} • ${_clock(video.duration ?? Duration.zero)}',
-                style: TextStyle(
-                    color:
-                        _emeraldLight.withValues(alpha: 0.7),
-                    fontSize: 13),
-              ),
-            ),
           const SizedBox(height: 10),
           // YouTube original: channel row directly below the title.
           _ChannelRow(video: video),

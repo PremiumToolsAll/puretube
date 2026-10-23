@@ -102,7 +102,7 @@ class PlayerUiState {
     this.lyricsLoading = false,
     this.autoplay = true,
     this.hqTextureId,
-    this.autoQuality = false,
+    this.autoQuality = true,
     this.hqAspectRatio = 0,
   });
 
@@ -282,6 +282,10 @@ class PlayerController extends Notifier<PlayerUiState>
   /// the controller is created). Published into
   /// [PlayerUiState.hqTextureId] while the plugin engine is active.
   int _pluginTextureId = -1;
+  // Session quality memory (user rule): a fresh app start plays
+  // Auto; once the user picks a quality by hand, every later video
+  // in this session starts at that pick. Null = no manual pick yet.
+  int? _sessionQualityHeight;
   // One-shot resume position for the next direct start (set by
   // retry() so a mid-video retry resumes HERE, not at the last
   // persisted history position).
@@ -1129,7 +1133,10 @@ class PlayerController extends Notifier<PlayerUiState>
             );
       state = state.copyWith(
         availableQualities: options,
-        currentQuality: current,
+        // The direct start already engaged the engine at the
+        // session quality — don't overwrite its label with the
+        // anchor (the label must show what is actually playing).
+        currentQuality: hqActive ? state.currentQuality : current,
       );
       // SparkTube behavior: an explicit "Auto" pick survives video
       // changes — re-engage the adaptive plugin engine for the new
@@ -1657,6 +1664,8 @@ class PlayerController extends Notifier<PlayerUiState>
     // SparkTube rule: an explicit "Auto" pick beats the settings
     // defaults for this session — fullscreen changes don't override it.
     if (state.autoQuality) return;
+    // The user's own session pick beats the settings defaults too.
+    if (_sessionQualityHeight != null) return;
     final videoId = state.videoId;
     if (videoId == null) return;
     final onWifi = await _isOnWifi();
@@ -1706,6 +1715,8 @@ class PlayerController extends Notifier<PlayerUiState>
     if (state.audioOnly) return;
     final token = ++_qualitySwitchToken;
     state = state.copyWith(autoQuality: true);
+    // Back to Auto: the session pick no longer rules later videos.
+    _sessionQualityHeight = null;
     final options = state.availableQualities;
     if (options.isEmpty) return;
     final top = options.first; // sorted height desc — bookkeeping only
@@ -1757,6 +1768,11 @@ class PlayerController extends Notifier<PlayerUiState>
     // internal re-applications (Auto's own mpv pick) keep it.
     if (!keepAuto && state.autoQuality) {
       state = state.copyWith(autoQuality: false);
+    }
+    // A manual pick rules the rest of the session: later videos
+    // start at this height too (see _directStart).
+    if (!keepAuto) {
+      _sessionQualityHeight = target.height;
     }
     // Already on the plugin with another target: SparkTube-style
     // rebuild from the plugin's cached catalog at the new cap —
@@ -1963,8 +1979,17 @@ class PlayerController extends Notifier<PlayerUiState>
     if (state.videoId != videoId) return;
     final targetH =
         _targetVideoHeight(onWifi: onWifi, fullscreen: false);
-    final cap =
-        (state.autoQuality || targetH == null) ? null : targetH;
+    // Quality rule: Auto (fresh start or user-chosen) = adaptive;
+    // a manual pick from earlier in this session beats the
+    // settings default for every new video.
+    final int? cap;
+    if (state.autoQuality) {
+      cap = null;
+    } else if (_sessionQualityHeight != null) {
+      cap = _sessionQualityHeight;
+    } else {
+      cap = targetH;
+    }
     final target = MuxedQuality(
       label: cap == null ? 'Auto' : '${cap}p',
       height: cap ?? targetH ?? 720,
