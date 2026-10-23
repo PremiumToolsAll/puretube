@@ -292,6 +292,11 @@ class PlayerController extends Notifier<PlayerUiState>
   Duration? _pendingResumeOnce;
   bool _ptEndedHandled = false;
   String? _lastPluginError;
+
+  /// Video id currently served by the direct-URL fallback (the
+  /// plugin's NewPipe resolve was blocked). Keeps the stale resolve
+  /// error from resurfacing over healthy fallback playback.
+  String? _directFallbackFor;
   // Video id for which the persistent-Auto hook already engaged the
   // HQ engine (prevents a fail/retry loop within one video).
   String? _autoHqEngagedFor;
@@ -446,7 +451,10 @@ class PlayerController extends Notifier<PlayerUiState>
     // Loud HQ errors (never silent): native playback/resolve failures
     // land in c.error. 'superseded' is just a raced load — ignore it.
     final err = c.error;
-    if (err != null && err != _lastPluginError && !err.contains('superseded')) {
+    if (err != null &&
+        err != _lastPluginError &&
+        !err.contains('superseded') &&
+        !(_directFallbackFor == state.videoId && _isResolveBlock(err))) {
       _lastPluginError = err;
       state = state.copyWith(
         errorMessage: 'HQ প্লেব্যাক সমস্যা: ${_shortenError(err)}',
@@ -719,6 +727,7 @@ class PlayerController extends Notifier<PlayerUiState>
   // ---------------- loading ----------------
 
   Future<void> loadVideo(String videoId) async {
+    _directFallbackFor = null;
     final previousSpeed = state.speed;
     final previousSkip = state.skipSponsors;
     final previousAudioOnly = state.audioOnly;
@@ -1874,6 +1883,15 @@ class PlayerController extends Notifier<PlayerUiState>
         autoplay: true,
       );
     } catch (e) {
+      // Bot-blocked resolve? Same direct-URL fallback as video mode.
+      if (state.videoId == video.id &&
+          state.audioOnly &&
+          _isResolveBlock(e.toString()) &&
+          await _playDirectFallback(video.id, _qualitySwitchToken,
+              resumeAt,
+              audioOnly: true)) {
+        return;
+      }
       if (state.videoId == video.id && state.audioOnly) {
         state = state.copyWith(
           status: PlayerStatus.error,
@@ -1953,6 +1971,88 @@ class PlayerController extends Notifier<PlayerUiState>
         status: PlayerStatus.error,
         errorMessage: 'ভিডিও চালু করা যায়নি — আবার চেষ্টা করুন',
       );
+    }
+  }
+
+  bool _isResolveBlock(String raw) =>
+      raw.contains('resolve_failed') ||
+      raw.contains('LOGIN_REQUIRED') ||
+      raw.contains('not a bot') ||
+      raw.contains('blocked anonymous');
+
+  /// Fallback for when YouTube blocks the plugin's NewPipe resolve
+  /// (LOGIN_REQUIRED bot wall on a flagged IP): the app's own
+  /// extraction chain usually still returns direct stream URLs
+  /// (session engine), so play those through the same plugin
+  /// engine — playback survives the block instead of erroring out.
+  Future<bool> _playDirectFallback(String videoId, int token,
+      Duration resumeAt, {required bool audioOnly}) async {
+    try {
+      var streams = state.streams;
+      if (streams == null ||
+          streams.videoId != videoId ||
+          streams.isExpired) {
+        streams = await _extractor.getPlaybackStreams(videoId);
+      }
+      if (token != _qualitySwitchToken || state.videoId != videoId) {
+        return false;
+      }
+      final pt = _plugin;
+      if (_pluginTextureId <= 0) {
+        try {
+          _pluginTextureId = await pt.textureId;
+        } catch (_) {}
+      }
+      state = state.copyWith(
+          hqTextureId: _pluginTextureId > 0 ? _pluginTextureId : -1);
+      unawaited(_publishTextureId());
+      if (audioOnly) {
+        await pt.loadDirect(streams.audioOnlyUrl,
+            audioOnly: true, position: resumeAt, autoplay: true);
+      } else {
+        await pt.loadDirect(streams.muxedUrl,
+            position: resumeAt, autoplay: true);
+      }
+      if (token != _qualitySwitchToken || state.videoId != videoId) {
+        return false;
+      }
+      _directFallbackFor = videoId;
+      if (state.speed != 1.0) {
+        try {
+          await pt.setSpeed(state.speed.clamp(0.25, 3.0));
+        } catch (_) {}
+      }
+      if (!audioOnly) {
+        try {
+          await pt.setResizeMode(_pluginResizeMode);
+        } catch (_) {}
+      }
+      if (pt.duration > Duration.zero) {
+        _hqDuration = pt.duration;
+        _hqDurationCtrl.add(pt.duration);
+      }
+      _hqPosition = resumeAt;
+      _hqPositionCtrl.add(resumeAt);
+      _hqPlaying = true;
+      _hqPlayingCtrl.add(true);
+      _startHqPoll();
+      final playingVideo = state.video;
+      if (playingVideo != null) _engageMirror(playingVideo);
+      state = state.copyWith(
+        streams: streams,
+        // Honest label: the fallback serves the app-chain muxed
+        // stream (<=720p), not the requested HQ target.
+        currentQuality: audioOnly
+            ? state.currentQuality
+            : MuxedQuality(
+                label: '${streams.muxedHeight}p',
+                height: streams.muxedHeight,
+                url: streams.muxedUrl,
+              ),
+      );
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -2051,6 +2151,15 @@ class PlayerController extends Notifier<PlayerUiState>
     } catch (e) {
       if (token != _qualitySwitchToken || state.videoId != videoId) {
         return false;
+      }
+      // YouTube bot-blocked the plugin's resolve (LOGIN_REQUIRED on
+      // a flagged IP)? Fall back to the app's own extraction chain
+      // and play its direct URLs through the same engine.
+      final rawErr = pt.error ?? e.toString();
+      if (_isResolveBlock(rawErr) &&
+          await _playDirectFallback(videoId, token, resumeAt,
+              audioOnly: false)) {
+        return true;
       }
       await _stopHq();
       if (!loud) return false;

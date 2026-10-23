@@ -188,6 +188,37 @@ class PureTubeController extends ChangeNotifier {
     }
   }
 
+  /// Plays direct stream URLs resolved by the APP — the fallback
+  /// for when the native NewPipe resolve is blocked (YouTube's
+  /// LOGIN_REQUIRED bot wall on a flagged IP). [url] is a muxed or
+  /// video-only stream; pass [audioUrl] to merge a separate audio
+  /// stream natively.
+  Future<void> loadDirect(String url,
+      {String? audioUrl,
+      bool audioOnly = false,
+      Duration position = Duration.zero,
+      bool autoplay = true}) async {
+    final generation = ++_loadGeneration;
+    resolving = true;
+    error = null;
+    notifyListeners();
+    try {
+      await _invoke<void>('loadDirect', {
+        'url': url,
+        'audioUrl': audioUrl,
+        'audioOnly': audioOnly,
+        'positionMs': position.inMilliseconds,
+        'autoplay': autoplay,
+      });
+      if (!_closed && generation == _loadGeneration) catalog = null;
+    } finally {
+      if (!_closed && generation == _loadGeneration) {
+        resolving = false;
+        notifyListeners();
+      }
+    }
+  }
+
   /// Plays a downloaded file (offline playback), merging the
   /// optional companion audio file natively. No network involved.
   Future<void> loadLocal({

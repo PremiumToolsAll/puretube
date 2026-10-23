@@ -175,6 +175,25 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
                     result.error("load_failed", t.message ?: "Unable to play file", null)
                 }
             }
+            "loadDirect" -> {
+                ensureProducer()
+                val url = a["url"] as? String ?: return result.error("bad_arguments", "url is required", null)
+                val audioUrl = a["audioUrl"] as? String
+                generation.incrementAndGet()
+                // Direct stream URLs resolved by the APP (fallback
+                // for when the NewPipe resolve is blocked, e.g.
+                // LOGIN_REQUIRED on a flagged IP): no catalog, so
+                // the expiry re-resolve and catalog fallbacks can
+                // never engage for them.
+                currentUrl = null; catalog = null; requestedHeight = null; selectedAudioId = null
+                disposed = false; audioOnly = a["audioOnly"] as? Boolean ?: false; shouldAutoplay = a["autoplay"] as? Boolean ?: true; stopped = false; retryingExpiry = false; fallbackStage = 0
+                try {
+                    installDirect(url, audioUrl, audioOnly, (a["positionMs"] as? Number)?.toLong() ?: 0L, shouldAutoplay)
+                    result.success(null)
+                } catch (t: Throwable) {
+                    result.error("load_failed", t.message ?: "Unable to play stream", null)
+                }
+            }
             "setQuality" -> { requestedHeight = (a["height"] as? Number)?.toInt(); safeRebuild(result) }
             "setResizeMode" -> { resizeMode = (a["mode"] as? Number)?.toInt() ?: androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT; result.success(null) }
             "setNotificationEnabled" -> { notificationEnabled = a["enabled"] as? Boolean ?: true; refreshService(); result.success(null) }
@@ -290,6 +309,29 @@ class PureTubePlaybackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, E
             )
             else -> videoSource
         }
+        firstFrameSeen = onlyAudio
+        frameWaitStartMs = System.currentTimeMillis()
+        bindSurface()
+        p.setMediaSource(source); p.prepare(); if (pos > 0) p.seekTo(pos); if (autoplay && !stopped) p.play() else p.pause()
+        emitState()
+    }
+
+    /** Plays app-resolved direct stream URLs (the LOGIN_REQUIRED
+     *  fallback): a muxed file, or a video+audio pair merged
+     *  natively — the same playback shape as install(), minus the
+     *  NewPipe catalog. */
+    private fun installDirect(url: String, audioUrl: String?, onlyAudio: Boolean, pos: Long, autoplay: Boolean) {
+        val p = ensurePlayer()
+        val factory = DefaultHttpDataSource.Factory().setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/132.0.0.0 Safari/537.36")
+        val source: MediaSource = when {
+            onlyAudio -> ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(url))
+            audioUrl != null -> MergingMediaSource(
+                ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(url)),
+                ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(audioUrl))
+            )
+            else -> ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(url))
+        }
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, onlyAudio).build()
         firstFrameSeen = onlyAudio
         frameWaitStartMs = System.currentTimeMillis()
         bindSurface()
