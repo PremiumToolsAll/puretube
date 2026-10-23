@@ -11,6 +11,7 @@ import '../../../library/domain/entities/library_models.dart';
 import '../../../library/presentation/providers/library_providers.dart';
 import '../../../library/presentation/screens/playlists_screen.dart'
     show showSaveToPlaylistSheet;
+import '../../../channel/presentation/screens/channel_screen.dart';
 import '../../../player/domain/entities/playback_models.dart';
 import '../../../player/presentation/screens/player_screen.dart';
 
@@ -25,14 +26,20 @@ class VideoCard extends ConsumerWidget {
   final VideoDetails video;
   const VideoCard({super.key, required this.video});
 
+  /// Opens this card's options sheet for any [video] — shared
+  /// with the channel page's video rows so every surface offers
+  /// the same Share / Download / Watch Later / Save Playlist.
+  static void showOptions(
+          BuildContext context, WidgetRef ref, VideoDetails video) =>
+      _showOptions(context, ref, video);
+
   void _open(BuildContext context) {
     Navigator.of(context).push(
-      MaterialPageRoute(
-          builder: (_) => PlayerScreen(videoId: video.id)),
+      MaterialPageRoute(builder: (_) => PlayerScreen(videoId: video.id)),
     );
   }
 
-  String _sizeText(int? bytes) {
+  static String _sizeText(int? bytes) {
     if (bytes == null || bytes <= 0) return 'Size unknown';
     if (bytes >= (1 << 30)) {
       return '${(bytes / (1 << 30)).toStringAsFixed(1)} GB';
@@ -40,7 +47,8 @@ class VideoCard extends ConsumerWidget {
     return '${(bytes / (1 << 20)).toStringAsFixed(1)} MB';
   }
 
-  Future<void> _download(BuildContext context, WidgetRef ref) async {
+  static Future<void> _download(
+      BuildContext context, WidgetRef ref, VideoDetails video) async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(const SnackBar(
       content: Text('ডাউনলোডের অপশন আনা হচ্ছে…'),
@@ -48,11 +56,9 @@ class VideoCard extends ConsumerWidget {
     ));
     List<DownloadOption> options;
     try {
-      options =
-          await ref.read(extractorProvider).getDownloadOptions(video.id);
+      options = await ref.read(extractorProvider).getDownloadOptions(video.id);
     } catch (e) {
-      messenger.showSnackBar(
-          SnackBar(content: Text('অপশন পাওয়া যায়নি: $e')));
+      messenger.showSnackBar(SnackBar(content: Text('অপশন পাওয়া যায়নি: $e')));
       return;
     }
     if (!context.mounted) return;
@@ -89,8 +95,8 @@ class VideoCard extends ConsumerWidget {
                             ? audioOpts.first
                             : null,
                       ));
-                  messenger.showSnackBar(const SnackBar(
-                      content: Text('ডাউনলোড শুরু হয়েছে')));
+                  messenger.showSnackBar(
+                      const SnackBar(content: Text('ডাউনলোড শুরু হয়েছে')));
                 },
               ),
             for (final o in audioOpts)
@@ -103,8 +109,8 @@ class VideoCard extends ConsumerWidget {
                   unawaited(ref
                       .read(downloadsControllerProvider.notifier)
                       .startDownload(o, video));
-                  messenger.showSnackBar(const SnackBar(
-                      content: Text('ডাউনলোড শুরু হয়েছে')));
+                  messenger.showSnackBar(
+                      const SnackBar(content: Text('ডাউনলোড শুরু হয়েছে')));
                 },
               ),
           ],
@@ -113,7 +119,8 @@ class VideoCard extends ConsumerWidget {
     );
   }
 
-  Future<void> _watchLater(BuildContext context, WidgetRef ref) async {
+  static Future<void> _watchLater(
+      BuildContext context, WidgetRef ref, VideoDetails video) async {
     final messenger = ScaffoldMessenger.of(context);
     final notifier = ref.read(playlistsControllerProvider.notifier);
     var playlists = ref.read(playlistsControllerProvider);
@@ -146,14 +153,14 @@ class VideoCard extends ConsumerWidget {
       ),
     );
     messenger.showSnackBar(SnackBar(
-      content: Text(added
-          ? 'Watch Later-এ সেভ হয়েছে'
-          : 'আগেই Watch Later-এ আছে'),
+      content:
+          Text(added ? 'Watch Later-এ সেভ হয়েছে' : 'আগেই Watch Later-এ আছে'),
       duration: const Duration(seconds: 2),
     ));
   }
 
-  void _showOptions(BuildContext context, WidgetRef ref) {
+  static void _showOptions(
+      BuildContext context, WidgetRef ref, VideoDetails video) {
     final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet(
       context: context,
@@ -183,8 +190,7 @@ class VideoCard extends ConsumerWidget {
               title: const Text('শেয়ার'),
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                Share.share(
-                    'https://www.youtube.com/watch?v=${video.id}');
+                Share.share('https://www.youtube.com/watch?v=${video.id}');
               },
             ),
             ListTile(
@@ -192,7 +198,7 @@ class VideoCard extends ConsumerWidget {
               title: const Text('ডাউনলোড'),
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                unawaited(_download(context, ref));
+                unawaited(_download(context, ref, video));
               },
             ),
             ListTile(
@@ -200,7 +206,7 @@ class VideoCard extends ConsumerWidget {
               title: const Text('Watch Later'),
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                unawaited(_watchLater(context, ref));
+                unawaited(_watchLater(context, ref, video));
               },
             ),
             ListTile(
@@ -224,15 +230,22 @@ class VideoCard extends ConsumerWidget {
     final ago = timeAgo(video.uploadDate);
     final meta = <String>[
       video.author,
-      if (video.viewCount != null)
-        '${formatCount(video.viewCount)} views',
+      if (video.viewCount != null) '${formatCount(video.viewCount)} views',
       if (ago.isNotEmpty) ago,
-    ].where((s) => s.isNotEmpty).join(' • ');
+    ].where((s) => s.isNotEmpty).join(' · ');
     final initial = video.author.trim().isNotEmpty
         ? video.author.trim()[0].toUpperCase()
         : '?';
+    // YouTube-style watched-progress: when this video was partly
+    // watched before, a red bar under the thumbnail shows how far.
+    final totalSecs = video.duration?.inSeconds ?? 0;
+    final watchedSecs =
+        ref.read(historyRepositoryProvider).getPosition(video.id);
+    final double? watchedFrac =
+        (totalSecs > 10 && watchedSecs > 5 && watchedSecs < totalSecs - 10)
+            ? watchedSecs / totalSecs
+            : null;
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
       onTap: () => _open(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -242,41 +255,48 @@ class VideoCard extends ConsumerWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: CachedNetworkImage(
-                    imageUrl: video.thumbnailUrl,
-                    fit: BoxFit.cover,
-                    placeholder: (_, __) => Container(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainer),
-                    errorWidget: (_, __, ___) => Container(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .surfaceContainer,
-                      child: const Icon(Icons.broken_image,
-                          color: Colors.grey),
-                    ),
+                CachedNetworkImage(
+                  imageUrl: video.thumbnailUrl,
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => Container(
+                      color: Theme.of(context).colorScheme.surfaceContainer),
+                  errorWidget: (_, __, ___) => Container(
+                    color: Theme.of(context).colorScheme.surfaceContainer,
+                    child: const Icon(Icons.broken_image, color: Colors.grey),
                   ),
                 ),
-                if ((video.duration ?? Duration.zero) >
-                    Duration.zero)
+                if ((video.duration ?? Duration.zero) > Duration.zero)
                   Positioned(
                     right: 6,
                     bottom: 6,
                     child: Container(
-                      padding:
-                          const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
                         color: Colors.black87,
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
                         formatDuration(video.duration),
-                        style: const TextStyle(
-                            fontSize: 11, color: Colors.white),
+                        style:
+                            const TextStyle(fontSize: 11, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                if (watchedFrac != null)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      height: 3,
+                      color: Colors.white24,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: FractionallySizedBox(
+                          widthFactor: watchedFrac,
+                          child: Container(height: 3, color: Colors.redAccent),
+                        ),
                       ),
                     ),
                   ),
@@ -284,54 +304,68 @@ class VideoCard extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: scheme.primaryContainer,
-                child: Text(
-                  initial,
-                  style: TextStyle(
-                    color: scheme.onPrimaryContainer,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Tapping the channel icon opens the channel page.
+                InkWell(
+                  borderRadius: BorderRadius.circular(18),
+                  onTap: video.channelId.isEmpty
+                      ? null
+                      : () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  ChannelScreen(channelId: video.channelId),
+                            ),
+                          ),
+                  child: CircleAvatar(
+                    radius: 18,
+                    backgroundColor: scheme.primaryContainer,
+                    child: Text(
+                      initial,
+                      style: TextStyle(
+                        color: scheme.onPrimaryContainer,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      video.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 15),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      meta,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: scheme.onSurfaceVariant,
-                          fontSize: 12),
-                    ),
-                  ],
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        video.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        meta,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: scheme.onSurfaceVariant, fontSize: 12),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.more_vert, size: 20),
-                color: scheme.onSurface,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(
-                    minWidth: 36, minHeight: 36),
-                onPressed: () => _showOptions(context, ref),
-              ),
-            ],
+                IconButton(
+                  icon: const Icon(Icons.more_vert, size: 20),
+                  color: scheme.onSurface,
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 36, minHeight: 36),
+                  onPressed: () => _showOptions(context, ref, video),
+                ),
+              ],
+            ),
           ),
         ],
       ),

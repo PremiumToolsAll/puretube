@@ -39,12 +39,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         // audio mode shows songs instantly.
         ref.read(musicFeedProvider);
         // Preload the Bengali/Hindi/ghazal/waz rails for both modes.
-        ref
-            .read(homeSectionsProvider.notifier)
-            .loadVideo();
-        ref
-            .read(homeSectionsProvider.notifier)
-            .loadAudio();
+        ref.read(homeSectionsProvider.notifier).loadVideo();
+        ref.read(homeSectionsProvider.notifier).loadAudio();
       }
     });
     // Infinite scroll: load more when near the bottom.
@@ -69,8 +65,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         builder: (ctx) => AlertDialog(
           title: const Text('আগের crash-এর তথ্য'),
           content: SingleChildScrollView(
-            child: SelectableText(fatal,
-                style: const TextStyle(fontSize: 11)),
+            child: SelectableText(fatal, style: const TextStyle(fontSize: 11)),
           ),
           actions: [
             TextButton(
@@ -125,10 +120,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final search = ref.watch(searchControllerProvider);
     final player = ref.watch(playerControllerProvider);
-    final showMini =
-        player.status == PlayerStatus.ready &&
-            player.video != null &&
-            !ref.watch(popupVisibleProvider);
+    final showMini = player.status == PlayerStatus.ready &&
+        player.video != null &&
+        !ref.watch(popupVisibleProvider);
     final isAudioHome = ref.watch(homeModeProvider);
 
     return Scaffold(
@@ -146,36 +140,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         actions: [
           IconButton(
             tooltip: 'Shorts',
-            icon: const Icon(
-                Icons.slow_motion_video_outlined),
+            icon: const Icon(Icons.slow_motion_video_outlined),
             onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                  builder: (_) =>
-                      const ShortsScreen()),
+              MaterialPageRoute(builder: (_) => const ShortsScreen()),
             ),
           ),
           IconButton(
             tooltip: 'Downloads',
             icon: const Icon(Icons.download_outlined),
             onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                  builder: (_) => const DownloadsScreen()),
+              MaterialPageRoute(builder: (_) => const DownloadsScreen()),
             ),
           ),
           IconButton(
             tooltip: 'Library',
             icon: const Icon(Icons.video_library_outlined),
             onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                  builder: (_) => const HistoryScreen()),
+              MaterialPageRoute(builder: (_) => const HistoryScreen()),
             ),
           ),
           IconButton(
             tooltip: 'Settings',
             icon: const Icon(Icons.settings_outlined),
             onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                  builder: (_) => const SettingsScreen()),
+              MaterialPageRoute(builder: (_) => const SettingsScreen()),
             ),
           ),
         ],
@@ -183,56 +171,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       body: Column(
         children: [
           Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
             child: Row(
               children: [
                 Expanded(
                   child: TextField(
                     controller: _searchController,
-                    textInputAction:
-                        TextInputAction.search,
+                    textInputAction: TextInputAction.search,
                     onSubmitted: _search,
-                    style: const TextStyle(
-                        color: Colors.white),
+                    style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
-                      hintText: isAudioHome
-                          ? 'Search songs…'
-                          : 'Search YouTube…',
-                      hintStyle: const TextStyle(
-                          color: Colors.grey),
-                      prefixIcon: const Icon(
-                          Icons.search,
-                          color: Colors.grey),
+                      hintText:
+                          isAudioHome ? 'Search songs…' : 'Search YouTube…',
+                      hintStyle: const TextStyle(color: Colors.grey),
+                      prefixIcon: const Icon(Icons.search, color: Colors.grey),
                       suffixIcon: IconButton(
-                        icon: const Icon(Icons.clear,
-                            color: Colors.grey),
+                        icon: const Icon(Icons.clear, color: Colors.grey),
                         onPressed: () {
                           _searchController.clear();
-                          ref
-                              .read(
-                                  searchControllerProvider
-                                      .notifier)
-                              .clear();
-                          ref
-                              .read(audioSongSearchProvider
-                                  .notifier)
-                              .clear();
+                          ref.read(searchControllerProvider.notifier).clear();
+                          ref.read(audioSongSearchProvider.notifier).clear();
                         },
                       ),
                       filled: true,
-                      fillColor: Theme.of(context)
-                          .colorScheme
-                          .surfaceContainer,
-                      contentPadding:
-                          const EdgeInsets.symmetric(
-                              vertical: 0),
-                      border:
-                          OutlineInputBorder(
-                        borderRadius:
-                            BorderRadius.circular(
-                                24),
-                        borderSide:
-                            BorderSide.none,
+                      fillColor: Theme.of(context).colorScheme.surfaceContainer,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
                       ),
                     ),
                   ),
@@ -244,34 +210,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 // audio home.
                 Consumer(
                   builder: (_, ref, __) {
-                    final isAudio =
-                        ref.watch(homeModeProvider);
+                    final isAudio = ref.watch(homeModeProvider);
                     return IconButton(
-                      tooltip: isAudio
-                          ? 'Video mode'
-                          : 'Audio mode',
+                      tooltip: isAudio ? 'Video mode' : 'Audio mode',
                       style: IconButton.styleFrom(
                         backgroundColor: isAudio
-                            ? Theme.of(context)
-                                .colorScheme
-                                .primary
-                            : Theme.of(context)
-                                .colorScheme
-                                .surfaceContainer,
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).colorScheme.surfaceContainer,
                       ),
                       icon: Icon(
                           isAudio
-                              ? Icons
-                                  .videocam_outlined
-                              : Icons
-                                  .headphones_outlined,
-                          color: isAudio
-                              ? Colors.black
-                              : Colors.white),
-                      onPressed: () => ref
-                          .read(homeModeProvider
-                              .notifier)
-                          .toggle(),
+                              ? Icons.videocam_outlined
+                              : Icons.headphones_outlined,
+                          color: isAudio ? Colors.black : Colors.white),
+                      onPressed: () =>
+                          ref.read(homeModeProvider.notifier).toggle(),
                     );
                   },
                 ),
@@ -283,65 +236,51 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             SizedBox(
               height: 42,
               child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: _categories.length,
-              separatorBuilder: (_, __) =>
-                  const SizedBox(width: 8),
-              itemBuilder: (ctx, i) {
-                final selected =
-                    _searchController.text == _categories[i];
-                return ActionChip(
-                  backgroundColor: selected
-                      ? Theme.of(context).colorScheme.primary
-                      : Theme.of(context)
-                          .colorScheme
-                          .surfaceContainer,
-                  side: BorderSide(
-                      color: selected
-                          ? Theme.of(context)
-                              .colorScheme
-                              .primary
-                          : Theme.of(context)
-                              .colorScheme
-                              .outlineVariant,
-                      width: selected ? 1.5 : 0.5),
-                  label: Text(_categories[i],
-                      style: TextStyle(
-                          color: selected
-                              ? Colors.black
-                              : Colors.white70,
-                          fontWeight: selected
-                              ? FontWeight.bold
-                              : FontWeight.normal)),
-                  onPressed: () {
-                    setState(() {
-                      _searchController.text = _categories[i];
-                    });
-                    _search(_categories[i]);
-                  },
-                );
-              },
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: _categories.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (ctx, i) {
+                  final selected = _searchController.text == _categories[i];
+                  return ActionChip(
+                    backgroundColor: selected
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.surfaceContainer,
+                    side: BorderSide(
+                        color: selected
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).colorScheme.outlineVariant,
+                        width: selected ? 1.5 : 0.5),
+                    label: Text(_categories[i],
+                        style: TextStyle(
+                            color: selected ? Colors.black : Colors.white70,
+                            fontWeight: selected
+                                ? FontWeight.bold
+                                : FontWeight.normal)),
+                    onPressed: () {
+                      setState(() {
+                        _searchController.text = _categories[i];
+                      });
+                      _search(_categories[i]);
+                    },
+                  );
+                },
+              ),
             ),
-          ),
           const SizedBox(height: 4),
           Expanded(
             child: isAudioHome
                 ? const AudioHome()
                 : RefreshIndicator(
-                    color:
-                        Theme.of(context).colorScheme.primary,
-                    backgroundColor: Theme.of(context)
-                        .colorScheme
-                        .surfaceContainer,
+                    color: Theme.of(context).colorScheme.primary,
+                    backgroundColor:
+                        Theme.of(context).colorScheme.surfaceContainer,
                     onRefresh: () async {
                       await ref
                           .read(homeSectionsProvider.notifier)
                           .refreshVideo();
                       await ref
-                          .read(searchControllerProvider
-                              .notifier)
+                          .read(searchControllerProvider.notifier)
                           .refreshFeed();
                     },
                     child: _buildResults(search),
@@ -349,8 +288,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
       ),
-      bottomNavigationBar:
-          showMini ? const MiniPlayerBar() : null,
+      bottomNavigationBar: showMini ? const MiniPlayerBar() : null,
     );
   }
 
@@ -371,11 +309,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           itemBuilder: (_, __) => Padding(
             padding: const EdgeInsets.only(bottom: 18),
             child: Shimmer.fromColors(
-              baseColor:
-                  Theme.of(context).colorScheme.surfaceContainer,
-              highlightColor: Theme.of(context)
-                  .colorScheme
-                  .surfaceContainerHigh,
+              baseColor: Theme.of(context).colorScheme.surfaceContainer,
+              highlightColor:
+                  Theme.of(context).colorScheme.surfaceContainerHigh,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -418,13 +354,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.error_outline,
-                    size: 48, color: Colors.grey),
+                const Icon(Icons.error_outline, size: 48, color: Colors.grey),
                 const SizedBox(height: 12),
                 Text(s.errorMessage ?? 'Search failed.',
                     textAlign: TextAlign.center,
-                    style:
-                        const TextStyle(color: Colors.grey)),
+                    style: const TextStyle(color: Colors.grey)),
                 const SizedBox(height: 12),
                 TextButton(
                   onPressed: () => _search(s.query),
@@ -447,11 +381,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
               sliver: SliverList.builder(
                 // Extra item at the end for the loading indicator.
-                itemCount:
-                    s.results.length + (s.loadingMore ? 1 : 0),
+                itemCount: s.results.length + (s.loadingMore ? 1 : 0),
                 itemBuilder: (ctx, i) {
                   if (i >= s.results.length) {
                     return const Center(
