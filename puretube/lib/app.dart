@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import 'core/navigation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -49,6 +51,7 @@ class _PureTubeAppState extends ConsumerState<PureTubeApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: rootNavigatorKey,
       title: 'PureTube',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkFor(ref.watch(themeOptionProvider)),

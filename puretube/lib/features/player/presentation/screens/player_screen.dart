@@ -4109,6 +4109,29 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
   double _dragFrac = 0;
   final _barKey = GlobalKey();
 
+  // Deliberate-seek gate (portrait only): a touch on the bar must
+  // prove itself a horizontal drag before it may scrub — a tap,
+  // jitter, or a vertical/diagonal pull never seeks. The drag must
+  // travel >= [_gateSlop] dp with the horizontal component clearly
+  // dominant (>= [_gateDominance]x the vertical). A touch that
+  // commits to a non-horizontal direction is dead for its whole
+  // sequence, and a second finger cancels the scrub. Landscape
+  // keeps the direct press-and-scrub behavior.
+  static const double _gateSlop = 14;
+  static const double _gateDominance = 1.3;
+  int? _gatePointer;
+  Offset? _gateStart;
+  bool _gateActive = false;
+  bool _gateRejected = false;
+  bool _gatePortrait = false;
+
+  void _gateReset() {
+    _gatePointer = null;
+    _gateStart = null;
+    _gateActive = false;
+    _gateRejected = false;
+  }
+
   double _fracFromGlobal(Offset globalPos) {
     final box = _barKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return 0;
@@ -4195,23 +4218,76 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
                         Listener(
                           behavior: HitTestBehavior.opaque,
                           onPointerDown: (e) {
-                            setState(() {
-                              _dragging = true;
-                              _dragFrac = _fracFromGlobal(e.position);
-                            });
+                            if (_gatePointer != null) {
+                              // Second finger mid-touch: cancel the
+                              // scrub outright (no seek on release).
+                              setState(() {
+                                _dragging = false;
+                                _gateRejected = true;
+                                _gateActive = false;
+                              });
+                              return;
+                            }
+                            _gatePointer = e.pointer;
+                            _gateStart = e.position;
+                            _gateActive = false;
+                            _gateRejected = false;
+                            _gatePortrait =
+                                MediaQuery.of(context).orientation ==
+                                    Orientation.portrait;
+                            if (!_gatePortrait) {
+                              // Landscape: direct behavior, as before.
+                              _gateActive = true;
+                              setState(() {
+                                _dragging = true;
+                                _dragFrac = _fracFromGlobal(e.position);
+                              });
+                            }
+                            // Portrait: stay pending — the thumb does
+                            // not jump and nothing seeks until the
+                            // drag proves itself horizontal.
                           },
                           onPointerMove: (e) {
-                            if (!_dragging) return;
-                            setState(
-                                () => _dragFrac = _fracFromGlobal(e.position));
+                            if (e.pointer != _gatePointer) return;
+                            if (_gateActive) {
+                              if (_dragging) {
+                                setState(() => _dragFrac =
+                                    _fracFromGlobal(e.position));
+                              }
+                              return;
+                            }
+                            if (_gateRejected || !_gatePortrait) return;
+                            final start = _gateStart;
+                            if (start == null) return;
+                            final dx = (e.position.dx - start.dx).abs();
+                            final dy = (e.position.dy - start.dy).abs();
+                            if (dx < _gateSlop && dy < _gateSlop) return;
+                            if (dx > dy * _gateDominance) {
+                              _gateActive = true;
+                              setState(() {
+                                _dragging = true;
+                                _dragFrac = _fracFromGlobal(e.position);
+                              });
+                            } else if (dy > dx * _gateDominance) {
+                              _gateRejected = true;
+                            }
+                            // Ambiguous diagonal: stay pending.
                           },
-                          onPointerUp: (_) async {
+                          onPointerUp: (e) async {
+                            if (e.pointer != _gatePointer) return;
+                            final wasActive = _gateActive && _dragging;
                             final f = _dragFrac;
+                            _gateReset();
                             setState(() => _dragging = false);
-                            await _seekToFrac(f, duration);
+                            if (wasActive) {
+                              await _seekToFrac(f, duration);
+                            }
                           },
-                          onPointerCancel: (_) =>
-                              setState(() => _dragging = false),
+                          onPointerCancel: (e) {
+                            if (e.pointer != _gatePointer) return;
+                            _gateReset();
+                            setState(() => _dragging = false);
+                          },
                           child: Container(
                             key: _barKey,
                             height: 36,

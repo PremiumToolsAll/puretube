@@ -5,6 +5,7 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:puretube_playback/puretube_playback.dart';
 
 import '../../../../core/database/hive_setup.dart';
+import '../../../../core/navigation.dart';
 import '../../../../core/di/providers.dart';
 import '../../../../core/widgets/press_scale.dart';
 import '../providers/player_controller.dart';
@@ -108,7 +109,7 @@ class _LiveCornerPlayerState
     }
     // PlayerScreen skips loadVideo when the id is unchanged,
     // so playback position is preserved.
-    await Navigator.of(context).push(
+    await rootNavigatorKey.currentState?.push(
       MaterialPageRoute(
         builder: (_) => PlayerScreen(videoId: videoId),
       ),
@@ -359,7 +360,7 @@ class _ResumeCornerPlayerState
             onPanUpdate: (d) => setState(() {
               _offset = _Corner.clampOffset(offset + d.delta, size);
             }),
-            onTap: () => Navigator.of(context).push(
+            onTap: () => rootNavigatorKey.currentState?.push(
               MaterialPageRoute(
                 builder: (_) => PlayerScreen(
                   videoId: id,
