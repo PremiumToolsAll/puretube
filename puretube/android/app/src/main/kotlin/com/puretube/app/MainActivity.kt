@@ -9,9 +9,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.view.OrientationEventListener
-import android.view.Surface
 import android.content.res.Configuration
 import android.graphics.drawable.Icon
 import android.os.Build
@@ -50,14 +51,17 @@ class MainActivity : AudioServiceActivity() {
     // Flutter can ALLOW both landscape sides, but on many phones
     // (MIUI especially) the activity then sticks to one side and
     // never flips when the user turns the phone over. While the
-    // full player is open, an OrientationEventListener watches the
-    // physical tilt and re-locks requestedOrientation to the side
-    // the phone is actually held on. The sector<->rotation pairing
-    // is calibrated at runtime from the system's own first pick,
-    // so no device-specific sign convention is assumed.
-    private var orientationListener: OrientationEventListener? = null
-    private var followSector: Int = -1
-    private var followRotation: Int = Surface.ROTATION_0
+    // full player is open, the accelerometer's gravity direction
+    // decides the side DIRECTLY (no calibration — the first
+    // attempt calibrated against the system's default pick, which
+    // blessed the wrong side whenever fullscreen was entered from
+    // portrait): gravity mostly along device +x means the phone's
+    // top points LEFT -> LANDSCAPE; along -x, top points RIGHT ->
+    // REVERSE_LANDSCAPE.
+    private var sensorManager: SensorManager? = null
+    private var accelListener: SensorEventListener? = null
+    private var followDesired: Int = -1
+    private var followStable: Int = 0
     private var followLastFlipMs: Long = 0L
     private var pipPlaying = false
     private var autoPipEnabled = false
@@ -241,58 +245,69 @@ class MainActivity : AudioServiceActivity() {
     }
 
     private fun startLandscapeFollow() {
-        followSector = -1
+        followDesired = -1
+        followStable = 0
         followLastFlipMs = 0L
-        if (orientationListener == null) {
-            orientationListener = object :
-                OrientationEventListener(this, SensorManager.SENSOR_DELAY_NORMAL) {
-                override fun onOrientationChanged(orientation: Int) {
-                    if (orientation == ORIENTATION_UNKNOWN) return
-                    // Landscape sectors are centred on 90 and 270.
-                    val sector = when (orientation) {
-                        in 45..134 -> 1
-                        in 225..314 -> 3
-                        else -> -1
-                    }
-                    if (sector == -1) return
-                    @Suppress("DEPRECATION")
-                    val rotation = windowManager.defaultDisplay.rotation
-                    if (followSector == -1) {
-                        // Calibrate: pair the sector the phone is
-                        // physically held in with the landscape side
-                        // the system just picked for it.
-                        followSector = sector
-                        followRotation = rotation
+        if (sensorManager == null) {
+            sensorManager =
+                getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        }
+        if (accelListener == null) {
+            accelListener = object : SensorEventListener {
+                override fun onSensorChanged(event: SensorEvent) {
+                    val ax = event.values[0]
+                    val ay = event.values[1]
+                    // Only a clear landscape hold counts: gravity
+                    // mostly along the device's sideways axis.
+                    if (Math.abs(ax) < 5.0f ||
+                        Math.abs(ax) < Math.abs(ay) * 1.3f
+                    ) {
+                        followStable = 0
                         return
                     }
-                    if (sector == followSector) {
-                        followRotation = rotation
-                        return
+                    val desired = if (ax > 0) {
+                        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                    } else {
+                        ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
                     }
-                    // The phone turned over to the other landscape
-                    // sector: flip the activity to match the hold.
+                    if (desired == followDesired) {
+                        followStable++
+                    } else {
+                        followDesired = desired
+                        followStable = 1
+                    }
+                    if (followStable < 3) return
+                    if (requestedOrientation == desired) return
                     val now = System.currentTimeMillis()
-                    if (now - followLastFlipMs < 900) return
+                    if (now - followLastFlipMs < 700) return
                     followLastFlipMs = now
-                    followSector = sector
-                    requestedOrientation =
-                        if (followRotation == Surface.ROTATION_90) {
-                            ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                        } else {
-                            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                        }
+                    requestedOrientation = desired
+                }
+
+                override fun onAccuracyChanged(
+                    sensor: Sensor?,
+                    accuracy: Int
+                ) {
                 }
             }
         }
-        orientationListener?.enable()
+        val sensor =
+            sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        if (sensor != null) {
+            sensorManager?.registerListener(
+                accelListener, sensor, SensorManager.SENSOR_DELAY_UI
+            )
+        }
     }
 
     private fun stopLandscapeFollow() {
-        orientationListener?.disable()
-        followSector = -1
+        accelListener?.let { sensorManager?.unregisterListener(it) }
+        followDesired = -1
+        followStable = 0
     }
 
     override fun onDestroy() {
+        stopLandscapeFollow()
         pipReceiver?.let {
             try {
                 unregisterReceiver(it)
