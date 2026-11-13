@@ -15,7 +15,6 @@ import '../../../../core/di/providers.dart';
 import '../../../player/presentation/widgets/mini_player_bar.dart';
 import '../widgets/audio_home.dart';
 import '../widgets/video_card.dart';
-import '../../../player/presentation/providers/popup_visibility.dart';
 import '../../../library/presentation/screens/downloads_screen.dart';
 import '../../../library/presentation/providers/library_providers.dart';
 import '../../../library/presentation/screens/history_screen.dart';
@@ -235,9 +234,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final search = ref.watch(searchControllerProvider);
     final player = ref.watch(playerControllerProvider);
+    // Now-playing bar: always visible while something is playing, in
+    // BOTH video and audio mode. It used to hide whenever the floating
+    // corner popup flag was set — but the corner popup never renders in
+    // audio mode, so after Back in audio mode nothing at all was visible
+    // in the app while the song kept playing. The bar (thumbnail +
+    // title + play/pause, tap to reopen) is the guaranteed surface; the
+    // corner popup still floats above it in video mode when it renders.
     final showMini = player.status == PlayerStatus.ready &&
-        player.video != null &&
-        !ref.watch(popupVisibleProvider);
+        player.video != null;
     final isAudioHome = ref.watch(homeModeProvider);
 
     return Scaffold(
