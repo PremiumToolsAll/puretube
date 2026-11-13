@@ -793,7 +793,7 @@ class YoutubeExtractorService {
           .timeout(const Duration(seconds: 25));
       return ChannelInfo(
         id: ch.id.value,
-        title: sanitizeUtf16(ch.title),
+        title: stripTopicSuffix(sanitizeUtf16(ch.title)),
         logoUrl: ch.logoUrl,
         bannerUrl: ch.bannerUrl,
         subscriberCount: ch.subscribersCount,

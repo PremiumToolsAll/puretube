@@ -47,6 +47,18 @@ String sanitizeUtf16(String input) {
   return buffer.toString();
 }
 
+/// YouTube auto-generates "Artist - Topic" channels for music uploads;
+/// the suffix is noise in the UI, so it is dropped wherever a channel
+/// or author name enters the model layer.
+String stripTopicSuffix(String name) {
+  const suffix = ' - Topic';
+  if (name.length > suffix.length &&
+      name.toLowerCase().endsWith(suffix.toLowerCase())) {
+    return name.substring(0, name.length - suffix.length).trimRight();
+  }
+  return name;
+}
+
 class VideoDetails {
   final String id;
   final String title;
@@ -74,7 +86,7 @@ class VideoDetails {
       VideoDetails._(
         id: id,
         title: sanitizeUtf16(title),
-        author: sanitizeUtf16(author),
+        author: stripTopicSuffix(sanitizeUtf16(author)),
         channelId: channelId,
         duration: duration,
         thumbnailUrl: thumbnailUrl,
