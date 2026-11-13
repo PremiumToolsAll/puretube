@@ -4226,6 +4226,12 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
                         Listener(
                           behavior: HitTestBehavior.opaque,
                           onPointerDown: (e) {
+                            // Stale pointer events can arrive after this
+                            // seek bar was unmounted (fullscreen rebuild /
+                            // video change recreates the subtree): setState
+                            // on an unmounted State crashes in release
+                            // mode (State.setState dereferences _element!).
+                            if (!mounted) return;
                             if (_gatePointer != null) {
                               // Second finger mid-touch: cancel the
                               // scrub outright (no seek on release).
@@ -4256,6 +4262,7 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
                             // drag proves itself horizontal.
                           },
                           onPointerMove: (e) {
+                            if (!mounted) return;
                             if (e.pointer != _gatePointer) return;
                             if (_gateActive) {
                               if (_dragging) {
@@ -4282,6 +4289,7 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
                             // Ambiguous diagonal: stay pending.
                           },
                           onPointerUp: (e) async {
+                            if (!mounted) return;
                             if (e.pointer != _gatePointer) return;
                             final wasActive = _gateActive && _dragging;
                             final f = _dragFrac;
@@ -4292,6 +4300,7 @@ class _PlayerSeekBarState extends ConsumerState<_PlayerSeekBar> {
                             }
                           },
                           onPointerCancel: (e) {
+                            if (!mounted) return;
                             if (e.pointer != _gatePointer) return;
                             _gateReset();
                             setState(() => _dragging = false);
