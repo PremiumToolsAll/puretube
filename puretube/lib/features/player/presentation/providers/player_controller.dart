@@ -660,11 +660,6 @@ class PlayerController extends Notifier<PlayerUiState>
 
     _pipSub = _pip.onPipChanged.listen((inPip) {
       state = state.copyWith(isInPip: inPip);
-      if (inPip) {
-        // Native PiP owns the window now: drop the in-app floating popup
-        // so the video never renders twice.
-        ref.read(popupVisibleProvider.notifier).state = false;
-      }
     });
     // PiP window transport buttons (Previous / Play-Pause / Next)
     // drive the SAME controller paths as every other surface.
@@ -757,7 +752,30 @@ class PlayerController extends Notifier<PlayerUiState>
 
   // ---------------- loading ----------------
 
-  Future<void> loadVideo(String videoId) async {
+  /// In-flight load dedupe: a second loadVideo() for the same video
+  /// while one is running just joins the first instead of fetching
+  /// everything twice (the player screen's initState re-requests the
+  /// same video right after an unawaited tap-start).
+  String? _loadingVideoId;
+  Future<void>? _loadingFuture;
+
+  Future<void> loadVideo(String videoId, {VideoDetails? initialVideo}) {
+    if (_loadingVideoId == videoId && _loadingFuture != null) {
+      return _loadingFuture!;
+    }
+    _loadingVideoId = videoId;
+    final f = _loadVideoInner(videoId, initialVideo: initialVideo);
+    _loadingFuture = f;
+    return f.whenComplete(() {
+      if (_loadingVideoId == videoId) {
+        _loadingVideoId = null;
+        _loadingFuture = null;
+      }
+    });
+  }
+
+  Future<void> _loadVideoInner(String videoId,
+      {VideoDetails? initialVideo}) async {
     _directFallbackFor = null;
     final previousSpeed = state.speed;
     final previousSkip = state.skipSponsors;
@@ -847,6 +865,26 @@ class PlayerController extends Notifier<PlayerUiState>
         video = hit.details;
         streams = hit.streams;
         segments = hit.segments;
+      } else if (initialVideo != null && initialVideo.id == videoId) {
+        // Instant start (audio taps): the list already knows the
+        // title/author/thumbnail/duration, so playback starts from
+        // that metadata right now — no waiting for the details
+        // chain (session → Piped → Invidious) to answer. The plugin
+        // resolves the stream itself from the watch URL. Details and
+        // sponsor segments refresh in the background.
+        video = initialVideo;
+        streams = null;
+        segments = const [];
+        unawaited(_extractor.getVideoDetails(videoId).then((d) {
+          if (state.videoId == videoId) {
+            state = state.copyWith(video: d);
+          }
+        }, onError: (_) {}));
+        unawaited(_sponsorBlock.getSegments(videoId).then((s) {
+          if (state.videoId == videoId) {
+            state = state.copyWith(sponsorSegments: s);
+          }
+        }, onError: (_) {}));
       } else {
         // Playback starts as soon as the DETAILS land: the Dart
         // stream chain is fallback-only data, so it no longer blocks
@@ -864,12 +902,19 @@ class PlayerController extends Notifier<PlayerUiState>
             state = state.copyWith(streams: s);
           }
         }, onError: (_) {}));
-        final results = await Future.wait([
-          _extractor.getVideoDetails(videoId),
-          _sponsorBlock.getSegments(videoId),
-        ]);
-        video = results[0] as VideoDetails;
-        segments = results[1] as List<SponsorSegment>;
+        // SponsorBlock no longer blocks the start either: segments
+        // patch into state when they arrive, so skipping starts
+        // working a moment later instead of delaying the first sound.
+        unawaited(_sponsorBlock.getSegments(videoId).then((s) {
+          if (state.videoId == videoId) {
+            state = state.copyWith(sponsorSegments: s);
+          }
+        }, onError: (_) {}));
+        video = await _extractor.getVideoDetails(videoId);
+        segments = const [];
+        // Stale: the user already moved to another video while the
+        // details were in flight — don't overwrite its state.
+        if (state.videoId != videoId) return;
       }
 
       if (keepAudioOnly) {
@@ -1193,11 +1238,14 @@ class PlayerController extends Notifier<PlayerUiState>
   /// Starts [videoId] directly in audio-only mode (used by the audio home).
   /// Persists the preference first so [loadVideo]'s keepAudioOnly picks it
   /// up even from an idle state (unlike [toggleAudioOnly], which needs a
-  /// ready player).
-  Future<void> playAudioOnly(String videoId) async {
+  /// ready player). Pass the tapped list item as [initialVideo] and the
+  /// player starts from its metadata at once, without waiting for the
+  /// details chain.
+  Future<void> playAudioOnly(String videoId,
+      {VideoDetails? initialVideo}) async {
     _prefAudioOnly = true;
     unawaited(_saveAudioOnlyPref(true));
-    await loadVideo(videoId);
+    await loadVideo(videoId, initialVideo: initialVideo);
   }
 
   Future<void> enterPip() async {

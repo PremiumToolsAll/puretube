@@ -371,7 +371,13 @@ class _ChannelRowState extends ConsumerState<_ChannelRow> {
 class PlayerScreen extends ConsumerStatefulWidget {
   final String videoId;
   final Duration? initialPosition;
-  const PlayerScreen({super.key, required this.videoId, this.initialPosition});
+
+  /// Metadata the tap source already knows (title/author/thumbnail/
+  /// duration): when given, playback starts from it at once instead
+  /// of waiting for the details chain — the tap feels instant.
+  final VideoDetails? initialVideo;
+  const PlayerScreen(
+      {super.key, required this.videoId, this.initialPosition, this.initialVideo});
 
   @override
   ConsumerState<PlayerScreen> createState() => _PlayerScreenState();
@@ -483,14 +489,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _fullPlayerOpenNotifier = ref.read(fullPlayerOpenProvider.notifier);
     _playerNotifier = ref.read(playerControllerProvider.notifier);
     _historyRepo = ref.read(historyRepositoryProvider);
-    // Fullscreen player takes over: hide the floating popup window.
-    ref.read(popupVisibleProvider.notifier).state = false;
     _fullPlayerOpenNotifier.push();
     final st = ref.read(playerControllerProvider);
     if (st.videoId != widget.videoId || st.status != PlayerStatus.ready) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          ref.read(playerControllerProvider.notifier).loadVideo(widget.videoId);
+          ref.read(playerControllerProvider.notifier).loadVideo(
+              widget.videoId,
+              initialVideo: widget.initialVideo);
         }
       });
     }
@@ -1363,16 +1369,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       },
                     ),
                     ListTile(
-                      leading: const Icon(Icons.picture_in_picture_outlined),
-                      title: const Text('Popup player'),
-                      subtitle: const Text('Floating window over the app'),
-                      onTap: () {
-                        Navigator.pop(ctx); // close the sheet
-                        Navigator.pop(context); // leave fullscreen player
-                        ref.read(popupVisibleProvider.notifier).state = true;
-                      },
-                    ),
-                    ListTile(
                       leading: const Icon(Icons.bedtime),
                       title: const Text('Sleep timer'),
                       subtitle: Text(ui.sleepRemaining != null
@@ -1847,12 +1843,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     // Audio (music) mode: Spotify-style player with the gold theme.
     // Playback is owned by PureTubeAudioHandler (audio_service), so it
     // keeps playing in the background even if this screen is popped.
-    // System back shrinks to the popup player (YouTube-style).
+    // System back leaves the player; the now-playing bar stays at the
+    // bottom of Home.
     if (uiState.audioOnly && uiState.video != null) {
       return PopScope(
         canPop: false,
         onPopInvokedWithResult: (didPop, _) {
-          if (!didPop) _shrinkToPopup();
+          if (!didPop) _goBack();
         },
         child: Scaffold(
           backgroundColor: Colors.black,
@@ -1861,11 +1858,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       );
     }
 
-    // System back shrinks to the popup player (YouTube-style).
+    // System back leaves the player; the now-playing bar stays at the
+    // bottom of Home.
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _shrinkToPopup();
+        if (!didPop) _goBack();
       },
       child: Scaffold(
         backgroundColor: _willowBg,
@@ -1941,7 +1939,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     icon: const Icon(Icons.keyboard_arrow_down,
                         color: Colors.white, size: 32),
                     // Audio keeps playing in the background.
-                    onPressed: _shrinkToPopup,
+                    onPressed: _goBack,
                   ),
                   Expanded(
                     child: Column(
@@ -2447,14 +2445,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     ));
   }
 
-  /// Back during playback shrinks to the floating popup player
-  /// (YouTube-style) instead of just closing. Tapping the popup
-  /// reopens this fullscreen player.
-  void _shrinkToPopup() {
-    final uiState = ref.read(playerControllerProvider);
-    if (uiState.status == PlayerStatus.ready && uiState.video != null) {
-      ref.read(popupVisibleProvider.notifier).state = true;
-    }
+  /// Back / minimize during playback just leaves the player: playback
+  /// keeps going and the now-playing bar stays at the bottom of Home
+  /// (the floating popup window was removed 2026-11-13 — the bar alone
+  /// is the after-Back surface, in both audio and video mode).
+  void _goBack() {
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -2802,7 +2797,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           PressIconButton(
             tooltip: 'Close',
             // Back keeps audio playing in the background (mini player).
-            onPressed: _shrinkToPopup,
+            onPressed: _goBack,
             icon: const Icon(Icons.close, color: Colors.white),
           ),
           Expanded(
@@ -3568,12 +3563,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               if (uiState.pipSupported) {
                 notifier.enterPip();
               } else {
-                // No native PiP on this device: fall back to the in-app
-                // floating window (same flow as the "Popup player"
-                // menu item — leave the fullscreen player first so the
-                // window floats over the previous screen).
+                // No native PiP on this device: just leave the player —
+                // playback continues and the now-playing bar stays at
+                // the bottom of Home. (The in-app floating window was
+                // removed 2026-11-13.)
                 Navigator.pop(context);
-                ref.read(popupVisibleProvider.notifier).state = true;
               }
             },
           ),

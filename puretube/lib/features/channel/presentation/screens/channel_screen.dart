@@ -375,7 +375,9 @@ class _ChannelScreenState extends ConsumerState<ChannelScreen>
         final v = list[i];
         return InkWell(
           onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => PlayerScreen(videoId: v.id)),
+            MaterialPageRoute(
+                builder: (_) =>
+                    PlayerScreen(videoId: v.id, initialVideo: v)),
           ),
           child: Stack(
             fit: StackFit.expand,
@@ -422,7 +424,9 @@ class _VideoRow extends ConsumerWidget {
     ].join(' · ');
     return InkWell(
       onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => PlayerScreen(videoId: video.id)),
+        MaterialPageRoute(
+            builder: (_) =>
+                PlayerScreen(videoId: video.id, initialVideo: video)),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),

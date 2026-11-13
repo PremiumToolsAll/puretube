@@ -211,11 +211,27 @@ class AudioSearchController extends StateNotifier<AudioSearchState> {
     try {
       // Audio search shows songs ONLY (YouTube Music) — no video
       // results mixed in.
-      final page =
-          await _ref.read(ytMusicProvider).searchSongs(query);
+      var page = await _ref.read(ytMusicProvider).searchSongs(query);
       if (myToken != _token) return;
+      var shownQuery = query;
+      // Typo tolerance: a misspelled query usually finds nothing.
+      // Ask YouTube's own suggestions (which correct the spelling)
+      // and retry with the top suggestion instead of showing nothing.
+      if (page.songs.isEmpty) {
+        final fixed = await _correctedQuery(query);
+        if (fixed != null) {
+          final retry =
+              await _ref.read(ytMusicProvider).searchSongs(fixed);
+          if (myToken != _token) return;
+          if (retry.songs.isNotEmpty) {
+            page = retry;
+            shownQuery = fixed;
+          }
+        }
+      }
       _continuation = page.continuation;
       state = state.copyWith(
+        query: shownQuery,
         songs: page.songs,
         loading: false,
         hasMore: page.continuation != null,
@@ -227,6 +243,23 @@ class AudioSearchController extends StateNotifier<AudioSearchState> {
           loading: false, error: 'Search failed. Try again.');
     }
     _busy = false;
+  }
+
+  /// Typo correction via YouTube's suggest endpoint: returns the top
+  /// suggestion when it differs from the typed query, else null.
+  /// Best-effort — any failure just means no correction.
+  Future<String?> _correctedQuery(String q) async {
+    try {
+      final suggestions = await _ref
+          .read(extractorProvider)
+          .getSearchSuggestions(q)
+          .timeout(const Duration(seconds: 5));
+      for (final s in suggestions) {
+        final t = s.trim();
+        if (t.isNotEmpty && t.toLowerCase() != q.toLowerCase()) return t;
+      }
+    } catch (_) {}
+    return null;
   }
 
   Future<void> loadMore() async {

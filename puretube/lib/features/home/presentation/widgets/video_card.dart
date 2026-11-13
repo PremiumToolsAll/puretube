@@ -35,7 +35,9 @@ class VideoCard extends ConsumerWidget {
 
   void _open(BuildContext context) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => PlayerScreen(videoId: video.id)),
+      MaterialPageRoute(
+          builder: (_) =>
+              PlayerScreen(videoId: video.id, initialVideo: video)),
     );
   }
 

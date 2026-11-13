@@ -203,14 +203,33 @@ class SearchController extends Notifier<SearchState> {
         loadingMore: false,
         hasMore: true);
     try {
-      final session = await ref
+      var session = await ref
           .read(extractorProvider)
           .startPagedSearch(q, limit: 25);
+      var shownQuery = q;
+      var firstPage = session.firstPage;
+      // Typo tolerance: a misspelled query usually finds nothing.
+      // Ask YouTube's own suggestions (which correct the spelling)
+      // and retry with the top suggestion instead of showing nothing.
+      if (firstPage.isEmpty) {
+        final fixed = await _correctedQuery(q);
+        if (fixed != null) {
+          final retry = await ref
+              .read(extractorProvider)
+              .startPagedSearch(fixed, limit: 25);
+          if (retry.firstPage.isNotEmpty) {
+            session = retry;
+            firstPage = retry.firstPage;
+            shownQuery = fixed;
+          }
+        }
+      }
       _session = session;
       state = state.copyWith(
         status: SearchStatus.done,
-        results: _applyFilters(session.firstPage, state.filters),
-        hasMore: session.firstPage.isNotEmpty,
+        query: shownQuery,
+        results: _applyFilters(firstPage, state.filters),
+        hasMore: firstPage.isNotEmpty,
       );
     } on PureTubeException catch (e) {
       state = state.copyWith(
@@ -220,6 +239,23 @@ class SearchController extends Notifier<SearchState> {
           status: SearchStatus.error,
           errorMessage: 'Search failed: $e');
     }
+  }
+
+  /// Typo correction via YouTube's suggest endpoint: returns the top
+  /// suggestion when it differs from the typed query, else null.
+  /// Best-effort — any failure just means no correction.
+  Future<String?> _correctedQuery(String q) async {
+    try {
+      final suggestions = await ref
+          .read(extractorProvider)
+          .getSearchSuggestions(q)
+          .timeout(const Duration(seconds: 5));
+      for (final s in suggestions) {
+        final t = s.trim();
+        if (t.isNotEmpty && t.toLowerCase() != q.toLowerCase()) return t;
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// Loads the next page of results (infinite scroll).

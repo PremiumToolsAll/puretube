@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -53,14 +55,14 @@ class _AudioHomeState extends ConsumerState<AudioHome> {
     }
   }
 
-  Future<void> _playSong(String videoId) async {
-    await ref
+  void _playSong(VideoDetails song) {
+    // Open the player IMMEDIATELY with the tapped song's own metadata —
+    // the load runs in the background, so the tap never feels dead.
+    unawaited(ref
         .read(playerControllerProvider.notifier)
-        .playAudioOnly(videoId);
-    if (mounted) {
-      Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => PlayerScreen(videoId: videoId)));
-    }
+        .playAudioOnly(song.id, initialVideo: song));
+    Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => PlayerScreen(videoId: song.id)));
   }
 
   @override
@@ -137,7 +139,7 @@ class _AudioHomeState extends ConsumerState<AudioHome> {
                     itemBuilder: (c, i) => _ArtworkCard(
                       song: section.items[i],
                       onTap: () =>
-                          _playSong(section.items[i].id),
+                          _playSong(section.items[i]),
                     ),
                   ),
                 ),
@@ -158,7 +160,7 @@ class _AudioHomeState extends ConsumerState<AudioHome> {
                   itemCount: trending.length,
                   itemBuilder: (c, i) => _ArtworkCard(
                     song: trending[i],
-                    onTap: () => _playSong(trending[i].id),
+                    onTap: () => _playSong(trending[i]),
                   ),
                 ),
               ),
@@ -171,7 +173,7 @@ class _AudioHomeState extends ConsumerState<AudioHome> {
             delegate: SliverChildBuilderDelegate(
               (c, i) => _SongRow(
                 song: rest[i],
-                onTap: () => _playSong(rest[i].id),
+                onTap: () => _playSong(rest[i]),
               ),
               childCount: rest.length,
             ),
@@ -236,7 +238,7 @@ class _AudioHomeState extends ConsumerState<AudioHome> {
           delegate: SliverChildBuilderDelegate(
             (c, i) => _SongRow(
               song: songs[i],
-              onTap: () => _playSong(songs[i].id),
+              onTap: () => _playSong(songs[i]),
             ),
             childCount: songs.length,
           ),
