@@ -66,6 +66,11 @@ class MusicFeedController extends StateNotifier<MusicFeedState> {
   int _next = 0;
   bool _busy = false;
 
+  /// Refresh rotation: each pull-to-refresh starts from a different
+  /// query so the list shows new songs instead of the same first
+  /// batch. The rest still loads in order below.
+  int _rotation = 0;
+
   Future<List<VideoDetails>> _fetchQuery(String q) async {
     final ytm = _ref.read(ytMusicProvider);
     try {
@@ -105,7 +110,8 @@ class MusicFeedController extends StateNotifier<MusicFeedState> {
     final seen = state.songs.map((s) => s.id).toSet();
     var taken = 0;
     while (taken < _batchSize && _next < _queries.length) {
-      final songs = await _fetchQuery(_queries[_next]);
+      final songs =
+          await _fetchQuery(_queries[(_rotation + _next) % _queries.length]);
       _next++;
       taken++;
       for (final s in songs) {
@@ -138,6 +144,9 @@ class MusicFeedController extends StateNotifier<MusicFeedState> {
     if (_busy) return;
     _busy = true;
     state = const MusicFeedState(loading: true);
+    // Rotate the query order by one batch so the next refresh opens
+    // with different songs.
+    _rotation = (_rotation + _batchSize) % _queries.length;
     _next = 0;
     await _loadBatch(isFirst: true);
     _busy = false;

@@ -7,7 +7,6 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../player/domain/entities/playback_models.dart';
 import '../../../player/presentation/providers/player_controller.dart';
 import '../../../player/presentation/screens/player_screen.dart';
-import '../providers/home_sections_provider.dart';
 import '../providers/music_feed_provider.dart';
 
 /// Audio-mode home: endless songs (YouTube Music), trending rail on top,
@@ -28,8 +27,6 @@ class _AudioHomeState extends ConsumerState<AudioHome> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         ref.read(musicFeedProvider.notifier).loadInitial();
-        // Bengali/Hindi songs, ghazal and waz rails.
-        ref.read(homeSectionsProvider.notifier).loadAudio();
       }
     });
     _scrollController.addListener(_onScroll);
@@ -107,44 +104,15 @@ class _AudioHomeState extends ConsumerState<AudioHome> {
     final songs = feed.songs;
     final trending = songs.take(15).toList();
     final rest = songs.skip(15).toList();
-    // Bengali/Hindi songs, ghazal and waz rails (Bengali headers).
-    final sections = ref.watch(homeSectionsProvider).audio;
 
     return RefreshIndicator(
       onRefresh: () async {
-        await ref
-            .read(homeSectionsProvider.notifier)
-            .refreshAudio();
         await ref.read(musicFeedProvider.notifier).refresh();
       },
       child: CustomScrollView(
         controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-          // The four topic rails sit above everything else.
-          for (final section in sections)
-            if (section.items.isNotEmpty) ...[
-              SliverToBoxAdapter(
-                child: _SectionHeader(
-                    title: section.header, theme: theme),
-              ),
-              SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 196,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12),
-                    itemCount: section.items.length,
-                    itemBuilder: (c, i) => _ArtworkCard(
-                      song: section.items[i],
-                      onTap: () =>
-                          _playSong(section.items[i]),
-                    ),
-                  ),
-                ),
-              ),
-            ],
           if (trending.isNotEmpty) ...[
             SliverToBoxAdapter(
               child: _SectionHeader(
