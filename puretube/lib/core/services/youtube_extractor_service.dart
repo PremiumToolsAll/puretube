@@ -582,10 +582,11 @@ class YoutubeExtractorService {
           .toList();
     } on TimeoutException {
       // A timeout on a slow/rate-limited network never recovers by
-      // re-running the same YouTube request — try Piped first, so Retry
-      // actually has a chance to load instead of timing out again.
+      // re-running the same YouTube request — try the fallback chain
+      // first, so Retry actually has a chance to load instead of
+      // timing out again.
       try {
-        return await _piped.searchVideos(query, limit: limit);
+        return await _pipedSearch(query, limit: limit);
       } catch (_) {
         // Fall through to the timeout error below.
       }
@@ -593,9 +594,15 @@ class YoutubeExtractorService {
     } on PureTubeException {
       rethrow;
     } catch (e) {
-      if (_isRateLimitError(e)) {
-        _markYouTubeBlocked();
-        return _pipedSearch(query, limit: limit);
+      if (_isRateLimitError(e)) _markYouTubeBlocked();
+      // Generic queries ("song") can return shelf layouts the parser
+      // cannot read (FormatException) while longer queries parse fine.
+      // The fallback chain (session -> Piped -> Invidious) returns the
+      // same videos as clean JSON, so try it before failing.
+      try {
+        return await _pipedSearch(query, limit: limit);
+      } catch (_) {
+        // Fall through to the original error below.
       }
       throw ExtractorException('Search failed: ${_friendlyError(e)}');
     }
@@ -624,10 +631,11 @@ class YoutubeExtractorService {
       return SearchSession._(results, videos);
     } on TimeoutException {
       // A timeout on a slow/rate-limited network never recovers by
-      // re-running the same YouTube request — try Piped first, so Retry
-      // actually has a chance to load instead of timing out again.
+      // re-running the same YouTube request — try the fallback chain
+      // first, so Retry actually has a chance to load instead of
+      // timing out again.
       try {
-        final pipedVideos = await _piped.searchVideos(query, limit: limit);
+        final pipedVideos = await _pipedSearch(query, limit: limit);
         // Piped has no paging; the session carries a null list and
         // fetchMoreSearchResults returns an empty list for it.
         return SearchSession._(null, pipedVideos);
@@ -638,12 +646,18 @@ class YoutubeExtractorService {
     } on PureTubeException {
       rethrow;
     } catch (e) {
-      if (_isRateLimitError(e)) {
-        _markYouTubeBlocked();
+      if (_isRateLimitError(e)) _markYouTubeBlocked();
+      // Generic queries ("song") can return shelf layouts the parser
+      // cannot read (FormatException) while longer queries parse fine.
+      // The fallback chain (session -> Piped -> Invidious) returns the
+      // same videos as clean JSON, so try it before failing.
+      try {
         final videos = await _pipedSearch(query, limit: limit);
         // Piped has no paging; the session carries a null list and
         // fetchMoreSearchResults returns an empty list for it.
         return SearchSession._(null, videos);
+      } catch (_) {
+        // Fall through to the original error below.
       }
       throw ExtractorException('Search failed: ${_friendlyError(e)}');
     }
