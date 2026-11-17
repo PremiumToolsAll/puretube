@@ -49,17 +49,18 @@ class _Gauge {
       this.kind = _GaugeKind.info});
 }
 
-/// iPhone-style slim vertical pill indicator, premium edition.
+/// Slim vertical pill indicator, screenshot edition.
 ///
-/// 48dp wide × 132dp tall. Dark translucent (#1C1C1E @ 90%) background with
-/// a subtle gold border and soft drop shadow, white fill rising from the
-/// bottom proportional to [value] (0..1), with the kind icon (headphones /
-/// sun) centered in dark grey. Fill height animates smoothly on value
+/// 40dp wide × 176dp tall. Black translucent background with a soft black
+/// shadow (কালো সেডো), no border: the kind icon (speaker / sun) sits at
+/// the top, a thin 6dp vertical track with white fill rising from the
+/// bottom sits in the middle, and the percentage sits at the bottom —
+/// all inside the one pill. Fill height animates smoothly on value
 /// changes.
 ///
 /// The pill is tappable: tapping the upper half calls [onIncrease], the
-/// lower half calls [onDecrease] (iPhone-style nudging). The current
-/// percentage (0–100%) is shown below the pill in gold.
+/// lower half calls [onDecrease]. The pill itself is hand-draggable via
+/// [onDrag] (up = positive).
 class _IosPill extends StatelessWidget {
   final double value;
   final _GaugeKind kind;
@@ -83,114 +84,97 @@ class _IosPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const width = 48.0;
-    const height = 132.0;
-    const radius = 14.0;
-    final gold = Theme.of(context).colorScheme.primary;
+    const width = 40.0;
+    const height = 176.0;
+    const radius = 20.0;
+    const trackWidth = 6.0;
+    const trackHeight = 96.0;
     final clamped = value.clamp(0.0, 1.0);
-    final icon = kind == _GaugeKind.volume ? Icons.headphones : Icons.wb_sunny;
+    final icon = kind == _GaugeKind.volume ? Icons.volume_up : Icons.wb_sunny;
     // Muted state: show the muted icon variant.
     final showMuted = kind == _GaugeKind.volume && clamped <= 0.0;
     final percent = (clamped * 100).round();
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapUp: (details) {
-            final box =
-                _pillKey.currentContext?.findRenderObject() as RenderBox?;
-            if (box == null) return;
-            final local = box.globalToLocal(details.globalPosition);
-            if (local.dy < box.size.height / 2) {
-              onIncrease?.call();
-            } else {
-              onDecrease?.call();
-            }
-          },
-          onVerticalDragUpdate: (details) {
-            // Drag up = increase, drag down = decrease.
-            // ~80px drag covers the full 0..1 range (fast).
-            if (onDrag == null) return;
-            onDrag!(-details.delta.dy / 80.0);
-          },
-          child: Container(
-            key: _pillKey,
-            width: width,
-            height: height,
-            decoration: BoxDecoration(
-              color: const Color(0x1C1C1E).withValues(alpha: 0.9),
-              borderRadius: BorderRadius.circular(radius),
-              border: Border.all(
-                color: gold.withValues(alpha: 0.45),
-                width: 1,
-              ),
-              boxShadow: const [
-                BoxShadow(
-                  color: Colors.black54,
-                  blurRadius: 24,
-                  spreadRadius: 2,
-                  offset: Offset(0, 8),
-                ),
-              ],
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapUp: (details) {
+        final box =
+            _pillKey.currentContext?.findRenderObject() as RenderBox?;
+        if (box == null) return;
+        final local = box.globalToLocal(details.globalPosition);
+        if (local.dy < box.size.height / 2) {
+          onIncrease?.call();
+        } else {
+          onDecrease?.call();
+        }
+      },
+      onVerticalDragUpdate: (details) {
+        // Drag up = increase, drag down = decrease.
+        // ~80px drag covers the full 0..1 range (fast).
+        if (onDrag == null) return;
+        onDrag!(-details.delta.dy / 80.0);
+      },
+      child: Container(
+        key: _pillKey,
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(radius),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black54,
+              blurRadius: 18,
+              spreadRadius: 1,
+              offset: Offset(0, 6),
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(radius),
-              child: Stack(
-                children: [
-                  // White fill from the bottom.
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 120),
-                      curve: Curves.easeOut,
-                      height: height * clamped,
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.bottomCenter,
-                          end: Alignment.topCenter,
-                          colors: [Colors.white, Color(0xFFF5E6C8)],
-                        ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            // Icon at the top.
+            Icon(
+              showMuted ? Icons.volume_off : icon,
+              size: 22,
+              color: Colors.white,
+            ),
+            // Thin vertical track with white fill from the bottom.
+            SizedBox(
+              width: trackWidth,
+              height: trackHeight,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(3),
+                child: Stack(
+                  children: [
+                    Container(color: Colors.white24),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 120),
+                        curve: Curves.easeOut,
+                        height: trackHeight * clamped,
+                        color: Colors.white,
                       ),
                     ),
-                  ),
-                  // Centered icon in dark grey.
-                  Center(
-                    child: Icon(
-                      showMuted ? Icons.volume_off : icon,
-                      size: 26,
-                      color: const Color(0xFF3A3A3C),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        // Percentage readout in gold.
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: Colors.black54,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: gold.withValues(alpha: 0.35),
+            // Percentage at the bottom, inside the pill.
+            Text(
+              '$percent%',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          ),
-          child: Text(
-            '$percent%',
-            style: TextStyle(
-              color: gold,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -452,6 +436,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // volume / brightness / scrub overlay
   _Gauge? _gauge;
   Timer? _gaugeTimer;
+  // Fade in/out for the gauge pill: set false to fade out, then the
+  // timer clears [_gauge] after the fade finishes.
+  bool _gaugeVisible = false;
 
   // vertical-drag gesture state
   bool _dragOnRightSide = true;
@@ -854,6 +841,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       value: v / 100,
       kind: _GaugeKind.volume,
     );
+    _gaugeVisible = true;
     setState(() {});
     _hideGaugeSoon();
   }
@@ -870,6 +858,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       value: b,
       kind: _GaugeKind.brightness,
     );
+    _gaugeVisible = true;
     setState(() {});
     _hideGaugeSoon();
   }
@@ -1011,13 +1000,21 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   void _showGauge(_Gauge gauge) {
     _gaugeTimer?.cancel();
-    setState(() => _gauge = gauge);
+    setState(() {
+      _gauge = gauge;
+      _gaugeVisible = true;
+    });
   }
 
   void _hideGaugeSoon() {
     _gaugeTimer?.cancel();
     _gaugeTimer = Timer(const Duration(milliseconds: 1500), () {
-      if (mounted) setState(() => _gauge = null);
+      if (!mounted) return;
+      // Fade out first, then remove the pill after the fade.
+      setState(() => _gaugeVisible = false);
+      _gaugeTimer = Timer(const Duration(milliseconds: 250), () {
+        if (mounted) setState(() => _gauge = null);
+      });
     });
   }
 
@@ -2648,7 +2645,21 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 ),
               ),
             ),
-          if (_gauge != null) _buildGauge(),
+          if (_gauge != null)
+            IgnorePointer(
+              ignoring: !_gaugeVisible,
+              child: AnimatedOpacity(
+                opacity: _gaugeVisible ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOut,
+                child: AnimatedScale(
+                  scale: _gaugeVisible ? 1.0 : 0.92,
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                  child: _buildGauge(),
+                ),
+              ),
+            ),
           if (_screenLocked)
             Positioned.fill(
               child: GestureDetector(
