@@ -497,7 +497,82 @@ class YoutubeExtractorService {
   Future<List<DownloadOption>> getDownloadOptions(String videoId) async {
     await _requireNetwork();
     try {
-      final manifest = await _getManifestWithAgeBypass(videoId);
+      // Session first: the youtubei ANDROID URLs are the ones YouTube
+      // actually serves to this device — SparkTube's downloads work
+      // for the same reason (its NewPipeExtractor URLs work while
+      // explode-manifest URLs get 403'd on some networks, the 1080p
+      // saga). The explode manifest stays as the fallback.
+      try {
+        final options = await _sessionDownloadOptions(videoId);
+        if (options.isNotEmpty) return options;
+      } catch (_) {
+        // Fall through to the explode manifest.
+      }
+      return await _explodeDownloadOptions(videoId);
+    } on TimeoutException {
+      throw ExtractorException('Timed out. Retry.');
+    } on PureTubeException {
+      rethrow;
+    } catch (e) {
+      throw ExtractorException('Could not list downloads: $e');
+    }
+  }
+
+  /// Download options from the session (youtubei ANDROID) source.
+  /// Same labels as the explode path so the sheet and the
+  /// already-downloaded marking need no changes.
+  Future<List<DownloadOption>> _sessionDownloadOptions(String videoId) async {
+    final streams = await _session.getDownloadStreams(videoId);
+    final options = <DownloadOption>[];
+    final seenVideo = <String>{};
+    for (final m in streams.muxed) {
+      if (m.height <= 0 || !seenVideo.add('muxed-${m.height}')) continue;
+      options.add(DownloadOption(
+        label: '${m.height}p',
+        url: m.url,
+        audioOnly: false,
+        sizeBytes: m.sizeBytes,
+        videoCodec: m.videoCodec,
+        audioCodec: m.audioCodec,
+        height: m.height,
+        bitrateKbps: m.bitrateKbps,
+        fps: m.fps,
+      ));
+    }
+    for (final v in streams.videoOnly) {
+      if (v.height <= 0 ||
+          !seenVideo.add('vo-${v.height}-${v.videoCodec}')) continue;
+      options.add(DownloadOption(
+        label: '${v.height}p ${v.videoCodec}',
+        url: v.url,
+        audioOnly: false,
+        sizeBytes: v.sizeBytes,
+        videoCodec: v.videoCodec,
+        height: v.height,
+        videoOnly: true,
+        bitrateKbps: v.bitrateKbps,
+        fps: v.fps,
+      ));
+    }
+    final seenAudio = <int>{};
+    for (final a in streams.audio) {
+      if (!seenAudio.add(a.bitrateKbps)) continue;
+      options.add(DownloadOption(
+        label: '${a.bitrateKbps} kbps ${a.audioCodec}',
+        url: a.url,
+        audioOnly: true,
+        sizeBytes: a.sizeBytes,
+        audioCodec: a.audioCodec,
+        bitrateKbps: a.bitrateKbps,
+      ));
+    }
+    return options;
+  }
+
+  /// Download options from the youtube_explode manifest (fallback
+  /// when the session source fails or returns nothing).
+  Future<List<DownloadOption>> _explodeDownloadOptions(String videoId) async {
+    final manifest = await _getManifestWithAgeBypass(videoId);
 
       final muxed = [
         ...manifest.muxed
@@ -557,13 +632,6 @@ class YoutubeExtractorService {
             videoId, 'No downloadable streams for this video.');
       }
       return options;
-    } on TimeoutException {
-      throw ExtractorException('Timed out. Retry.');
-    } on PureTubeException {
-      rethrow;
-    } catch (e) {
-      throw ExtractorException('Could not list downloads: $e');
-    }
   }
 
   Future<List<VideoDetails>> searchVideos(String query,

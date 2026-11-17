@@ -365,6 +365,72 @@ class YoutubeSessionService {
     }
   }
 
+  /// Full download list through the real visitor session — the same
+  /// youtubei ANDROID source playback uses, so these are the URLs
+  /// YouTube actually serves to this device. The explode manifest
+  /// URLs are the ones YouTube 403s on some networks (the 1080p
+  /// saga: SparkTube's NewPipeExtractor URLs worked while ours
+  /// didn't). Muxed formats top out at 720p; adaptiveFormats carry
+  /// video-only up to 2160p and the audio-only tracks.
+  Future<SessionDownloadStreams> getDownloadStreams(String videoId) async {
+    final json = await _playerJson(videoId);
+    final sd = json['streamingData'];
+    if (sd is! Map<String, dynamic>) {
+      throw Exception('YouTube session: no streaming data');
+    }
+    SessionDownloadStream toStream(Map<String, dynamic> s,
+        {required bool audioOnly, required bool videoOnly}) {
+      final mime = s['mimeType']?.toString() ?? '';
+      final codecs = _fullCodecOf(mime)
+          .split(',')
+          .map((c) => c.trim().split('.').first)
+          .where((c) => c.isNotEmpty)
+          .toList();
+      final h = _num(s['height']);
+      return SessionDownloadStream(
+        url: s['url'].toString(),
+        height: h > 0 ? h : _heightOfLabel(s['qualityLabel']?.toString()),
+        bitrateKbps: (_num(s['bitrate']) / 1000).round(),
+        fps: _num(s['fps']),
+        sizeBytes: int.tryParse(s['contentLength']?.toString() ?? ''),
+        videoCodec: audioOnly
+            ? ''
+            : (codecs.isNotEmpty ? codecs.first : _codecOf(mime)),
+        audioCodec: audioOnly
+            ? (codecs.isNotEmpty ? codecs.first : _codecOf(mime))
+            : (codecs.length > 1 ? codecs[1] : ''),
+        audioOnly: audioOnly,
+        videoOnly: videoOnly,
+      );
+    }
+
+    final muxed = _asMaps(sd['formats'])
+        .where((s) => (s['url']?.toString() ?? '').isNotEmpty)
+        .map((s) => toStream(s, audioOnly: false, videoOnly: false))
+        .toList()
+      ..sort((a, b) => b.height.compareTo(a.height));
+    final adaptive = _asMaps(sd['adaptiveFormats'])
+        .where((s) => (s['url']?.toString() ?? '').isNotEmpty)
+        .toList();
+    final videoOnly = adaptive
+        .where((s) =>
+            (s['mimeType']?.toString() ?? '').startsWith('video/'))
+        .map((s) => toStream(s, audioOnly: false, videoOnly: true))
+        .toList()
+      ..sort((a, b) => b.height.compareTo(a.height));
+    final audio = adaptive
+        .where((s) =>
+            (s['mimeType']?.toString() ?? '').startsWith('audio/'))
+        .map((s) => toStream(s, audioOnly: true, videoOnly: false))
+        .toList()
+      ..sort((a, b) => b.bitrateKbps.compareTo(a.bitrateKbps));
+    if (muxed.isEmpty && videoOnly.isEmpty && audio.isEmpty) {
+      throw Exception('YouTube session: no downloadable streams');
+    }
+    return SessionDownloadStreams(
+        muxed: muxed, videoOnly: videoOnly, audio: audio);
+  }
+
   /// Live search suggestions while typing — YouTube's suggest
   /// endpoint, the same data NewPipe's SuggestionExtractor shows.
   /// Best-effort: any failure returns an empty list so typing

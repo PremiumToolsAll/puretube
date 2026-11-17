@@ -24,7 +24,7 @@ class DownloadService {
       '(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36';
 
   /// Parallel connections per file (SparkTube uses 6).
-  static const _segments = 5;
+  static const _segments = 6;
 
   /// Below this size, splitting costs more than it gains.
   static const _minSplitBytes = 2 * 1024 * 1024;

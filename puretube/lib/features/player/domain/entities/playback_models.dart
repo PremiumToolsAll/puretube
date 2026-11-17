@@ -182,6 +182,48 @@ class PlaybackStreams {
   bool get isExpired => DateTime.now().difference(fetchedAt) > streamTtl;
 }
 
+/// One downloadable stream from the session (youtubei) source:
+/// the same ANDROID-client URLs playback uses, so they are the
+/// ones YouTube actually serves to this device.
+class SessionDownloadStream {
+  final String url;
+  final int height; // 0 for audio-only
+  final int bitrateKbps;
+  final int fps; // 0 when unknown / audio
+  final int? sizeBytes; // from contentLength; null when unknown
+  final String videoCodec; // e.g. "avc1"; "" for audio-only
+  final String audioCodec; // e.g. "mp4a"; "" for video-only
+  final bool audioOnly;
+  final bool videoOnly;
+
+  const SessionDownloadStream({
+    required this.url,
+    required this.height,
+    required this.bitrateKbps,
+    required this.fps,
+    required this.sizeBytes,
+    required this.videoCodec,
+    required this.audioCodec,
+    required this.audioOnly,
+    required this.videoOnly,
+  });
+}
+
+/// Full download list from the session source, split the way the
+/// download sheet shows them: muxed (video+audio in one file),
+/// video-only DASH, audio-only.
+class SessionDownloadStreams {
+  final List<SessionDownloadStream> muxed;
+  final List<SessionDownloadStream> videoOnly;
+  final List<SessionDownloadStream> audio;
+
+  const SessionDownloadStreams({
+    required this.muxed,
+    required this.videoOnly,
+    required this.audio,
+  });
+}
+
 class DownloadOption {
   final String label; // "720p", "480p", "Audio"
   final String url;
