@@ -130,6 +130,34 @@ class VideoDetails {
       );
 }
 
+/// One channel playlist, as the channel's Playlists tab lists it:
+/// title, video count, thumbnail, and the "Channel · Playlist" byline.
+class PlaylistInfo {
+  final String id;
+  final String title;
+  final int videoCount;
+  final String thumbnailUrl;
+  final String byline;
+
+  const PlaylistInfo({
+    required this.id,
+    required this.title,
+    required this.videoCount,
+    required this.thumbnailUrl,
+    required this.byline,
+  });
+}
+
+/// One page of a paged list (channel videos, playlists, playlist
+/// videos): the items plus the token for the next page, or null when
+/// the list is exhausted.
+class PagedResult<T> {
+  final List<T> items;
+  final String? nextPageToken;
+
+  const PagedResult({required this.items, this.nextPageToken});
+}
+
 class PlaybackStreams {
   /// YouTube-issued stream URLs expire after ~6 hours. We treat them as
   /// stale a little early so refresh happens before a 403 mid-playback.

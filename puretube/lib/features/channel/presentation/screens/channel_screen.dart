@@ -10,12 +10,16 @@ import '../../../library/presentation/providers/library_providers.dart';
 import '../../../player/domain/entities/playback_models.dart';
 import '../../../player/presentation/screens/player_screen.dart';
 import '../tabs/community_tab.dart';
+import '../widgets/channel_video_row.dart';
+import 'playlist_screen.dart';
 
 /// Channel page in the original YouTube layout: banner, big avatar
 /// with name + subscriber count, a full-width Subscribe pill, then
-/// Home / Videos / Shorts / Community tabs. The Videos tab uses
-/// YouTube's row list with Latest / Popular / Oldest chips; Shorts
-/// uses the 3-column vertical grid.
+/// Home / Videos / Shorts / Playlists / Community tabs. The Videos
+/// tab uses YouTube's row list with Latest / Popular / Oldest chips
+/// and loads more as you scroll (ALL videos, paged); the Playlists
+/// tab lists the channel's playlists (tap one to open its videos).
+/// Shorts uses the 3-column vertical grid.
 class ChannelScreen extends ConsumerStatefulWidget {
   final String channelId;
 
@@ -31,6 +35,13 @@ class _ChannelScreenState extends ConsumerState<ChannelScreen>
   late final TabController _tabCtrl;
   ChannelInfo? _channel;
   List<VideoDetails> _videos = [];
+  String? _nextVideosToken;
+  bool _loadingMoreVideos = false;
+  final _videosScrollCtrl = ScrollController();
+  List<PlaylistInfo> _playlists = [];
+  String? _nextPlaylistsToken;
+  bool _loadingMorePlaylists = false;
+  final _playlistsScrollCtrl = ScrollController();
   bool _loading = true;
   bool _subscribed = false;
   String? _error;
@@ -39,14 +50,30 @@ class _ChannelScreenState extends ConsumerState<ChannelScreen>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 4, vsync: this);
+    _tabCtrl = TabController(length: 5, vsync: this);
+    _videosScrollCtrl.addListener(_onVideosScroll);
+    _playlistsScrollCtrl.addListener(_onPlaylistsScroll);
     _load();
   }
 
   @override
   void dispose() {
+    _videosScrollCtrl.dispose();
+    _playlistsScrollCtrl.dispose();
     _tabCtrl.dispose();
     super.dispose();
+  }
+
+  void _onVideosScroll() {
+    if (_videosScrollCtrl.position.extentAfter < 400) {
+      _loadMoreVideos();
+    }
+  }
+
+  void _onPlaylistsScroll() {
+    if (_playlistsScrollCtrl.position.extentAfter < 400) {
+      _loadMorePlaylists();
+    }
   }
 
   Future<void> _load() async {
@@ -57,15 +84,23 @@ class _ChannelScreenState extends ConsumerState<ChannelScreen>
     try {
       final extractor = ref.read(extractorProvider);
       final ch = await extractor.getChannel(widget.channelId);
-      final uploads = await extractor.getChannelUploads(widget.channelId,
-          limit: 40, channelTitle: ch.title);
+      final uploads = await extractor.getChannelVideosPage(
+          widget.channelId,
+          limit: 30,
+          channelTitle: ch.title);
+      final playlists = await extractor.getChannelPlaylistsPage(
+          widget.channelId,
+          limit: 30);
       final sub = ref
           .read(subscriptionRepositoryProvider)
           .isSubscribed(widget.channelId);
       if (mounted) {
         setState(() {
           _channel = ch;
-          _videos = uploads;
+          _videos = uploads.items;
+          _nextVideosToken = uploads.nextPageToken;
+          _playlists = playlists.items;
+          _nextPlaylistsToken = playlists.nextPageToken;
           _subscribed = sub;
           _loading = false;
         });
@@ -77,6 +112,54 @@ class _ChannelScreenState extends ConsumerState<ChannelScreen>
           _loading = false;
         });
       }
+    }
+  }
+
+  /// Loads the next page of channel videos and appends it, so the
+  /// Videos tab eventually shows ALL of the channel's videos.
+  Future<void> _loadMoreVideos() async {
+    final token = _nextVideosToken;
+    if (token == null || _loadingMoreVideos || _loading) return;
+    setState(() => _loadingMoreVideos = true);
+    try {
+      final page = await ref.read(extractorProvider).getChannelVideosPage(
+          widget.channelId,
+          pageToken: token,
+          limit: 30,
+          channelTitle: _channel?.title ?? '');
+      if (!mounted) return;
+      setState(() {
+        // Skip videos already shown (a page can repeat the last
+        // item of the previous one).
+        final seen = _videos.map((v) => v.id).toSet();
+        _videos.addAll(page.items.where((v) => seen.add(v.id)));
+        _nextVideosToken = page.nextPageToken;
+        _loadingMoreVideos = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingMoreVideos = false);
+    }
+  }
+
+  /// Loads the next page of channel playlists and appends it.
+  Future<void> _loadMorePlaylists() async {
+    final token = _nextPlaylistsToken;
+    if (token == null || _loadingMorePlaylists || _loading) return;
+    setState(() => _loadingMorePlaylists = true);
+    try {
+      final page = await ref
+          .read(extractorProvider)
+          .getChannelPlaylistsPage(widget.channelId,
+              pageToken: token, limit: 30);
+      if (!mounted) return;
+      setState(() {
+        final seen = _playlists.map((p) => p.id).toSet();
+        _playlists.addAll(page.items.where((p) => seen.add(p.id)));
+        _nextPlaylistsToken = page.nextPageToken;
+        _loadingMorePlaylists = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingMorePlaylists = false);
     }
   }
 
@@ -170,6 +253,7 @@ class _ChannelScreenState extends ConsumerState<ChannelScreen>
                         Tab(text: 'Home'),
                         Tab(text: 'Videos'),
                         Tab(text: 'Shorts'),
+                        Tab(text: 'Playlists'),
                         Tab(text: 'Community'),
                       ],
                     ),
@@ -180,6 +264,7 @@ class _ChannelScreenState extends ConsumerState<ChannelScreen>
                           _homeTab(),
                           _videosTab(),
                           _shortsTab(),
+                          _playlistsTab(),
                           CommunityTab(channelId: widget.channelId),
                         ],
                       ),
@@ -303,7 +388,7 @@ class _ChannelScreenState extends ConsumerState<ChannelScreen>
                       fontSize: 16,
                       fontWeight: FontWeight.bold)),
             ),
-            for (final v in rest) _VideoRow(video: v),
+            for (final v in rest) ChannelVideoRow(video: v),
             const SizedBox(height: 12),
           ],
         ],
@@ -347,12 +432,61 @@ class _ChannelScreenState extends ConsumerState<ChannelScreen>
                   color: _accent,
                   onRefresh: _load,
                   child: ListView.builder(
-                    itemCount: list.length,
-                    itemBuilder: (_, i) => _VideoRow(video: list[i]),
+                    controller: _videosScrollCtrl,
+                    // One trailing slot: a spinner while the next
+                    // page loads, so ALL videos keep appearing.
+                    itemCount: list.length +
+                        (_nextVideosToken != null ? 1 : 0),
+                    itemBuilder: (_, i) {
+                      if (i >= list.length) {
+                        return _loadingMoreVideos
+                            ? Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                child: Center(
+                                    child: CircularProgressIndicator(
+                                        color: _accent)),
+                              )
+                            : const SizedBox(height: 24);
+                      }
+                      return ChannelVideoRow(video: list[i]);
+                    },
                   ),
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _playlistsTab() {
+    if (_playlists.isEmpty) {
+      return const Center(
+          child: Text('No playlists yet',
+              style: TextStyle(color: Colors.grey)));
+    }
+    return RefreshIndicator(
+      color: _accent,
+      onRefresh: _load,
+      child: ListView.builder(
+        controller: _playlistsScrollCtrl,
+        itemCount:
+            _playlists.length + (_nextPlaylistsToken != null ? 1 : 0),
+        itemBuilder: (_, i) {
+          if (i >= _playlists.length) {
+            return _loadingMorePlaylists
+                ? Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Center(
+                        child: CircularProgressIndicator(color: _accent)),
+                  )
+                : const SizedBox(height: 24);
+          }
+          return _PlaylistRow(
+            playlist: _playlists[i],
+            channelTitle: _channel?.title ?? '',
+          );
+        },
+      ),
     );
   }
 
@@ -408,26 +542,21 @@ class _ChannelScreenState extends ConsumerState<ChannelScreen>
   }
 }
 
-/// YouTube channel Videos-tab row: 16:9 thumbnail on the left
-/// (rounded, duration badge), title + "views · ago" on the right,
-/// ⋮ with the same options sheet as the home cards.
-class _VideoRow extends ConsumerWidget {
-  final VideoDetails video;
-  const _VideoRow({required this.video});
+/// YouTube channel Playlists-tab row: 16:9 thumbnail on the left
+/// with a dark "▶ N videos" strip at the bottom, title + byline on
+/// the right. Tapping opens the playlist's videos.
+class _PlaylistRow extends StatelessWidget {
+  final PlaylistInfo playlist;
+  final String channelTitle;
+  const _PlaylistRow({required this.playlist, required this.channelTitle});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final ago = timeAgo(video.uploadDate);
-    // Original YouTube channel rows: "1.6K · 1d ago" (no "views" word).
-    final meta = <String>[
-      if (video.viewCount != null) formatCount(video.viewCount),
-      if (ago.isNotEmpty) ago,
-    ].join(' · ');
+  Widget build(BuildContext context) {
     return InkWell(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
-            builder: (_) =>
-                PlayerScreen(videoId: video.id, initialVideo: video)),
+            builder: (_) => PlaylistScreen(
+                playlist: playlist, channelTitle: channelTitle)),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -443,29 +572,36 @@ class _VideoRow extends ConsumerWidget {
                   fit: StackFit.expand,
                   children: [
                     CachedNetworkImage(
-                      imageUrl: video.thumbnailUrl,
+                      imageUrl: playlist.thumbnailUrl,
                       fit: BoxFit.cover,
                       errorWidget: (_, __, ___) =>
                           Container(color: const Color(0xFF1A1A1A)),
                     ),
-                    if ((video.duration ?? Duration.zero) > Duration.zero)
-                      Positioned(
-                        right: 4,
-                        bottom: 4,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: Colors.black87,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            '${video.isMusic ? '♫ ' : ''}${formatDuration(video.duration)}',
-                            style: const TextStyle(
-                                fontSize: 11, color: Colors.white),
-                          ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        color: Colors.black.withValues(alpha: 0.75),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.playlist_play,
+                                size: 16, color: Colors.white),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${playlist.videoCount} videos',
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ],
                         ),
                       ),
+                    ),
                   ],
                 ),
               ),
@@ -475,22 +611,19 @@ class _VideoRow extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(video.title,
+                  Text(playlist.title,
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                       style:
                           const TextStyle(color: Colors.white, fontSize: 14)),
                   const SizedBox(height: 4),
-                  Text(meta,
-                      style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                  Text(
+                    playlist.byline.isNotEmpty
+                        ? playlist.byline
+                        : '${playlist.videoCount} videos',
+                    style: const TextStyle(color: Colors.grey, fontSize: 12)),
                 ],
               ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.more_vert, size: 20, color: Colors.white),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              onPressed: () => VideoCard.showOptions(context, ref, video),
             ),
           ],
         ),
@@ -498,3 +631,4 @@ class _VideoRow extends ConsumerWidget {
     );
   }
 }
+

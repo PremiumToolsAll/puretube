@@ -34,6 +34,18 @@ class YoutubeSessionService {
   static const _searchUrl =
       'https://www.youtube.com/youtubei/v1/search?prettyPrint=false';
   static const _homeUrl = 'https://m.youtube.com/';
+  static const _webHomeUrl = 'https://www.youtube.com/';
+
+  /// The browse endpoint only answers the WEB client with the full
+  /// header set (verified live 2026-11-17: ANDROID gets HTTP 400 for
+  /// both browseId and continuation requests, WEB returns 200).
+  /// The key is YouTube's public InnerTube key, used by every
+  /// third-party client — not a user credential.
+  static const _browseUrl =
+      'https://www.youtube.com/youtubei/v1/browse?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8&prettyPrint=false';
+  static const _webUa =
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+  static const _webClientVersion = '2.20240111.09.00';
 
   static const _androidUa =
       'com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip';
@@ -69,6 +81,48 @@ class YoutubeSessionService {
         'osVersion': '11',
         'visitorData': visitorData,
       };
+
+  Map<String, dynamic> _webClient(String visitorData) => {
+        'clientName': 'WEB',
+        'clientVersion': _webClientVersion,
+        'userAgent': _webUa,
+        'hl': 'en',
+        'gl': 'US',
+        'timeZone': 'UTC',
+        'utcOffsetMinutes': 0,
+        'visitorData': visitorData,
+      };
+
+  String? _webVisitorData;
+  DateTime? _webVisitorFetchedAt;
+
+  /// WEB visitor token, cached like the mobile one — the browse
+  /// continuation endpoint needs the WEB client's own token.
+  Future<String> _webVisitorToken() async {
+    final vd = _webVisitorData;
+    final at = _webVisitorFetchedAt;
+    if (vd != null &&
+        vd.isNotEmpty &&
+        at != null &&
+        DateTime.now().difference(at).inHours < 6) {
+      return vd;
+    }
+    final resp = await _client
+        .get(Uri.parse(_webHomeUrl), headers: {'User-Agent': _webUa})
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode != 200) {
+      throw Exception(
+          'YouTube session: web homepage HTTP ${resp.statusCode}');
+    }
+    final m = _visitorRe.firstMatch(resp.body);
+    final token = m?.group(1);
+    if (token == null || token.isEmpty) {
+      throw Exception('YouTube session: no web visitor token');
+    }
+    _webVisitorData = token;
+    _webVisitorFetchedAt = DateTime.now();
+    return token;
+  }
 
   /// Returns a cached visitor token, refreshing it from the mobile
   /// homepage when missing or older than 6 hours.
@@ -686,52 +740,553 @@ class YoutubeSessionService {
       throw Exception(
           'YouTube session: channel page ${resp.statusCode}');
     }
-    final raw = _initialDataRe.firstMatch(resp.body)?.group(1);
+    final root = _decodeInitialData(resp.body);
+    return _videoItems(root)
+        .map((r) => _rendererToDetails(r, channelId,
+            channelTitle: channelTitle))
+        .whereType<VideoDetails>()
+        .take(limit)
+        .toList();
+  }
+
+  /// Paged channel videos — the Videos tab's "show ALL videos".
+  /// Page 1 comes from the mobile channel page (30 items); further
+  /// pages redeem the page's continuation token through the WEB
+  /// browse endpoint (verified live 2026-11-17: 30 items per page,
+  /// each page carries the next token). Continuation items arrive as
+  /// lockupViewModels, first-page items as compactVideoRenderers —
+  /// both are accepted.
+  Future<PagedResult<VideoDetails>> getChannelVideosPage(
+      String channelId,
+      {String? pageToken,
+      int limit = 30,
+      String channelTitle = ''}) async {
+    if (pageToken == null) {
+      final resp = await _client
+          .get(
+            Uri.parse('https://m.youtube.com/channel/$channelId/videos'),
+            headers: {
+              'User-Agent': _mobileUa,
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
+          )
+          .timeout(const Duration(seconds: 20));
+      if (resp.statusCode != 200) {
+        throw Exception(
+            'YouTube session: channel page ${resp.statusCode}');
+      }
+      final root = _decodeInitialData(resp.body);
+      final items = _videoItems(root);
+      final videos = items
+          .map((r) => _rendererToDetails(r, channelId,
+              channelTitle: channelTitle))
+          .whereType<VideoDetails>()
+          .take(limit)
+          .toList();
+      return PagedResult(
+          items: videos, nextPageToken: _findContinuationToken(root));
+    }
+    final json = await _browseContinuation(pageToken);
+    final items = _continuationVideoItems(json);
+    final videos = items
+        .map((r) => _rendererToDetails(r, channelId,
+            channelTitle: channelTitle))
+        .whereType<VideoDetails>()
+        .take(limit)
+        .toList();
+    return PagedResult(
+        items: videos,
+        nextPageToken: _findContinuationToken(json));
+  }
+
+  /// Paged channel playlists for the Playlists tab. Page 1 comes
+  /// from the mobile /playlists page (compactPlaylistRenderer
+  /// items); further pages use the same browse continuation.
+  Future<PagedResult<PlaylistInfo>> getChannelPlaylistsPage(
+      String channelId,
+      {String? pageToken, int limit = 30}) async {
+    if (pageToken == null) {
+      final resp = await _client
+          .get(
+            Uri.parse(
+                'https://m.youtube.com/channel/$channelId/playlists'),
+            headers: {
+              'User-Agent': _mobileUa,
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
+          )
+          .timeout(const Duration(seconds: 20));
+      if (resp.statusCode != 200) {
+        throw Exception(
+            'YouTube session: playlists page ${resp.statusCode}');
+      }
+      final root = _decodeInitialData(resp.body);
+      final items = _playlistItems(root);
+      return PagedResult(
+          items: items
+              .map(_playlistRendererToInfo)
+              .whereType<PlaylistInfo>()
+              .take(limit)
+              .toList(),
+          nextPageToken: _findContinuationToken(root));
+    }
+    final json = await _browseContinuation(pageToken);
+    final items = _playlistItems(json);
+    return PagedResult(
+        items: items
+            .map(_playlistRendererToInfo)
+            .whereType<PlaylistInfo>()
+            .take(limit)
+            .toList(),
+        nextPageToken: _findContinuationToken(json));
+  }
+
+  /// Paged videos inside one playlist (the playlist detail screen).
+  /// Page 1 comes from the mobile /playlist page — its videos are
+  /// lockupViewModels; further pages use the browse continuation.
+  Future<PagedResult<VideoDetails>> getPlaylistVideosPage(
+      String playlistId,
+      {String? pageToken,
+      int limit = 30,
+      String channelTitle = ''}) async {
+    if (pageToken == null) {
+      final resp = await _client
+          .get(
+            Uri.parse(
+                'https://m.youtube.com/playlist?list=$playlistId'),
+            headers: {
+              'User-Agent': _mobileUa,
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
+          )
+          .timeout(const Duration(seconds: 20));
+      if (resp.statusCode != 200) {
+        throw Exception(
+            'YouTube session: playlist page ${resp.statusCode}');
+      }
+      final root = _decodeInitialData(resp.body);
+      final items = _videoItems(root);
+      final videos = items
+          .map((r) => _rendererToDetails(r, '',
+              channelTitle: channelTitle))
+          .whereType<VideoDetails>()
+          .take(limit)
+          .toList();
+      return PagedResult(
+          items: videos, nextPageToken: _findContinuationToken(root));
+    }
+    final json = await _browseContinuation(pageToken);
+    final items = _continuationVideoItems(json);
+    final videos = items
+        .map((r) => _rendererToDetails(r, '',
+            channelTitle: channelTitle))
+        .whereType<VideoDetails>()
+        .take(limit)
+        .toList();
+    return PagedResult(
+        items: videos,
+        nextPageToken: _findContinuationToken(json));
+  }
+
+  /// Decodes a mobile page's `var ytInitialData = '...'` blob
+  /// (\x-escaped JSON with doubled backslashes — see
+  /// getChannelVideos) into its root map.
+  static Map<String, dynamic> _decodeInitialData(String html) {
+    final raw = _initialDataRe.firstMatch(html)?.group(1);
     if (raw == null || raw.isEmpty) {
       throw Exception('YouTube session: no channel data');
     }
-    // The embedded JSON is \x-escaped (quotes are \x22, so no raw
-    // apostrophe can end the capture early). YouTube also doubles
-    // every backslash when embedding it, so \\" must collapse back
-    // to \" or jsonDecode chokes on titles/keywords that contain
-    // quotes ("Lyrical Video").
     final jsonText = raw
         .replaceAllMapped(_hexEscapeRe,
             (m) => String.fromCharCode(int.parse(m.group(1)!, radix: 16)))
         .replaceAll(r'\\', r'\');
-    final root = jsonDecode(jsonText);
-    final out = <VideoDetails>[];
+    final decoded = jsonDecode(jsonText);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('YouTube session: bad channel data');
+    }
+    return decoded;
+  }
+
+  /// Redeems a continuation token through the WEB browse endpoint
+  /// and returns the decoded response JSON.
+  Future<Map<String, dynamic>> _browseContinuation(
+      String token) async {
+    final vd = await _webVisitorToken();
+    final body = jsonEncode({
+      'context': {'client': _webClient(vd)},
+      'request': {'useSsl': true},
+      'continuation': token,
+    });
+    final resp = await _client
+        .post(Uri.parse(_browseUrl),
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': _webUa,
+              'X-Goog-Visitor-Id': vd,
+              'X-YouTube-Client-Name': '1',
+              'X-YouTube-Client-Version': _webClientVersion,
+              'Origin': 'https://www.youtube.com',
+              'Referer': 'https://www.youtube.com/',
+            },
+            body: body)
+        .timeout(const Duration(seconds: 20));
+    if (resp.statusCode != 200) {
+      throw Exception(
+          'YouTube session: continuation HTTP ${resp.statusCode}');
+    }
+    final decoded = jsonDecode(resp.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('YouTube session: bad continuation response');
+    }
+    return decoded;
+  }
+
+  /// Video renderers anywhere in a page tree: richItemRenderer
+  /// content (compactVideoRenderer / videoRenderer /
+  /// gridVideoRenderer / lockupViewModel) plus bare
+  /// compactPlaylistRenderer-free video renderers.
+  static List<Map<String, dynamic>> _videoItems(Object? root) {
+    final out = <Map<String, dynamic>>[];
     void walk(Object? o) {
-      if (out.length >= limit) return;
       if (o is Map<String, dynamic>) {
         final item = o['richItemRenderer'];
+        var matched = false;
         if (item is Map<String, dynamic>) {
           final content = item['content'];
           if (content is Map<String, dynamic>) {
             final vr = content['compactVideoRenderer'] ??
                 content['videoRenderer'] ??
-                content['gridVideoRenderer'];
+                content['gridVideoRenderer'] ??
+                content['lockupViewModel'];
             if (vr is Map<String, dynamic>) {
-              final v = _channelVideoToDetails(vr, channelId,
-                  channelTitle: channelTitle);
-              if (v != null) out.add(v);
+              out.add(vr);
+              matched = true;
             }
           }
         }
-        for (final x in o.values) {
-          walk(x);
-          if (out.length >= limit) return;
+        final lv = o['lockupViewModel'];
+        if (lv is Map<String, dynamic> &&
+            lv['contentType']?.toString() ==
+                'LOCKUP_CONTENT_TYPE_VIDEO') {
+          out.add(lv);
+        }
+        for (final entry in o.entries) {
+          // Don't descend into a richItemRenderer we already took
+          // the video from, or the same lockup is added twice.
+          if (matched && entry.key == 'richItemRenderer') continue;
+          walk(entry.value);
         }
       } else if (o is List) {
         for (final x in o) {
           walk(x);
-          if (out.length >= limit) return;
         }
       }
     }
 
     walk(root);
     return out;
+  }
+
+  /// Video renderers inside a continuation response:
+  /// onResponseReceivedActions[].appendContinuationItemsAction
+  /// .continuationItems[] (richItemRenderer content, as above).
+  static List<Map<String, dynamic>> _continuationVideoItems(
+      Map<String, dynamic> json) {
+    final out = <Map<String, dynamic>>[];
+    final actions = json['onResponseReceivedActions'];
+    if (actions is List) {
+      for (final a in actions) {
+        if (a is! Map<String, dynamic>) continue;
+        final act = a['appendContinuationItemsAction'];
+        if (act is! Map<String, dynamic>) continue;
+        final items = act['continuationItems'];
+        if (items is! List) continue;
+        for (final it in items) {
+          if (it is! Map<String, dynamic>) continue;
+          final ri = it['richItemRenderer'];
+          if (ri is! Map<String, dynamic>) continue;
+          final content = ri['content'];
+          if (content is! Map<String, dynamic>) continue;
+          final vr = content['compactVideoRenderer'] ??
+              content['videoRenderer'] ??
+              content['gridVideoRenderer'] ??
+              content['lockupViewModel'];
+          if (vr is Map<String, dynamic>) out.add(vr);
+        }
+      }
+    }
+    // Fall back to the generic walk when the shape differs.
+    if (out.isEmpty) return _videoItems(json);
+    return out;
+  }
+
+  /// Playlist renderers anywhere in a page tree
+  /// (compactPlaylistRenderer / playlistRenderer).
+  static List<Map<String, dynamic>> _playlistItems(Object? root) {
+    final out = <Map<String, dynamic>>[];
+    void walk(Object? o) {
+      if (o is Map<String, dynamic>) {
+        final pr = o['compactPlaylistRenderer'] ?? o['playlistRenderer'];
+        if (pr is Map<String, dynamic>) out.add(pr);
+        for (final x in o.values) {
+          walk(x);
+        }
+      } else if (o is List) {
+        for (final x in o) {
+          walk(x);
+        }
+      }
+    }
+
+    walk(root);
+    return out;
+  }
+
+  /// Finds the next-page token anywhere in a page/continuation
+  /// tree. Two shapes exist: continuationItemRenderer
+  /// (.continuationEndpoint.continuationCommand.token) and
+  /// continuationItemViewModel (.continuationCommand.innertubeCommand
+  /// .continuationCommand.token) — a recursive search for a
+  /// continuationCommand holding a token covers both.
+  static String? _findContinuationToken(Object? root) {
+    String? found;
+    String? searchCommand(Object? o) {
+      if (o is Map<String, dynamic>) {
+        final cmd = o['continuationCommand'];
+        if (cmd is Map<String, dynamic>) {
+          final token = cmd['token']?.toString();
+          if (token != null && token.isNotEmpty) return token;
+        }
+        for (final x in o.values) {
+          final t = searchCommand(x);
+          if (t != null) return t;
+        }
+      } else if (o is List) {
+        for (final x in o) {
+          final t = searchCommand(x);
+          if (t != null) return t;
+        }
+      }
+      return null;
+    }
+
+    void walk(Object? o) {
+      if (found != null) return;
+      if (o is Map<String, dynamic>) {
+        if (o.containsKey('continuationItemRenderer') ||
+            o.containsKey('continuationItemViewModel')) {
+          found = searchCommand(o);
+          if (found != null) return;
+        }
+        for (final x in o.values) {
+          walk(x);
+        }
+      } else if (o is List) {
+        for (final x in o) {
+          walk(x);
+        }
+      }
+    }
+
+    walk(root);
+    return found;
+  }
+
+  /// Maps any accepted video renderer (compactVideoRenderer,
+  /// videoRenderer, gridVideoRenderer, lockupViewModel) to
+  /// VideoDetails. Returns null for non-video items (e.g. Shorts
+  /// lockups) and items without a title.
+  static VideoDetails? _rendererToDetails(
+      Map<String, dynamic> r, String channelId,
+      {String channelTitle = ''}) {
+    // lockupViewModel (continuation pages, playlist page) carries
+    // contentId instead of videoId.
+    if (r.containsKey('contentId')) {
+      return _lockupToDetails(r, channelTitle: channelTitle);
+    }
+    return _channelVideoToDetails(r, channelId,
+        channelTitle: channelTitle);
+  }
+
+  /// YouTube's newer lockup format (continuation pages and the
+  /// playlist page): contentId is the videoId, the title is a plain
+  /// string, the duration is a thumbnail badge, and views + upload
+  /// time live in the metadata rows ("16K views3 weeks ago").
+  static VideoDetails? _lockupToDetails(
+      Map<String, dynamic> lv, {String channelTitle = ''}) {
+    final type = lv['contentType']?.toString() ?? '';
+    if (type.isNotEmpty && type != 'LOCKUP_CONTENT_TYPE_VIDEO') {
+      return null;
+    }
+    final id = lv['contentId']?.toString() ?? '';
+    if (id.isEmpty) return null;
+    final md = lv['metadata'];
+    final lmd = md is Map<String, dynamic>
+        ? md['lockupMetadataViewModel']
+        : null;
+    String title = '';
+    String author = '';
+    int? views;
+    DateTime? ago;
+    if (lmd is Map<String, dynamic>) {
+      final t = lmd['title'];
+      if (t is Map<String, dynamic>) {
+        title = t['content']?.toString() ?? '';
+      }
+      final rows = _lockupRows(lmd);
+      for (final row in rows) {
+        final v = _parseCompactViews(row);
+        if (v != null) views ??= v;
+        final a = _parseAgo(row);
+        if (a != null) ago ??= a;
+        if (author.isEmpty && !row.contains('views')) {
+          author = row.trim();
+        }
+      }
+    }
+    if (title.trim().isEmpty) return null;
+    String thumb = '';
+    var bestW = -1;
+    final img = lv['contentImage'];
+    final tvm = img is Map<String, dynamic>
+        ? img['thumbnailViewModel']
+        : null;
+    String? durationText;
+    if (tvm is Map<String, dynamic>) {
+      final sources = tvm['image'];
+      final srcList = sources is Map<String, dynamic>
+          ? sources['sources']
+          : null;
+      if (srcList is List) {
+        for (final s in srcList) {
+          if (s is! Map<String, dynamic>) continue;
+          final w = _num(s['width']);
+          final u = s['url']?.toString() ?? '';
+          if (u.isNotEmpty && w >= bestW) {
+            bestW = w;
+            thumb = u;
+          }
+        }
+      }
+      durationText = _lockupDuration(tvm);
+    }
+    return VideoDetails(
+      id: id,
+      title: title.trim(),
+      author: author.isNotEmpty ? author : channelTitle,
+      channelId: '',
+      duration: durationText == null
+          ? null
+          : _parseLengthText(durationText),
+      thumbnailUrl: thumb,
+      viewCount: views,
+      likeCount: null,
+      uploadDate: ago,
+      description: '',
+    );
+  }
+
+  /// Metadata rows of a lockup, joined per row ("16K views3 weeks
+  /// ago" — the · delimiter is a separate field, not a part).
+  static List<String> _lockupRows(Map<String, dynamic> lmd) {
+    final out = <String>[];
+    final meta = lmd['metadata'];
+    final cm = meta is Map<String, dynamic>
+        ? meta['contentMetadataViewModel']
+        : null;
+    final rows = cm is Map<String, dynamic> ? cm['metadataRows'] : null;
+    if (rows is List) {
+      for (final row in rows) {
+        if (row is! Map<String, dynamic>) continue;
+        final parts = row['metadataParts'];
+        if (parts is! List) continue;
+        final buf = StringBuffer();
+        for (final p in parts) {
+          if (p is! Map<String, dynamic>) continue;
+          final text = p['text'];
+          if (text is Map<String, dynamic>) {
+            buf.write(text['content']?.toString() ?? '');
+          }
+        }
+        final s = buf.toString().trim();
+        if (s.isNotEmpty) out.add(s);
+      }
+    }
+    return out;
+  }
+
+  /// Duration badge text of a lockup thumbnail
+  /// ("3:12", or null when absent).
+  static String? _lockupDuration(Map<String, dynamic> tvm) {
+    final overlays = tvm['overlays'];
+    if (overlays is! List) return null;
+    for (final ov in overlays) {
+      if (ov is! Map<String, dynamic>) continue;
+      final bottom = ov['thumbnailBottomOverlayViewModel'];
+      if (bottom is! Map<String, dynamic>) continue;
+      final badges = bottom['badges'];
+      if (badges is! List) continue;
+      for (final b in badges) {
+        if (b is! Map<String, dynamic>) continue;
+        final badge = b['thumbnailBadgeViewModel'];
+        if (badge is Map<String, dynamic>) {
+          final text = badge['text']?.toString();
+          if (text != null && text.isNotEmpty) return text;
+        }
+      }
+    }
+    return null;
+  }
+
+  /// "16K views" → 16000, "3.3K views" → 3300, "36M views" →
+  /// 36000000, "1,916 views" → 1916, "No views" → 0. Null when the
+  /// text carries no view count at all.
+  static int? _parseCompactViews(String text) {
+    final m = RegExp(r'([\d.,]+)\s*([KMB]?)\s*views').firstMatch(text);
+    if (m == null) return null;
+    final num = double.tryParse(m.group(1)!.replaceAll(',', '')) ?? 0;
+    switch (m.group(2)) {
+      case 'K':
+        return (num * 1000).round();
+      case 'M':
+        return (num * 1000000).round();
+      case 'B':
+        return (num * 1000000000).round();
+      default:
+        return num.round();
+    }
+  }
+
+  static PlaylistInfo? _playlistRendererToInfo(
+      Map<String, dynamic> r) {
+    final id = r['playlistId']?.toString() ?? '';
+    if (id.isEmpty) return null;
+    final title = _runsText(r['title']).trim();
+    if (title.isEmpty) return null;
+    final thumbs = _asMaps(r['thumbnail']?['thumbnails']);
+    var bestThumb = '';
+    var bestW = -1;
+    for (final t in thumbs) {
+      final w = _num(t['width']);
+      final u = t['url']?.toString() ?? '';
+      if (u.isNotEmpty && w >= bestW) {
+        bestW = w;
+        bestThumb = u;
+      }
+    }
+    var count = 0;
+    final countText = _runsText(r['videoCountText']);
+    final cm = RegExp(r'([\d,]+)').firstMatch(countText);
+    if (cm != null) {
+      count = int.tryParse(cm.group(1)!.replaceAll(',', '')) ?? 0;
+    }
+    return PlaylistInfo(
+      id: id,
+      title: title,
+      videoCount: count,
+      thumbnailUrl: bestThumb,
+      byline: _runsText(r['shortBylineText']),
+    );
   }
 
   static VideoDetails? _channelVideoToDetails(

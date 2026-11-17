@@ -823,6 +823,33 @@ class YoutubeExtractorService {
 
   /// Lists recent uploads from a channel. Tries the uploads-page API
   /// first (most reliable), falling back to the UU-playlist method.
+  /// Paged channel videos (Videos tab "show all"): page 1 from the
+  /// mobile channel page, further pages from the browse
+  /// continuation. Session leg only — youtube_explode's channel
+  /// parser is broken and cannot paginate.
+  Future<PagedResult<VideoDetails>> getChannelVideosPage(
+          String channelId,
+          {String? pageToken,
+          int limit = 30,
+          String channelTitle = ''}) =>
+      _session.getChannelVideosPage(channelId,
+          pageToken: pageToken, limit: limit, channelTitle: channelTitle);
+
+  /// Paged channel playlists (Playlists tab).
+  Future<PagedResult<PlaylistInfo>> getChannelPlaylistsPage(
+          String channelId, {String? pageToken, int limit = 30}) =>
+      _session.getChannelPlaylistsPage(channelId,
+          pageToken: pageToken, limit: limit);
+
+  /// Paged videos inside one playlist (playlist detail screen).
+  Future<PagedResult<VideoDetails>> getPlaylistVideosPage(
+          String playlistId,
+          {String? pageToken,
+          int limit = 30,
+          String channelTitle = ''}) =>
+      _session.getPlaylistVideosPage(playlistId,
+          pageToken: pageToken, limit: limit, channelTitle: channelTitle);
+
   Future<List<VideoDetails>> getChannelUploads(String channelId,
       {int limit = 30, String channelTitle = ''}) async {
     await _requireNetwork();
