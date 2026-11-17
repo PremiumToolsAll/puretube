@@ -557,7 +557,10 @@ class YoutubeSessionService {
     Duration? dur;
     final lt = r['lengthText'];
     if (lt is Map<String, dynamic>) {
-      final t = lt['simpleText']?.toString() ?? '';
+      // lengthText comes as simpleText OR runs — the ANDROID search
+      // response uses runs ("3:45"), so read both forms or every
+      // video loses its duration badge.
+      final t = _runsText(lt);
       final parts = t.split(':');
       if (parts.length == 2) {
         dur = Duration(
