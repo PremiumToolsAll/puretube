@@ -71,6 +71,10 @@ class VideoDetails {
   final DateTime? uploadDate;
   final String description;
 
+  /// True when YouTube marks the video as music (its duration badge
+  /// shows a ♫ note, like the original app's channel rows).
+  final bool isMusic;
+
   factory VideoDetails({
     required String id,
     required String title,
@@ -82,6 +86,7 @@ class VideoDetails {
     required int? likeCount,
     required DateTime? uploadDate,
     required String description,
+    bool isMusic = false,
   }) =>
       VideoDetails._(
         id: id,
@@ -94,6 +99,7 @@ class VideoDetails {
         likeCount: likeCount,
         uploadDate: uploadDate,
         description: sanitizeUtf16(description),
+        isMusic: isMusic,
       );
 
   const VideoDetails._({
@@ -107,6 +113,7 @@ class VideoDetails {
     required this.likeCount,
     required this.uploadDate,
     required this.description,
+    this.isMusic = false,
   });
 
   factory VideoDetails.fromExplode(Video video) => VideoDetails(

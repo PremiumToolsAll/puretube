@@ -824,18 +824,23 @@ class YoutubeExtractorService {
   /// Lists recent uploads from a channel. Tries the uploads-page API
   /// first (most reliable), falling back to the UU-playlist method.
   Future<List<VideoDetails>> getChannelUploads(String channelId,
-      {int limit = 30}) async {
+      {int limit = 30, String channelTitle = ''}) async {
     await _requireNetwork();
     try {
       final page = await _yt.channels
           .getUploadsFromPage(channelId)
           .timeout(const Duration(seconds: 30));
       final videos = page.take(limit).toList();
-      if (videos.isNotEmpty) {
+      if (videos.isNotEmpty &&
+          videos.any((v) => v.title.trim().isNotEmpty)) {
         return videos.map(VideoDetails.fromExplode).toList();
       }
+      // Empty titles everywhere = the parser broke on this IP's
+      // response shape (verified 2026-11-17: Badshah's channel shows
+      // thumbnails + "0 views" but no titles/durations/dates).
+      // Fall through to the session leg below.
     } catch (_) {
-      // Fall through to the UU-playlist method below.
+      // Fall through to the session leg below.
     }
     try {
       final uploads = await _yt.channels
@@ -843,14 +848,25 @@ class YoutubeExtractorService {
           .take(limit)
           .toList()
           .timeout(const Duration(seconds: 30));
-      return uploads.map(VideoDetails.fromExplode).toList();
-    } on TimeoutException {
-      throw ExtractorException('Channel videos timed out.');
-    } on PureTubeException {
-      rethrow;
-    } catch (e) {
-      throw ExtractorException('Could not load uploads: ${_friendlyError(e)}');
+      if (uploads.isNotEmpty &&
+          uploads.any((v) => v.title.trim().isNotEmpty)) {
+        return uploads.map(VideoDetails.fromExplode).toList();
+      }
+    } catch (_) {
+      // Fall through to the session leg below.
     }
+    // Session leg: reads the mobile channel page's own ytInitialData,
+    // which carries title, duration, view count and upload time for
+    // every video (verified live 2026-11-17).
+    try {
+      final sessionVideos = await _session.getChannelVideos(channelId,
+          limit: limit, channelTitle: channelTitle);
+      if (sessionVideos.isNotEmpty) return sessionVideos;
+    } catch (e) {
+      throw ExtractorException(
+          'Could not load uploads: ${_friendlyError(e)}');
+    }
+    throw ExtractorException('Could not load uploads.');
   }
 
   /// Fetches "Up Next" suggestions for a video. youtube_explode_dart 3.x

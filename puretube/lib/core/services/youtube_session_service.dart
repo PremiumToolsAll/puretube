@@ -45,6 +45,12 @@ class YoutubeSessionService {
   static final _heightRe = RegExp(r'(\d+)p');
   static final _codecsRe = RegExp(r'codecs="([^"]+)"');
 
+  /// The mobile channel page embeds its data as a \x-escaped JSON
+  /// string: `var ytInitialData = '\x7b\x22responseContext...';`
+  static final _initialDataRe =
+      RegExp(r"var ytInitialData = '((?:\\.|[^'\\])*)';", dotAll: true);
+  static final _hexEscapeRe = RegExp(r'\\x([0-9a-fA-F]{2})');
+
   String? _visitorData;
   DateTime? _visitorFetchedAt;
   DateTime _lastPlayerCall =
@@ -650,5 +656,189 @@ class YoutubeSessionService {
         return a.displayName.compareTo(b.displayName);
       });
     return out;
+  }
+
+  /// Channel Videos-tab rows with full metadata (title, duration,
+  /// view count, upload time, music flag) — exactly what the original
+  /// YouTube app shows.
+  ///
+  /// youtube_explode's channel-uploads parser is broken against the
+  /// current YouTube response shape (it throws
+  /// "Failed to retrieve initial data from ChannelUploadPage" from
+  /// some IPs and returns videos with empty titles / 0 views from
+  /// others), so this reads the mobile channel page's own
+  /// `ytInitialData` instead — the same "real visitor session" trick
+  /// the rest of this service uses. Verified live 2026-11-17:
+  /// 30 compactVideoRenderer items, every field present
+  /// ("4:57", "1,916 views", "2 days ago", MUSIC icon).
+  Future<List<VideoDetails>> getChannelVideos(String channelId,
+      {int limit = 40, String channelTitle = ''}) async {
+    final resp = await _client
+        .get(
+          Uri.parse('https://m.youtube.com/channel/$channelId/videos'),
+          headers: {
+            'User-Agent': _mobileUa,
+            'Accept-Language': 'en-US,en;q=0.9',
+          },
+        )
+        .timeout(const Duration(seconds: 20));
+    if (resp.statusCode != 200) {
+      throw Exception(
+          'YouTube session: channel page ${resp.statusCode}');
+    }
+    final raw = _initialDataRe.firstMatch(resp.body)?.group(1);
+    if (raw == null || raw.isEmpty) {
+      throw Exception('YouTube session: no channel data');
+    }
+    // The embedded JSON is \x-escaped (quotes are \x22, so no raw
+    // apostrophe can end the capture early). YouTube also doubles
+    // every backslash when embedding it, so \\" must collapse back
+    // to \" or jsonDecode chokes on titles/keywords that contain
+    // quotes ("Lyrical Video").
+    final jsonText = raw
+        .replaceAllMapped(_hexEscapeRe,
+            (m) => String.fromCharCode(int.parse(m.group(1)!, radix: 16)))
+        .replaceAll(r'\\', r'\');
+    final root = jsonDecode(jsonText);
+    final out = <VideoDetails>[];
+    void walk(Object? o) {
+      if (out.length >= limit) return;
+      if (o is Map<String, dynamic>) {
+        final item = o['richItemRenderer'];
+        if (item is Map<String, dynamic>) {
+          final content = item['content'];
+          if (content is Map<String, dynamic>) {
+            final vr = content['compactVideoRenderer'] ??
+                content['videoRenderer'] ??
+                content['gridVideoRenderer'];
+            if (vr is Map<String, dynamic>) {
+              final v = _channelVideoToDetails(vr, channelId,
+                  channelTitle: channelTitle);
+              if (v != null) out.add(v);
+            }
+          }
+        }
+        for (final x in o.values) {
+          walk(x);
+          if (out.length >= limit) return;
+        }
+      } else if (o is List) {
+        for (final x in o) {
+          walk(x);
+          if (out.length >= limit) return;
+        }
+      }
+    }
+
+    walk(root);
+    return out;
+  }
+
+  static VideoDetails? _channelVideoToDetails(
+      Map<String, dynamic> r, String channelId,
+      {String channelTitle = ''}) {
+    final id = r['videoId']?.toString() ?? '';
+    if (id.isEmpty) return null;
+    final title = _runsText(r['title']).trim();
+    if (title.isEmpty) return null;
+    final thumbs = _asMaps(r['thumbnail']?['thumbnails']);
+    var bestThumb = '';
+    var bestW = -1;
+    for (final t in thumbs) {
+      final w = _num(t['width']);
+      final u = t['url']?.toString() ?? '';
+      if (u.isNotEmpty && w >= bestW) {
+        bestW = w;
+        bestThumb = u;
+      }
+    }
+    return VideoDetails(
+      id: id,
+      title: title,
+      author: channelTitle,
+      channelId: channelId,
+      duration: _parseLengthText(_runsText(r['lengthText'])),
+      thumbnailUrl: bestThumb,
+      viewCount: _parseViewCount(_runsText(r['viewCountText'])),
+      likeCount: null,
+      uploadDate: _parseAgo(_runsText(r['publishedTimeText'])),
+      description: '',
+      isMusic: _isMusicRenderer(r),
+    );
+  }
+
+  /// "4:57" / "1:02:33" → Duration. Null when absent or unparseable.
+  static Duration? _parseLengthText(String text) {
+    final parts = text.trim().split(':');
+    if (parts.length == 2) {
+      final m = int.tryParse(parts[0]);
+      final s = int.tryParse(parts[1]);
+      if (m == null || s == null) return null;
+      return Duration(minutes: m, seconds: s);
+    }
+    if (parts.length == 3) {
+      final h = int.tryParse(parts[0]);
+      final m = int.tryParse(parts[1]);
+      final s = int.tryParse(parts[2]);
+      if (h == null || m == null || s == null) return null;
+      return Duration(hours: h, minutes: m, seconds: s);
+    }
+    return null;
+  }
+
+  /// "1,916 views" → 1916, "23,368 views" → 23368, "No views" → 0.
+  /// Returns null only when there is no view text at all.
+  static int? _parseViewCount(String text) {
+    final t = text.trim();
+    if (t.isEmpty) return null;
+    final digits = t.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) return 0;
+    return int.tryParse(digits) ?? 0;
+  }
+
+  /// "22 hours ago" / "2 days ago" / "3 weeks ago" / "1 month ago" /
+  /// "1 year ago" (optionally prefixed with "Streamed ") → DateTime.
+  /// Null when unparseable (the row then hides the "ago" part).
+  static DateTime? _parseAgo(String text) {
+    var t = text.trim();
+    if (t.isEmpty) return null;
+    if (t.startsWith('Streamed ')) t = t.substring('Streamed '.length);
+    final m = RegExp(
+            r'(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago')
+        .firstMatch(t);
+    if (m == null) return null;
+    final n = int.tryParse(m.group(1)!) ?? 0;
+    switch (m.group(2)) {
+      case 'second':
+        return DateTime.now().subtract(Duration(seconds: n));
+      case 'minute':
+        return DateTime.now().subtract(Duration(minutes: n));
+      case 'hour':
+        return DateTime.now().subtract(Duration(hours: n));
+      case 'day':
+        return DateTime.now().subtract(Duration(days: n));
+      case 'week':
+        return DateTime.now().subtract(Duration(days: n * 7));
+      case 'month':
+        return DateTime.now().subtract(Duration(days: n * 30));
+      case 'year':
+        return DateTime.now().subtract(Duration(days: n * 365));
+    }
+    return null;
+  }
+
+  /// YouTube marks music videos with a MUSIC icon in the duration
+  /// overlay — the ♫ note the original app shows before "4:50".
+  static bool _isMusicRenderer(Map<String, dynamic> r) {
+    for (final ov in _asMaps(r['thumbnailOverlays'])) {
+      final ts = ov['thumbnailOverlayTimeStatusRenderer'];
+      if (ts is Map<String, dynamic>) {
+        final icon = ts['icon'];
+        if (icon is Map<String, dynamic>) {
+          if (icon['iconType']?.toString() == 'MUSIC') return true;
+        }
+      }
+    }
+    return false;
   }
 }

@@ -57,8 +57,8 @@ class _ChannelScreenState extends ConsumerState<ChannelScreen>
     try {
       final extractor = ref.read(extractorProvider);
       final ch = await extractor.getChannel(widget.channelId);
-      final uploads =
-          await extractor.getChannelUploads(widget.channelId, limit: 40);
+      final uploads = await extractor.getChannelUploads(widget.channelId,
+          limit: 40, channelTitle: ch.title);
       final sub = ref
           .read(subscriptionRepositoryProvider)
           .isSubscribed(widget.channelId);
@@ -418,8 +418,9 @@ class _VideoRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ago = timeAgo(video.uploadDate);
+    // Original YouTube channel rows: "1.6K · 1d ago" (no "views" word).
     final meta = <String>[
-      if (video.viewCount != null) '${formatCount(video.viewCount)} views',
+      if (video.viewCount != null) formatCount(video.viewCount),
       if (ago.isNotEmpty) ago,
     ].join(' · ');
     return InkWell(
@@ -459,7 +460,7 @@ class _VideoRow extends ConsumerWidget {
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
-                            formatDuration(video.duration),
+                            '${video.isMusic ? '♫ ' : ''}${formatDuration(video.duration)}',
                             style: const TextStyle(
                                 fontSize: 11, color: Colors.white),
                           ),
