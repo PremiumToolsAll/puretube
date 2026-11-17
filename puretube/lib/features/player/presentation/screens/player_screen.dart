@@ -3381,51 +3381,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           const SizedBox(height: 12),
           _buildActionRow(uiState, notifier),
           const SizedBox(height: 12),
-          if (video.description.isNotEmpty) ...[
-            InkWell(
-              onTap: () => _DescriptionSheet.show(context, video),
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainer,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: _emerald.withValues(alpha: 0.25),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Description',
-                        style: TextStyle(
-                            color: _emeraldLight,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 6),
-                    Text(
-                      '${formatCount(video.viewCount)} views • ${timeAgo(video.uploadDate)}',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      video.description,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.grey, fontSize: 13),
-                    ),
-                    const SizedBox(height: 2),
-                    const Text('...more',
-                        style: TextStyle(color: Colors.grey, fontSize: 13)),
-                  ],
-                ),
-              ),
-            ),
-          ],
+          // No description box under the channel — the description only
+          // shows when the title is tapped (_DescriptionSheet).
           if (video.id.isNotEmpty) const _UpNextSection(),
         ],
       ),
